@@ -4,7 +4,12 @@ fn classify(seed : Int) : Int = seed * 2
 
 fn run_once(f : (() -> Int) @ once) : Int = f()
 
+fn announce() : Unit ! {IO} = println(classify(21))
+
 fn main() =
   println(run_once(\() -> 1))
-  -- The closure captures only a top-level function: portable, single use.
-  println(teleport(\() -> classify(21)))
+  -- The closure captures only a top-level function: portable, single use. It is
+  -- sealed into an envelope rather than called, and the installed transport
+  -- decides where that envelope lands. `run_here` lands it in this process, so
+  -- what the sealed computation prints is printed after the cut.
+  println(show(run_here(\() -> teleport(announce))))

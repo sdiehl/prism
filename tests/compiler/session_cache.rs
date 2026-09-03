@@ -5,10 +5,7 @@ use prism::{check_on_in, with_prelude, CompilerSession, Config, Root, SessionSta
 #[test]
 fn repeated_frontend_query_hits_by_raw_input_identity() {
     let session = CompilerSession::new();
-    let cfg = Config {
-        session: Some(session.clone()),
-        ..Config::default()
-    };
+    let cfg = Config::default().with_session(session.clone());
     let roots = [Root::Embedded(prism::stdlib::STDLIB)];
     let src = with_prelude("fn answer() = 42");
 
@@ -23,11 +20,13 @@ fn repeated_frontend_query_hits_by_raw_input_identity() {
     );
     let second = check_on_in(&src, &roots, &cfg).unwrap();
     let first_facts = first
+        .defs
         .decls
         .iter()
         .map(|decl| (decl.name.clone(), decl.ty.show()))
         .collect::<Vec<_>>();
     let second_facts = second
+        .defs
         .decls
         .iter()
         .map(|decl| (decl.name.clone(), decl.ty.show()))
@@ -57,10 +56,7 @@ fn repeated_frontend_query_hits_by_raw_input_identity() {
 #[test]
 fn trivia_edit_reuses_semantics_and_rebases_diagnostics() {
     let session = CompilerSession::new();
-    let cfg = Config {
-        session: Some(session.clone()),
-        ..Config::default()
-    };
+    let cfg = Config::default().with_session(session.clone());
     let roots = [Root::Embedded(prism::stdlib::STDLIB)];
     let before = with_prelude("fn answer() : Int ! {IO} =\n  let unused = 1\n  42\n");
     let after =
@@ -69,11 +65,13 @@ fn trivia_edit_reuses_semantics_and_rebases_diagnostics() {
     let first = check_on_in(&before, &roots, &cfg).unwrap();
     let second = check_on_in(&after, &roots, &cfg).unwrap();
     let first_warning = first
+        .reports
         .warnings
         .iter()
         .find(|warning| warning.msg.contains("unused"))
         .unwrap();
     let second_warning = second
+        .reports
         .warnings
         .iter()
         .find(|warning| warning.msg.contains("unused"))
@@ -81,11 +79,13 @@ fn trivia_edit_reuses_semantics_and_rebases_diagnostics() {
     assert_eq!(first_warning.msg, second_warning.msg);
     assert_ne!(first_warning.span, second_warning.span);
     let first_checker_warning = first
+        .reports
         .warnings
         .iter()
         .find(|warning| warning.msg.contains("never performed"))
         .unwrap();
     let second_checker_warning = second
+        .reports
         .warnings
         .iter()
         .find(|warning| warning.msg.contains("never performed"))
@@ -94,11 +94,13 @@ fn trivia_edit_reuses_semantics_and_rebases_diagnostics() {
     assert_ne!(first_checker_warning.span, second_checker_warning.span);
     assert_eq!(
         first
+            .defs
             .decls
             .iter()
             .map(|decl| decl.ty.show())
             .collect::<Vec<_>>(),
         second
+            .defs
             .decls
             .iter()
             .map(|decl| decl.ty.show())
@@ -117,10 +119,7 @@ fn trivia_edit_reuses_semantics_and_rebases_diagnostics() {
 #[test]
 fn imported_module_trivia_reuses_the_frontend_query() {
     let session = CompilerSession::new();
-    let cfg = Config {
-        session: Some(session.clone()),
-        ..Config::default()
-    };
+    let cfg = Config::default().with_session(session.clone());
     let source = with_prelude("import Helper\nfn answer() : Int = Helper.value()\n");
     let roots = |module: &str| {
         vec![
@@ -141,11 +140,13 @@ fn imported_module_trivia_reuses_the_frontend_query() {
     .unwrap();
     assert_eq!(
         first
+            .defs
             .decls
             .iter()
             .map(|decl| decl.ty.show())
             .collect::<Vec<_>>(),
         second
+            .defs
             .decls
             .iter()
             .map(|decl| decl.ty.show())

@@ -1,0 +1,6 @@
+-- `@ many` is the spelled form of the unrestricted default: a callback marked
+-- with it admits repeated direct use, and the annotation adds no behavior. The
+-- row conflicts with `once` on the multiplicity axis and erases before Core.
+fn use2(g : ((Int) -> Int) @ many, x : Int) : Int = g(x) + g(x + 1)
+
+fn main() : Int = use2(\(n) -> n * 2, 3)

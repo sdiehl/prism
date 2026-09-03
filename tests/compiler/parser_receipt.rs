@@ -85,15 +85,82 @@ const MAX_NAMED_DIVERGENCES: usize = 12;
 // The divergences the committed corpus currently shows, each named by the
 // construct it stands for. The Rust parser is authoritative, so a row here is a
 // gap in the Prism parser and a debt against parser authority, never a tolerated
-// difference. The list is empty: over the whole committed corpus the two parsers
-// agree byte for byte, spans and synth bits included.
+// difference.
 //
 // The set is watched in both directions: a divergence that is not listed fails
 // the lane, and a complete sweep also fails when a listed file starts agreeing,
-// so the list cannot outlive the gap it records. Empty, the first half is the
-// whole gate, and a row may only ever be added with the construct that earned
-// it.
-const KNOWN_DIVERGENCES: [(&str, &str); 0] = [];
+// so the list cannot outlive the gap it records. A row may only ever be added
+// with the construct that earned it.
+//
+// The one open construct: a return-position `@ linear` usage claim sets a
+// `linear` flag on the authority's fn item, and the shadow parser validates the
+// claim but carries no such field in its Decl or its codec, so every fn item
+// that makes the claim encodes without it. Closing the gap means threading the
+// flag through `lib/std/Syntax` (Ast.pr, Parse/Decl.pr, Codec.pr) the way
+// `no_alloc` already is.
+const LINEAR_CLAIM: &str = "fn-item `@ linear` claim dropped by the shadow codec";
+const KNOWN_DIVERGENCES: [(&str, &str); 15] = [
+    (
+        "tests/cases/alloc_certificate/reject/composed_row_fresh.pr",
+        LINEAR_CLAIM,
+    ),
+    (
+        "tests/cases/linear_certificate/accept/composed_claims.pr",
+        LINEAR_CLAIM,
+    ),
+    (
+        "tests/cases/linear_certificate/accept/fip_callee.pr",
+        LINEAR_CLAIM,
+    ),
+    (
+        "tests/cases/linear_certificate/accept/immediate_args_callee.pr",
+        LINEAR_CLAIM,
+    ),
+    (
+        "tests/cases/linear_certificate/accept/immediate_duplication.pr",
+        LINEAR_CLAIM,
+    ),
+    (
+        "tests/cases/linear_certificate/accept/unbounded_linear_recursion.pr",
+        LINEAR_CLAIM,
+    ),
+    (
+        "tests/cases/linear_certificate/reject/borrowed_param.pr",
+        LINEAR_CLAIM,
+    ),
+    (
+        "tests/cases/linear_certificate/reject/composed_row_duplicate.pr",
+        LINEAR_CLAIM,
+    ),
+    (
+        "tests/cases/linear_certificate/reject/duplicated_capture.pr",
+        LINEAR_CLAIM,
+    ),
+    (
+        "tests/cases/linear_certificate/reject/duplicated_value.pr",
+        LINEAR_CLAIM,
+    ),
+    (
+        "tests/cases/linear_certificate/reject/fbip_callee.pr",
+        LINEAR_CLAIM,
+    ),
+    (
+        "tests/cases/linear_certificate/reject/indirect_call.pr",
+        LINEAR_CLAIM,
+    ),
+    (
+        "tests/cases/linear_certificate/reject/uncertified_callee.pr",
+        LINEAR_CLAIM,
+    ),
+    (
+        "tests/cases/stack_certificate/accept/composed_row_callee.pr",
+        LINEAR_CLAIM,
+    ),
+    (
+        "tests/cases/stack_certificate/reject/composed_row_nontail.pr",
+        LINEAR_CLAIM,
+    ),
+];
 
 // The front end runs over these to charge the work counters. Named rather than
 // taken off the top of a sorted directory, because the counters only need a real
@@ -414,10 +481,7 @@ fn compile_for_counters() -> (BTreeMap<&'static str, PhaseTally>, String) {
     // counters fired rather than pinning them to an exact figure.
     work::enable();
     let sink = TimingSink::new();
-    let cfg = Config {
-        timing: Some(sink.clone()),
-        ..Config::from_env()
-    };
+    let cfg = Config::from_env().with_timing(sink.clone());
     let plain = Config::from_env();
     let mut hashes = Vec::new();
     for path in COMPILE_SOURCES.map(|s| root().join(s)) {

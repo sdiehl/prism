@@ -11,8 +11,9 @@ use crate::types::ty::EffRow;
 use prism_common::sym::Sym;
 
 use super::{
-    instantiate_constructor, CompSig, TypedBinder, TypedComp, TypedCompKind, TypedCoreFn,
-    TypedHandler, TypedPattern, TypedValue, TypedValueKind, UncheckedTypedCore, VerifyEnv,
+    instantiate_constructor, on_core_stack, CompSig, TypedBinder, TypedComp, TypedCompKind,
+    TypedCoreFn, TypedHandler, TypedPattern, TypedValue, TypedValueKind, UncheckedTypedCore,
+    VerifyEnv,
 };
 
 /// Rewrite counts for typed newtype erasure.
@@ -35,6 +36,14 @@ impl NewtypeEraseStats {
 /// independent verifier remains responsible for rejecting an invalid input.
 #[must_use]
 pub fn erase_newtypes<P>(
+    core: UncheckedTypedCore<P>,
+    constructors: &BTreeSet<Sym>,
+    env: &VerifyEnv,
+) -> (UncheckedTypedCore<P>, NewtypeEraseStats) {
+    on_core_stack(|| erase_newtypes_on_core_stack(core, constructors, env))
+}
+
+fn erase_newtypes_on_core_stack<P>(
     core: UncheckedTypedCore<P>,
     constructors: &BTreeSet<Sym>,
     env: &VerifyEnv,
@@ -76,6 +85,13 @@ impl Erase<'_> {
     }
 
     fn value(&mut self, value: TypedValue) -> TypedValue {
+        // Deep value nests (reinterpret and newtype chains) recurse per node;
+        // grow stack segments inside the recursion, same discipline as the
+        // shared descent.
+        on_core_stack(|| self.value_on_core_stack(value))
+    }
+
+    fn value_on_core_stack(&mut self, value: TypedValue) -> TypedValue {
         let ty = value.ty;
         let kind = match value.kind {
             TypedValueKind::Var {
@@ -154,8 +170,13 @@ impl Erase<'_> {
         TypedValue::new(ty, kind)
     }
 
-    #[allow(clippy::too_many_lines)]
     fn comp(&mut self, comp: TypedComp) -> TypedComp {
+        // Same growth discipline as `value`.
+        on_core_stack(|| self.comp_on_core_stack(comp))
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn comp_on_core_stack(&mut self, comp: TypedComp) -> TypedComp {
         let sig = comp.sig;
         let kind = match comp.kind {
             TypedCompKind::Return(value) => TypedCompKind::Return(self.value(value)),

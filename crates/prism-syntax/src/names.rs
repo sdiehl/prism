@@ -77,22 +77,24 @@ pub const INPUT_CAPABILITY_EFFECTS: &[&str] = &["Console", "FileSystem", "Random
 // capability, shipped in the `Concurrent` stdlib, so it is an ordinary effect and
 // no longer reserved.)
 pub const PREEMPT_EFFECT: &str = "Preempt";
-// The boundary capabilities that are reserved but unshipped: `Net` (network).
-// Reserving the effect name now means no package can give it an incompatible
-// meaning before its capability protocol (and provenance event kind) is designed;
-// `Process` is deliberately absent because its observation label is already live,
-// and `Entropy` shipped (the prelude `effect Entropy`, backed by `prim_entropy`),
-// so it is an ordinary effect and no longer reserved. Each entry carries the
-// reason its rejection diagnostic names.
+// `Net`: the stream-socket boundary, shipped as the `Std.Net` effect with its
+// default Unix handler, so it is an ordinary effect and no longer reserved. Like
+// `Entropy` it is deliberately absent from the `replayable` allowed set
+// ([`INPUT_CAPABILITY_EFFECTS`]): its observations are recorded but not replayed,
+// so a durable function that performed `Net` would have to reach a live socket on
+// resume, and the row check rejects it instead.
 pub const NET_EFFECT: &str = "Net";
 // `Entropy`: real, non-replayable OS randomness, shipped as a prelude effect. It
 // is deliberately absent from the `replayable` allowed set ([`INPUT_CAPABILITY_EFFECTS`]),
 // so a durable function cannot consume it and reuse captured key material on replay.
 pub const ENTROPY_EFFECT: &str = "Entropy";
-pub const RESERVED_SEAM_EFFECTS: &[(&str, &str)] = &[
-    (PREEMPT_EFFECT, "the concurrency preemption seam"),
-    (NET_EFFECT, "the network boundary capability"),
-];
+// The seams reserved but unshipped. Reserving a name means no package can give it
+// an incompatible meaning before the seam it labels is designed; each entry
+// carries the reason its rejection diagnostic names. `Process` is deliberately
+// absent because its observation label is already live, and `Entropy` and `Net`
+// have both since shipped as ordinary effects.
+pub const RESERVED_SEAM_EFFECTS: &[(&str, &str)] =
+    &[(PREEMPT_EFFECT, "the concurrency preemption seam")];
 
 // The `Concurrent` scheduler entry points. `run_cooperative` is the policy-neutral
 // wrap that the `--scheduler` flag retargets; `run_async` (FIFO) and `run_lifo`
@@ -836,6 +838,15 @@ pub fn dict_ctor(class: &str) -> String {
     format!("{DICT_PREFIX}{class}")
 }
 
+// Whether a constructor name is a synthesized class dictionary rather than one
+// a program declared. The elaborator builds and matches these directly in Core,
+// so they carry datatype and constructor facts but no value-environment scheme:
+// there is no surface expression that could name one.
+#[must_use]
+pub fn is_dict_ctor(name: &str) -> bool {
+    name.starts_with(DICT_PREFIX)
+}
+
 // Prefix marking a top-level function lowered from an instance method. The `@`
 // is unforgeable in source, so no user function can collide with one.
 pub const INSTANCE_METHOD_PREFIX: &str = "i@";
@@ -1004,6 +1015,9 @@ pub const FRESH_RC: &str = "%rc";
 /// in a specialized clone. This namespace never reaches compatibility Core.
 pub const FRESH_SPECIALIZE_QUANTIFIER: &str = "%spq";
 pub const FRESH_FUSE: &str = "%fu";
+/// Fresh binders minted when exact-size construction synthesizes the sized
+/// destination-array clones of a growable builder chain.
+pub const FRESH_EXACT_SIZE: &str = "%xs";
 /// The ambient residual-row quantifier evidence passing appends to each
 /// callable that gains evidence parameters.
 ///
@@ -1117,6 +1131,26 @@ pub fn ho_specialized_clone(function: &str, n: usize) -> String {
     format!("{function}$hs{n}")
 }
 
+// The top-level clone emitted when exact-size construction re-plumbs a
+// growable list-to-array builder chain against a statically known element
+// count. A distinct tag keeps these disjoint from both specializers' clones,
+// since the pass runs after them and clones their output (an `$hs` clone's
+// wrapper chain may be re-cloned here).
+#[must_use]
+pub fn exact_sized_clone(function: &str, n: usize) -> String {
+    format!("{function}$xs{n}")
+}
+
+// The top-level definition a closed local lambda is hoisted into so its
+// applications can devirtualize to direct calls. `function` is the enclosing
+// definition and `n` its deterministic lift-order counter. The body moves
+// rather than being cloned, so this namespace is disjoint from every clone
+// scheme above by its distinct tag.
+#[must_use]
+pub fn lifted_lambda(function: &str, n: usize) -> String {
+    format!("{function}$ll{n}")
+}
+
 /// Phase-private clone at one thunk-demand convention.
 ///
 /// Distinct from dictionary `$sp` clones so the independently ordered passes
@@ -1210,6 +1244,36 @@ mod tests {
         assert_ne!(
             super::ho_specialized_clone("map", 7),
             super::specialized_clone("map", 7)
+        );
+    }
+
+    // Exact-size construction clones specializer output, so its tag must be
+    // disjoint from both clone schemes even when the counters agree.
+    #[test]
+    fn exact_size_clone_names_are_disjoint_from_specializer_clones() {
+        assert_eq!(super::exact_sized_clone("push_all", 2), "push_all$xs2");
+        assert_ne!(
+            super::exact_sized_clone("map", 7),
+            super::ho_specialized_clone("map", 7)
+        );
+        assert_ne!(
+            super::exact_sized_clone("map", 7),
+            super::specialized_clone("map", 7)
+        );
+    }
+
+    // A lifted lambda is a moved definition, not a clone; its namespace must
+    // still be disjoint from every clone scheme so counters can never collide.
+    #[test]
+    fn lifted_lambda_names_are_disjoint_from_clone_namespaces() {
+        assert_eq!(super::lifted_lambda("main", 1), "main$ll1");
+        assert_ne!(
+            super::lifted_lambda("map", 3),
+            super::ho_specialized_clone("map", 3)
+        );
+        assert_ne!(
+            super::lifted_lambda("map", 3),
+            super::specialized_clone("map", 3)
         );
     }
 

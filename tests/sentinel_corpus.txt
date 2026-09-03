@@ -1,0 +1,67 @@
+# Sentinel corpus: the coverage-selected subset the local fast gate runs, one
+# corpus label per line. Selected so that every effect-lowering tier, every
+# lowering strategy, every effect name the corpus spells, and every cost
+# magnitude recorded by the committed manifests appears in at least one
+# program. Read by tests/support when PRISM_SENTINEL_CORPUS is set; the full
+# matrix stays on CI. Regenerate with `just sentinel` after the corpus or the
+# manifests change; `just sentinel --check` verifies currency. Do not hand-edit.
+examples/boids.pr
+examples/chaos_swarm.pr
+examples/cli.pr
+examples/clock.pr
+examples/condition.pr
+examples/deep_tco.pr
+examples/delim.pr
+examples/eff_amb.pr
+examples/eff_forward.pr
+examples/eff_poly.pr
+examples/eff_writer.pr
+examples/effectful_traverse.pr
+examples/errors.pr
+examples/hangman.pr
+examples/interaction.pr
+examples/interp.pr
+examples/lambda.pr
+examples/memo.pr
+examples/moore.pr
+examples/named_handlers.pr
+examples/pendulum.pr
+examples/protocol_ladder.pr
+examples/queens.pr
+examples/replay_concurrent.pr
+examples/same_fringe.pr
+examples/scheduler.pr
+examples/scheduler_policy.pr
+examples/systemf.pr
+examples/systemf_dk.pr
+examples/trmc.pr
+examples/var_pure.pr
+tests/cases/run/combine_effects.pr
+tests/cases/run/constrained_mutual.pr
+tests/cases/run/deep_effect_recursion.pr
+tests/cases/run/deriving_json.pr
+tests/cases/run/eff_closure_arg.pr
+tests/cases/run/eff_fuse.pr
+tests/cases/run/eff_poly_fn_arg.pr
+tests/cases/run/eff_row_forward.pr
+tests/cases/run/final_ctl.pr
+tests/cases/run/handler_arms_answer_apart.pr
+tests/cases/run/handler_funval.pr
+tests/cases/run/handler_implicit_return.pr
+tests/cases/run/handler_partial_forward.pr
+tests/cases/run/intmap.pr
+tests/cases/run/law_reader.pr
+tests/cases/run/law_ufp.pr
+tests/cases/run/local_mono_combined.pr
+tests/cases/run/local_mono_effectful_helper.pr
+tests/cases/run/local_mono_nontail_resume.pr
+tests/cases/run/local_mono_state_rest.pr
+tests/cases/run/local_mono_two_entries.pr
+tests/cases/run/main_heap_result.pr
+tests/cases/run/optic_solver.pr
+tests/cases/run/reified_under_world.pr
+tests/cases/run/syntax_hostile.pr
+tests/cases/run/thunk_effect_absorb.pr
+tests/cases/run/trmc.pr
+tests/cases/run/while_state.pr
+tests/cases/run/wire_laws.pr

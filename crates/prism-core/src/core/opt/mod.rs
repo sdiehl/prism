@@ -66,7 +66,7 @@ impl OptLevel {
 ///
 /// The ordered list a level expands to is data, built by [`pipeline`]; new
 /// passes slot in here.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum CorePass {
     /// Whole-program stream fusion of pull-`Sequence` pipelines: collapse a
     /// recognized producer|>transformer|>consumer chain into one allocation-free
@@ -83,6 +83,12 @@ pub enum CorePass {
     /// force-and-apply into a direct call. Runs after `Specialize` so a callable
     /// threaded through a dictionary clone is already visible as a top-level call.
     HoSpecialize,
+    /// Exact-size destination allocation: redirect a growable list-to-array
+    /// builder chain to sized clones at call sites whose element count the
+    /// summary domain proves exact. Runs after `HoSpecialize` so the
+    /// devirtualized traversal clones whose counts the summaries track are
+    /// already in place.
+    ExactSize,
     /// The fixed-point gentle simplifier (case-of-known-constructor, trivial
     /// copy-propagation, dead-let elimination, const-fold, case-of-case,
     /// used-once-thunk inlining).
@@ -96,11 +102,12 @@ pub enum CorePass {
 impl CorePass {
     /// Every pass, in declaration order. The one table the name lookup and the
     /// misspelling suggestion read, so a new variant reaches both.
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::Fuse,
         Self::EraseNewtypes,
         Self::Specialize,
         Self::HoSpecialize,
+        Self::ExactSize,
         Self::Simplify,
         Self::Inline,
         Self::Cse,
@@ -114,6 +121,7 @@ impl CorePass {
             Self::EraseNewtypes => "EraseNewtypes",
             Self::Specialize => "Specialize",
             Self::HoSpecialize => "HoSpecialize",
+            Self::ExactSize => "ExactSize",
             Self::Simplify => "Simplify",
             Self::Inline => "Inline",
             Self::Cse => "Cse",
@@ -136,9 +144,11 @@ impl CorePass {
             // before effect lowering rewrites the shapes it matches on. Erasure is a
             // representation both backends consume; specialization needs the
             // pre-lowering dictionary shapes.
-            Self::Fuse | Self::EraseNewtypes | Self::Specialize | Self::HoSpecialize => {
-                PassStage::PreLowering
-            }
+            Self::Fuse
+            | Self::EraseNewtypes
+            | Self::Specialize
+            | Self::HoSpecialize
+            | Self::ExactSize => PassStage::PreLowering,
             // The simplifier, inliner, and CSE must run after effect lowering:
             // pre-lowering they rewrite the Core shapes the var/State fusion
             // analysis matches on.
@@ -180,15 +190,50 @@ impl PassStage {
 ///
 /// Overrides the `-O` level entirely: each section is exactly the passes named,
 /// in order, with no level defaults filled in.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct PassSpec {
-    /// Pre-lowering passes, in run order.
-    pub pre: Vec<CorePass>,
-    /// Late (post-lowering) passes, in run order.
-    pub late: Vec<CorePass>,
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PassPipeline {
+    pre: Vec<CorePass>,
+    late: Vec<CorePass>,
 }
 
-impl PassSpec {
+/// Compatibility name for the original public API. Construction remains
+/// validated because the alias exposes no fields.
+pub type PassSpec = PassPipeline;
+
+impl PassPipeline {
+    /// Build one explicit staged pipeline.
+    ///
+    /// # Errors
+    /// An empty pipeline, an off-stage pass, or an illegal specialization order.
+    pub fn try_new(pre: Vec<CorePass>, late: Vec<CorePass>) -> Result<Self, String> {
+        if pre
+            .iter()
+            .any(|pass| pass.stage() != PassStage::PreLowering)
+        {
+            return Err("pre pipeline contains a late-stage pass".into());
+        }
+        if late.iter().any(|pass| pass.stage() != PassStage::Late) {
+            return Err("late pipeline contains a pre-lowering pass".into());
+        }
+        let erase = pre.iter().position(|p| *p == CorePass::EraseNewtypes);
+        let specialize = pre.iter().position(|p| *p == CorePass::Specialize);
+        if let (Some(e), Some(s)) = (erase, specialize) {
+            if s < e {
+                return Err("EraseNewtypes must precede Specialize".into());
+            }
+        }
+        let higher_order = pre.iter().position(|p| *p == CorePass::HoSpecialize);
+        if let (Some(s), Some(h)) = (specialize, higher_order) {
+            if h < s {
+                return Err("Specialize must precede HoSpecialize".into());
+            }
+        }
+        if pre.is_empty() && late.is_empty() {
+            return Err("pass specification is empty".into());
+        }
+        Ok(Self { pre, late })
+    }
+
     /// Parse a pass spec of the form `[pre:<names>][;late:<names>]`, where
     /// `<names>` is a comma-separated list of [`CorePass::name`] spellings. A bare
     /// comma-list with no `pre:`/`late:` marker is taken as the pre stage. An
@@ -200,12 +245,13 @@ impl PassSpec {
     /// in the wrong stage, the pre section orders `Specialize` before
     /// `EraseNewtypes`, or both sections are empty.
     pub fn parse(spec: &str) -> Result<Self, String> {
-        let mut out = Self::default();
+        let mut pre = Vec::new();
+        let mut late = Vec::new();
         for segment in spec.split(';').map(str::trim).filter(|s| !s.is_empty()) {
             let (stage, names) = split_section(segment);
             let target = match stage {
-                PassStage::PreLowering => &mut out.pre,
-                PassStage::Late => &mut out.late,
+                PassStage::PreLowering => &mut pre,
+                PassStage::Late => &mut late,
             };
             for name in names.split(',').map(str::trim).filter(|s| !s.is_empty()) {
                 let pass = CorePass::from_name(name).ok_or_else(|| unknown_pass(name))?;
@@ -219,24 +265,177 @@ impl PassSpec {
                 target.push(pass);
             }
         }
-        let erase = out.pre.iter().position(|p| *p == CorePass::EraseNewtypes);
-        let spec_pos = out.pre.iter().position(|p| *p == CorePass::Specialize);
-        if let (Some(e), Some(s)) = (erase, spec_pos) {
-            if s < e {
-                return Err("EraseNewtypes must precede Specialize".into());
-            }
-        }
-        let ho_pos = out.pre.iter().position(|p| *p == CorePass::HoSpecialize);
-        if let (Some(s), Some(h)) = (spec_pos, ho_pos) {
-            if h < s {
-                return Err("Specialize must precede HoSpecialize".into());
-            }
-        }
-        if out.pre.is_empty() && out.late.is_empty() {
-            return Err("pass specification is empty".into());
-        }
-        Ok(out)
+        Self::try_new(pre, late)
     }
+
+    /// Passes belonging to one verified stage.
+    #[must_use]
+    pub fn for_stage(&self, stage: PassStage) -> &[CorePass] {
+        match stage {
+            PassStage::PreLowering => &self.pre,
+            PassStage::Late => &self.late,
+        }
+    }
+
+    /// Pre-lowering passes, in run order.
+    #[must_use]
+    pub fn pre(&self) -> &[CorePass] {
+        &self.pre
+    }
+
+    /// Late passes, in run order.
+    #[must_use]
+    pub fn late(&self) -> &[CorePass] {
+        &self.late
+    }
+
+    fn without(&self, disabled: CorePass) -> Result<Self, String> {
+        Self::try_new(
+            self.pre
+                .iter()
+                .copied()
+                .filter(|pass| *pass != disabled)
+                .collect(),
+            self.late
+                .iter()
+                .copied()
+                .filter(|pass| *pass != disabled)
+                .collect(),
+        )
+    }
+}
+
+/// A duplicate-free normalized set of disabled level-selected passes.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PassSet(BTreeSet<CorePass>);
+
+impl PassSet {
+    #[must_use]
+    pub const fn new() -> Self {
+        Self(BTreeSet::new())
+    }
+
+    pub fn insert(&mut self, pass: CorePass) {
+        self.0.insert(pass);
+    }
+
+    #[must_use]
+    pub fn contains(&self, pass: CorePass) -> bool {
+        self.0.contains(&pass)
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = CorePass> + '_ {
+        self.0.iter().copied()
+    }
+}
+
+impl FromIterator<CorePass> for PassSet {
+    fn from_iter<T: IntoIterator<Item = CorePass>>(iter: T) -> Self {
+        Self(iter.into_iter().collect())
+    }
+}
+
+/// The mutually exclusive ways to select an optimizer pipeline.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum OptimizationPlan {
+    Level { level: OptLevel, disabled: PassSet },
+    Explicit(PassPipeline),
+}
+
+impl Default for OptimizationPlan {
+    fn default() -> Self {
+        Self::Level {
+            level: OptLevel::default(),
+            disabled: PassSet::new(),
+        }
+    }
+}
+
+impl OptimizationPlan {
+    #[must_use]
+    pub const fn level(level: OptLevel, disabled: PassSet) -> Self {
+        Self::Level { level, disabled }
+    }
+
+    #[must_use]
+    pub const fn explicit(pipeline: PassPipeline) -> Self {
+        Self::Explicit(pipeline)
+    }
+
+    /// Disable one pass. Explicit pipelines are normalized immediately; a
+    /// request that would make them empty is rejected.
+    ///
+    /// # Errors
+    /// Returns an error when disabling the pass would leave an explicit
+    /// pipeline empty.
+    pub fn disable(&mut self, pass: CorePass) -> Result<(), String> {
+        match self {
+            Self::Level { disabled, .. } => {
+                disabled.insert(pass);
+                Ok(())
+            }
+            Self::Explicit(pipeline) => {
+                *pipeline = pipeline.without(pass)?;
+                Ok(())
+            }
+        }
+    }
+
+    #[must_use]
+    pub const fn selected_level(&self) -> Option<OptLevel> {
+        match self {
+            Self::Level { level, .. } => Some(*level),
+            Self::Explicit(_) => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn explicit_pipeline(&self) -> Option<&PassPipeline> {
+        match self {
+            Self::Explicit(pipeline) => Some(pipeline),
+            Self::Level { .. } => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn disabled(&self) -> Option<&PassSet> {
+        match self {
+            Self::Level { disabled, .. } => Some(disabled),
+            Self::Explicit(_) => None,
+        }
+    }
+
+    #[must_use]
+    pub fn passes(&self, stage: PassStage, options: OptimizerOptions) -> Vec<CorePass> {
+        match self {
+            Self::Explicit(pipeline) => pipeline.for_stage(stage).to_vec(),
+            Self::Level { level, disabled } => {
+                let mut selected = pipeline(*level)
+                    .into_iter()
+                    .filter(|pass| pass.stage() == stage && !disabled.contains(*pass))
+                    .collect::<Vec<_>>();
+                if options.force_fuse
+                    && stage == PassStage::PreLowering
+                    && !disabled.contains(CorePass::Fuse)
+                    && !selected.contains(&CorePass::Fuse)
+                {
+                    selected.insert(0, CorePass::Fuse);
+                }
+                selected
+            }
+        }
+    }
+}
+
+/// The only behavior option observed while resolving optimizer passes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct OptimizerOptions {
+    pub force_fuse: bool,
 }
 
 // Split one `;`-delimited segment into its stage and the comma-list of names. A
@@ -314,6 +513,7 @@ pub fn pipeline(level: OptLevel) -> Vec<CorePass> {
             CorePass::EraseNewtypes,
             CorePass::Specialize,
             CorePass::HoSpecialize,
+            CorePass::ExactSize,
             CorePass::Simplify,
             CorePass::Inline,
             CorePass::Simplify,
@@ -338,6 +538,7 @@ pub fn pipeline(level: OptLevel) -> Vec<CorePass> {
             CorePass::EraseNewtypes,
             CorePass::Specialize,
             CorePass::HoSpecialize,
+            CorePass::ExactSize,
             CorePass::Simplify,
             CorePass::Inline,
             CorePass::Simplify,
@@ -372,6 +573,24 @@ pub fn pass_fingerprint(
     hasher.finalize().to_hex().to_string()
 }
 
+/// Fingerprint a normalized optimization policy without exposing process-wide
+/// flags or precedence inputs to the middle end.
+#[must_use]
+pub fn optimization_fingerprint(
+    plan: &OptimizationPlan,
+    stage: PassStage,
+    options: OptimizerOptions,
+) -> String {
+    let passes = plan.passes(stage, options);
+    let mut hasher = blake3::Hasher::new();
+    for field in std::iter::once(stage.label()).chain(passes.iter().map(|pass| pass.name())) {
+        hasher.update(&(field.len() as u64).to_le_bytes());
+        hasher.update(field.as_bytes());
+    }
+    hasher.update(PASS_FINGERPRINT_SCHEMA);
+    hasher.finalize().to_hex().to_string()
+}
+
 /// Resolve an optimization level or explicit specification into the exact pass
 /// sequence that changes Core at one stage.
 #[must_use]
@@ -394,10 +613,7 @@ pub fn effective_passes(
             }
             selected
         },
-        |spec| match stage {
-            PassStage::PreLowering => spec.pre.clone(),
-            PassStage::Late => spec.late.clone(),
-        },
+        |spec| spec.for_stage(stage).to_vec(),
     );
     passes.retain(|pass| !disabled.contains(pass));
     passes
@@ -459,4 +675,33 @@ pub fn newtype_ctors(prog: &Program<CorePhase>) -> BTreeSet<Sym> {
         .filter_map(|d| d.ctors.first())
         .map(|c| Sym::from(&c.name))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn staged_pipeline_rejects_wrong_stage_and_empty_construction() {
+        assert!(PassPipeline::try_new(vec![CorePass::Inline], Vec::new()).is_err());
+        assert!(PassPipeline::try_new(Vec::new(), vec![CorePass::Fuse]).is_err());
+        assert!(PassPipeline::try_new(Vec::new(), Vec::new()).is_err());
+    }
+
+    #[test]
+    fn explicit_and_level_plans_are_one_choice() {
+        let explicit = PassPipeline::parse("pre:EraseNewtypes;late:Simplify").unwrap();
+        let plan = OptimizationPlan::explicit(explicit);
+        assert_eq!(plan.selected_level(), None);
+        assert_eq!(
+            plan.passes(PassStage::Late, OptimizerOptions::default()),
+            vec![CorePass::Simplify]
+        );
+    }
+
+    #[test]
+    fn disabling_the_only_explicit_pass_is_rejected() {
+        let mut plan = OptimizationPlan::explicit(PassPipeline::parse("late:Simplify").unwrap());
+        assert!(plan.disable(CorePass::Simplify).is_err());
+    }
 }

@@ -34,21 +34,15 @@ fn roots_with_b(b_source: &str) -> Vec<Root> {
 }
 
 fn config(threads: usize) -> Config {
-    Config {
-        flags: DynFlags {
-            query_threads: threads,
-            compiler_cache: false,
-            ..DynFlags::default()
-        },
-        ..Config::default()
-    }
+    Config::from_flags(DynFlags {
+        query_threads: threads,
+        compiler_cache: false,
+        ..DynFlags::default()
+    })
 }
 
 fn session_config(threads: usize, session: CompilerSession) -> Config {
-    Config {
-        session: Some(session),
-        ..config(threads)
-    }
+    config(threads).with_session(session)
 }
 
 #[test]
@@ -72,6 +66,7 @@ fn module_queries_typecheck_from_interfaces_in_deterministic_parallel_layers() {
     assert_eq!(
         parallel
             .root
+            .defs
             .decls
             .first()
             .expect("parallel root")
@@ -79,6 +74,7 @@ fn module_queries_typecheck_from_interfaces_in_deterministic_parallel_layers() {
             .show(),
         sequential
             .root
+            .defs
             .decls
             .first()
             .expect("sequential root")
@@ -135,7 +131,12 @@ fn prelude_backed_project_modules_use_the_cached_standard_foundation() {
     module_roots.push(Root::Embedded(prism::stdlib::STDLIB));
     let report = check_modules_on(&source, &module_roots, &config(PARALLEL_THREADS)).unwrap();
     assert!(report.modules.iter().any(|module| module.name == "A"));
-    assert!(report.root.decls.iter().any(|decl| decl.name == "main"));
+    assert!(report
+        .root
+        .defs
+        .decls
+        .iter()
+        .any(|decl| decl.name == "main"));
 }
 
 #[test]
@@ -144,8 +145,8 @@ fn durable_checked_bodies_rehydrate_without_typechecking() {
         std::env::temp_dir().join(format!("prism-module-interfaces-{}", std::process::id()));
     let _ = fs::remove_dir_all(&store);
     let mut cfg = config(PARALLEL_THREADS);
-    cfg.flags.compiler_cache = true;
-    cfg.flags.store_path = Some(store.clone());
+    cfg.update_flags(|flags| flags.compiler_cache = true);
+    cfg.update_flags(|flags| flags.store_path = Some(store.clone()));
 
     let cold = check_modules_on(ROOT, &roots(BEFORE_VALUE), &cfg).unwrap();
     assert_eq!(cold.modules.len(), 3);
@@ -167,12 +168,14 @@ fn durable_checked_bodies_rehydrate_without_typechecking() {
         .all(|decision| decision.reasons.is_empty()));
     assert_eq!(
         warm.root
+            .defs
             .decls
             .first()
             .expect("warm root declaration")
             .ty
             .show(),
         cold.root
+            .defs
             .decls
             .first()
             .expect("cold root declaration")
@@ -180,8 +183,8 @@ fn durable_checked_bodies_rehydrate_without_typechecking() {
             .show()
     );
     assert_eq!(
-        warm.root.eff_ops.keys().collect::<Vec<_>>(),
-        cold.root.eff_ops.keys().collect::<Vec<_>>()
+        warm.root.defs.eff_ops.keys().collect::<Vec<_>>(),
+        cold.root.defs.eff_ops.keys().collect::<Vec<_>>()
     );
 
     let private_edit = check_modules_on(ROOT, &roots(AFTER_VALUE), &cfg).unwrap();
@@ -231,8 +234,8 @@ fn durable_checked_hir_rehydrates_resolution_facts() {
         )]),
     )];
     let mut cfg = config(PARALLEL_THREADS);
-    cfg.flags.compiler_cache = true;
-    cfg.flags.store_path = Some(store.clone());
+    cfg.update_flags(|flags| flags.compiler_cache = true);
+    cfg.update_flags(|flags| flags.store_path = Some(store.clone()));
     let root = "import B\nfn main() : Int = B.read(B.point())\n";
 
     let cold = check_modules_on(root, &module_roots, &cfg).unwrap();
@@ -243,6 +246,7 @@ fn durable_checked_hir_rehydrates_resolution_facts() {
     let read_type = |module: &prism::CheckedModule| {
         module
             .checked
+            .defs
             .decls
             .iter()
             .find(|decl| decl.name == "B.read")
@@ -272,8 +276,8 @@ fn deriving_module_uses_interface_scope_and_durable_checked_body() {
         "import Shape\nfn main() : Bool = eq(Shape.circle(1), Shape.circle(1))\n",
     );
     let mut cfg = config(PARALLEL_THREADS);
-    cfg.flags.compiler_cache = true;
-    cfg.flags.store_path = Some(store.clone());
+    cfg.update_flags(|flags| flags.compiler_cache = true);
+    cfg.update_flags(|flags| flags.store_path = Some(store.clone()));
 
     let cold = check_modules_on(&source, &module_roots, &cfg).unwrap();
     assert_eq!(cold.modules.len(), 1);
@@ -292,8 +296,8 @@ fn malformed_module_decision_is_rejected() {
     ));
     let _ = fs::remove_dir_all(&store);
     let mut cfg = config(PARALLEL_THREADS);
-    cfg.flags.compiler_cache = true;
-    cfg.flags.store_path = Some(store.clone());
+    cfg.update_flags(|flags| flags.compiler_cache = true);
+    cfg.update_flags(|flags| flags.store_path = Some(store.clone()));
     check_modules_on(ROOT, &roots(BEFORE_VALUE), &cfg).unwrap();
 
     let decision = fs::read_dir(store.join(MODULE_DECISION_DIR))
@@ -318,8 +322,8 @@ fn malformed_durable_checked_body_query_is_rejected() {
     ));
     let _ = fs::remove_dir_all(&store);
     let mut cfg = config(PARALLEL_THREADS);
-    cfg.flags.compiler_cache = true;
-    cfg.flags.store_path = Some(store.clone());
+    cfg.update_flags(|flags| flags.compiler_cache = true);
+    cfg.update_flags(|flags| flags.store_path = Some(store.clone()));
     check_modules_on(ROOT, &roots(BEFORE_VALUE), &cfg).unwrap();
 
     // Query bindings sit one shard level below the kind directory.

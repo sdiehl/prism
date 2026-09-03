@@ -210,9 +210,9 @@ fn pkg_init_prompts_and_creates_minimal_package() {
 
 fn store_cfg(root: PathBuf) -> Config {
     let mut cfg = Config::default();
-    cfg.flags.store = true;
-    cfg.flags.store_path = Some(root);
-    cfg.flags.quiet = true;
+    cfg.update_flags(|flags| flags.store = true);
+    cfg.update_flags(|flags| flags.store_path = Some(root));
+    cfg.update_flags(|flags| flags.quiet = true);
     cfg
 }
 
@@ -429,7 +429,7 @@ fn stale_std_pin_loads_source_bundle_from_store() {
     let src = with_custom_prelude("", "import StoreOnly (answer)\nfn main() = answer()\n");
 
     let checked = prism::check_on(&src, &roots).expect("store-served std module resolves");
-    assert!(checked.decls.iter().any(|d| d.name == "main"));
+    assert!(checked.defs.decls.iter().any(|d| d.name == "main"));
 }
 
 #[test]

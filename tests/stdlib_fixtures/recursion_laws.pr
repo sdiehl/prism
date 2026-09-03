@@ -1,0 +1,294 @@
+-- Focused E0 oracle: the structural adapter laws are seeded properties, the
+-- pure materialized/direct forms agree, both monomorphic and parameterized
+-- base functors instantiate the public schemes, and an effectful mapper records
+-- recursive positions exactly once in left-to-right order.
+
+import Control.Recursion (..)
+import Control.Writer (..)
+import Quickcheck (..)
+
+type Tree(a) = Leaf(a) | Branch(Tree(a), Tree(a)) deriving (Eq, Show)
+
+type TreeF(a, r) = LeafF(a) | BranchF(r, r) deriving (Eq, Show)
+
+let callback_row_seed : Int = 2
+
+let int_leaf_gen : Gen(Tree(Int)) = gen_map(\(n) -> Leaf(n), gen_int)
+
+let int_branch_gen : Gen(Tree(Int)) =
+  gen_map2(\(left, right) -> Branch(left, right), int_leaf_gen, int_leaf_gen)
+
+let int_tree_gen : Gen(Tree(Int)) =
+  gen_choose(int_leaf_gen, [
+      int_branch_gen,
+      gen_map2(
+          \(left, right) -> Branch(left, right),
+          int_branch_gen,
+          int_leaf_gen,
+        ),
+    ])
+
+fn tree_project(tree : Tree(a)) : TreeF(a, Tree(a)) =
+  match tree of
+    Leaf(x) => LeafF(x)
+    Branch(left, right) => BranchF(left, right)
+
+fn tree_embed(layer : TreeF(a, Tree(a))) : Tree(a) =
+  match layer of
+    LeafF(x) => Leaf(x)
+    BranchF(left, right) => Branch(left, right)
+
+fn tree_map_layer(
+  f : (r) -> s ! {| e},
+  layer : TreeF(a, r)
+) : TreeF(a, s) ! { | e} =
+  match layer of
+    LeafF(x) => LeafF(x)
+    BranchF(left, right) =>
+      let mapped_left = f(left)
+      let mapped_right = f(right)
+      BranchF(mapped_left, mapped_right)
+
+fn tree_size_layer(layer : TreeF(a, Int)) : Int =
+  match layer of
+    LeafF(_) => 1
+    BranchF(left, right) => 1 + left + right
+
+fn tree_size(tree : Tree(a)) : Int =
+  cata(tree_project, tree_map_layer, tree_size_layer, tree)
+
+fn map_preserves_shape(layer : TreeF(Int, Tree(Int))) : Bool =
+  match layer of
+    LeafF(payload) =>
+      match tree_map_layer(tree_size, layer) of
+        LeafF(mapped_payload) => mapped_payload == payload
+        BranchF(_, _) => false
+    BranchF(_, _) =>
+      match tree_map_layer(tree_size, layer) of
+        LeafF(_) => false
+        BranchF(_, _) => true
+
+fn prop_structural_laws(tree : Tree(Int)) : Bool =
+  let layer = tree_project(tree)
+  let map_identity = tree_map_layer(\(child) -> child, layer) == layer
+  let map_composed = tree_map_layer(\(child) -> show(tree_size(child)), layer)
+    == tree_map_layer(show, tree_map_layer(tree_size, layer))
+  tree_embed(layer) == tree
+    && tree_project(tree_embed(layer)) == layer
+    && map_identity
+    && map_composed
+    && map_preserves_shape(layer)
+
+fn grow_tree(depth : Int) : TreeF(Int, Int) =
+  if depth <= 0 then
+    LeafF(1)
+  else
+    BranchF(depth - 1, depth - 1)
+
+fn sum_tree_layer(layer : TreeF(Int, Int)) : Int =
+  match layer of
+    LeafF(n) => n
+    BranchF(left, right) => left + right
+
+fn build_tree(depth : Int) : Tree(Int) =
+  ana(grow_tree, tree_map_layer, tree_embed, depth)
+
+fn materialized(depth : Int) : Int =
+  cata(tree_project, tree_map_layer, sum_tree_layer, build_tree(depth))
+
+fn direct(depth : Int) : Int =
+  hylo(grow_tree, tree_map_layer, sum_tree_layer, depth)
+
+fn prop_materialized_matches_direct(depth : Int) : Bool =
+  materialized(depth) == direct(depth)
+
+-- A monomorphic, string-carrying lambda term exercises the same library without
+-- a datatype parameter or a generated base functor.
+type Term
+  = Var(String)
+  | App(Term, Term)
+  | Lam(String, Term)
+  deriving (Eq, Show)
+
+type TermF(r) = VarF(String) | AppF(r, r) | LamF(String, r) deriving (Eq, Show)
+
+let var_term_gen : Gen(Term) = gen_map(\(name) -> Var(name), gen_string)
+
+let app_term_gen : Gen(Term) =
+  gen_map2(
+      \(function, argument) -> App(function, argument),
+      var_term_gen,
+      var_term_gen,
+    )
+
+let lam_term_gen : Gen(Term) =
+  gen_map2(\(name, body) -> Lam(name, body), gen_string, var_term_gen)
+
+let term_gen : Gen(Term) =
+  gen_choose(var_term_gen, [
+      app_term_gen,
+      lam_term_gen,
+      gen_map2(
+          \(function, argument) -> App(function, argument),
+          lam_term_gen,
+          app_term_gen,
+        ),
+    ])
+
+fn term_project(term : Term) : TermF(Term) =
+  match term of
+    Var(name) => VarF(name)
+    App(function, argument) => AppF(function, argument)
+    Lam(name, body) => LamF(name, body)
+
+fn term_embed(layer : TermF(Term)) : Term =
+  match layer of
+    VarF(name) => Var(name)
+    AppF(function, argument) => App(function, argument)
+    LamF(name, body) => Lam(name, body)
+
+fn term_map_layer(f : (r) -> s ! {| e}, layer : TermF(r)) : TermF(s) ! { | e} =
+  match layer of
+    VarF(name) => VarF(name)
+    AppF(function, argument) =>
+      let mapped_function = f(function)
+      let mapped_argument = f(argument)
+      AppF(mapped_function, mapped_argument)
+    LamF(name, body) => LamF(name, f(body))
+
+fn term_size_layer(layer : TermF(Int)) : Int =
+  match layer of
+    VarF(_) => 1
+    AppF(function, argument) => 1 + function + argument
+    LamF(_, body) => 1 + body
+
+fn term_size(term : Term) : Int =
+  cata(term_project, term_map_layer, term_size_layer, term)
+
+fn term_map_preserves_shape(layer : TermF(Term)) : Bool =
+  match layer of
+    VarF(name) =>
+      match term_map_layer(term_size, layer) of
+        VarF(mapped_name) => mapped_name == name
+        _ => false
+    AppF(_, _) =>
+      match term_map_layer(term_size, layer) of
+        AppF(_, _) => true
+        _ => false
+    LamF(name, _) =>
+      match term_map_layer(term_size, layer) of
+        LamF(mapped_name, _) => mapped_name == name
+        _ => false
+
+fn prop_term_structural_laws(term : Term) : Bool =
+  let layer = term_project(term)
+  let map_identity = term_map_layer(\(child) -> child, layer) == layer
+  let map_composed = term_map_layer(\(child) -> show(term_size(child)), layer)
+    == term_map_layer(show, term_map_layer(term_size, layer))
+  term_embed(layer) == term
+    && term_project(term_embed(layer)) == layer
+    && map_identity
+    && map_composed
+    && term_map_preserves_shape(layer)
+
+fn simplify_identity(layer : TermF((Term, Term))) : Term =
+  match layer of
+    VarF(name) => Var(name)
+    LamF(name, (_original, body)) => Lam(name, body)
+    AppF((original_function, function), (_original_argument, argument)) =>
+      match original_function of
+        Lam(parameter, Var(body_name)) =>
+          if parameter == body_name then
+            argument
+          else
+            App(function, argument)
+        _ => App(function, argument)
+
+fn para_uses_original_child() : Bool =
+  let term = App(Lam("x", Var("x")), App(Var("f"), Var("y")))
+  para(term_project, term_map_layer, simplify_identity, term)
+    == App(Var("f"), Var("y"))
+
+fn tree_root_name(tree : Tree(String)) : String =
+  match tree of
+    Leaf(name) => name
+    Branch(_, _) => "branch"
+
+fn traced_tree_map(
+  f : (Tree(String)) -> s ! {Writer(String) | e},
+  layer : TreeF(String, Tree(String))
+) : TreeF(String, s) ! {Writer(String) | e} =
+  match layer of
+    LeafF(name) => LeafF(name)
+    BranchF(left, right) =>
+      tell(tree_root_name(left))
+      let mapped_left = f(left)
+      tell(tree_root_name(right))
+      let mapped_right = f(right)
+      BranchF(mapped_left, mapped_right)
+
+fn trace_recursive_positions() : (Int, List(String)) =
+  let tree = Branch(Leaf("a"), Branch(Leaf("b"), Leaf("c")))
+  run_writer(\() -> cata(tree_project, traced_tree_map, tree_size_layer, tree))
+
+fn traced_grow_tree(depth : Int) : TreeF(Int, Int) ! {Writer(String)} =
+  tell(concat("seed:", show(depth)))
+  grow_tree(depth)
+
+fn traced_sum_tree(layer : TreeF(Int, Int)) : Int ! {Writer(String)} =
+  tell("fold")
+  sum_tree_layer(layer)
+
+fn traced_para_size(layer : TreeF(Int, (Tree(Int), Int))) : Int ! {Writer(String)} =
+  tell("para")
+  match layer of
+    LeafF(_) => 1
+    BranchF((_left_tree, left), (_right_tree, right)) => 1 + left + right
+
+-- These calls pin open-row instantiation for the coalgebra, algebra, and mapper
+-- positions of all four schemes. The exact traversal-order oracle above remains
+-- small enough to diagnose directly.
+fn all_callback_rows_instantiate() : Bool =
+  let seed = callback_row_seed
+  let source = build_tree(seed)
+  let cata_run = run_writer(
+      \() -> cata(tree_project, tree_map_layer, traced_sum_tree, source),
+    )
+  let ana_run =
+    run_writer(\() -> ana(traced_grow_tree, tree_map_layer, tree_embed, seed))
+  let para_run = run_writer(
+      \() -> para(tree_project, tree_map_layer, traced_para_size, source),
+    )
+  let hylo_run = run_writer(
+      \() -> hylo(traced_grow_tree, tree_map_layer, traced_sum_tree, seed),
+    )
+  fst(cata_run) == direct(seed)
+    && fst(ana_run) == source
+    && fst(para_run) == tree_size(source)
+    && fst(hylo_run) == direct(seed)
+
+fn main() : Unit ! {IO} =
+  println(
+      show_outcome(
+          "tree structural laws",
+          quickcheck(int_tree_gen, prop_structural_laws),
+        ),
+    )
+  println(
+      show_outcome(
+          "term structural laws",
+          quickcheck(term_gen, prop_term_structural_laws),
+        ),
+    )
+  println(
+      show_outcome(
+          "materialized cata-ana equals hylo",
+          quickcheck(
+              gen_one_of(0, [1, 2, 3, 4, 5]),
+              prop_materialized_matches_direct,
+            ),
+        ),
+    )
+  println(para_uses_original_child())
+  println(trace_recursive_positions())
+  println(all_callback_rows_instantiate())

@@ -11,6 +11,7 @@ fn scheme_of(src: &str, name: &str) -> String {
     let full = prism::with_prelude(src);
     let checked = check(&full).expect("program should type-check");
     checked
+        .defs
         .decls
         .iter()
         .find(|d| d.name == name)

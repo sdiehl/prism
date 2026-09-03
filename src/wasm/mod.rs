@@ -594,6 +594,7 @@ pub fn diagnostics(src: &str) -> String {
                 .collect()
         }
         Ok(checked) => checked
+            .reports
             .warnings
             .iter()
             .filter_map(|w| entry(w.span.start, w.span.end, "Warning", &w.msg))
@@ -641,11 +642,12 @@ pub fn dump_hir(src: &str) -> String {
 #[must_use]
 pub fn dump(src: &str) -> String {
     let prelude: HashSet<String> = match check(&with_prelude("")) {
-        Ok(c) => c.decls.iter().map(|d| d.name.clone()).collect(),
+        Ok(c) => c.defs.decls.iter().map(|d| d.name.clone()).collect(),
         Err(e) => return format!("error: {e}"),
     };
     match check(&with_prelude(src)) {
         Ok(c) => c
+            .defs
             .decls
             .iter()
             .filter(|d| !prelude.contains(&d.name))

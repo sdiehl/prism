@@ -55,6 +55,7 @@ pub fn query_on(
         "uses-type" => {
             let checked = check_on(src, roots)?;
             let mut hits: Vec<String> = checked
+                .defs
                 .decls
                 .iter()
                 .filter(|d| type_mentions(&checked.show_sig(d), target))

@@ -1,0 +1,16 @@
+---
+source: tests/compiler/callable_certificate.rs
+expression: out
+---
+=== allocating callee ===
+callable certificate `@ noalloc` not met in `drive`: passes `boxit` into parameter `f` of `apply`, whose function type demands `@ noalloc`, but the call tree of `boxit` is not proven allocation-free; certify `boxit` (`@ noalloc`, `fip`, or `fbip`) or make its body allocation-free
+=== combined row uncertified ===
+callable certificate `@ noalloc` not met in `drive`: passes `boxit` into parameter `f` of `iterate`, whose function type demands `@ noalloc`, but the call tree of `boxit` is not proven allocation-free; certify `boxit` (`@ noalloc`, `fip`, or `fbip`) or make its body allocation-free
+=== graded budget callee ===
+callable certificate `@ noalloc` not met in `drive`: passes `boxit` into parameter `f` of `apply`, whose function type demands `@ noalloc`, but the call tree of `boxit` is not proven allocation-free; certify `boxit` (`@ noalloc`, `fip`, or `fbip`) or make its body allocation-free
+=== literal lambda opaque ===
+callable certificate `@ noalloc` unavailable in `drive`: supplies a value for parameter `f` of `apply`, whose function type demands `@ noalloc`, but the value cannot be traced to a named function or a certified parameter; name the callable as a top-level function so its certificate can be checked
+=== shadowed certificate ===
+callable certificate `@ noalloc` unavailable in `wrap`: supplies a value for parameter `f` of `apply`, whose function type demands `@ noalloc`, but the value cannot be traced to a named function or a certified parameter; name the callable as a top-level function so its certificate can be checked
+=== uncertified param flow ===
+callable certificate `@ noalloc` unavailable in `wrap`: supplies a value for parameter `f` of `apply`, whose function type demands `@ noalloc`, but the value cannot be traced to a named function or a certified parameter; name the callable as a top-level function so its certificate can be checked

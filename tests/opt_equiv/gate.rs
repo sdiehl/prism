@@ -48,14 +48,17 @@ struct Variant {
 impl Variant {
     fn level(label: &'static str, level: OptLevel) -> Self {
         let mut config = Config::default().with_opt(level);
-        config.flags.compiler_cache = false;
-        config.flags.quiet = true;
+        config.update_flags(|flags| flags.compiler_cache = false);
+        config.update_flags(|flags| flags.quiet = true);
         Self { label, config }
     }
 
     fn without(label: &'static str, pass: CorePass) -> Self {
         let mut variant = Self::level(label, OptLevel::O2);
-        variant.config.disabled.push(pass);
+        variant
+            .config
+            .disable_pass(pass)
+            .expect("an O2 pass can be disabled");
         variant
     }
 }

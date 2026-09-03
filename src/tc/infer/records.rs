@@ -6,7 +6,7 @@ use crate::names;
 use crate::syntax::ast::{Core, Expr, NodeId, PathOp, PathStep, S};
 use crate::types::ty::Type;
 
-use super::super::{Env, Tc};
+use super::super::{Env, FieldRef, Tc};
 
 impl Tc<'_> {
     pub(super) fn synth_record_create(
@@ -178,7 +178,11 @@ impl Tc<'_> {
                 };
                 let (cname, ft, fi, arity) =
                     self.find_update_field(span, tname.as_str(), seg, &cur)?;
-                chain.push((cname, fi, arity));
+                chain.push(FieldRef {
+                    ctor: cname,
+                    index: fi,
+                    arity,
+                });
                 cur = ft;
             }
             // `= v` sets, so `v` must have the focus type; `~ f` modifies, so `f`

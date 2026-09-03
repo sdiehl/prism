@@ -736,9 +736,7 @@ fn verify_semantic_patch_behavior_inner(
 
     // Behavior receipts use the unoptimized interpreter oracle. Optimization
     // equivalence is a separate gate and cannot influence patch classification.
-    let mut oracle_cfg = cfg.clone();
-    oracle_cfg.flags.opt_level = OptLevel::O0;
-    oracle_cfg.passes = None;
+    let oracle_cfg = cfg.clone().use_level(OptLevel::O0);
     let mut cases = Vec::with_capacity(corpus.cases.len());
     let mut first_divergence = None;
     for case in &corpus.cases {
@@ -1028,6 +1026,7 @@ fn definition_facts(state: &SemanticState, symbol: Sym) -> Result<DefinitionFact
     })?;
     let declaration = state
         .checked
+        .defs
         .decls
         .iter()
         .find(|declaration| declaration.name == symbol.as_str())
@@ -1053,9 +1052,8 @@ fn definition_facts(state: &SemanticState, symbol: Sym) -> Result<DefinitionFact
     let grade = state
         .fips
         .get(&symbol)
-        .and_then(|fip| fip.keyword())
-        .unwrap_or("unrestricted")
-        .to_string();
+        .and_then(|fip| fip.render())
+        .unwrap_or_else(|| "unrestricted".to_string());
     Ok(DefinitionFacts {
         name: symbol.as_str().to_string(),
         hash: hash.as_str().to_string(),

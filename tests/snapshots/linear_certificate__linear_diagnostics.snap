@@ -1,0 +1,20 @@
+---
+source: tests/compiler/linear_certificate.rs
+expression: out
+---
+=== borrowed param ===
+usage check `@ linear` failed for function `keep`: is not linear (has a borrowed parameter)
+=== composed row duplicate ===
+usage check `@ linear` failed for function `twin`: is not linear (duplicates a value)
+=== duplicated capture ===
+usage check `@ linear` failed for function `bad`: is not linear (duplicates a value)
+=== duplicated value ===
+usage check `@ linear` failed for function `twin`: is not linear (duplicates a value)
+=== fbip callee ===
+usage check `@ linear` failed for function `top`: linearity is not closed over its call tree: call to `id` receives an owned value but `id` carries no linearity certificate; certify `id` (`@ linear` or `fip`)
+=== indirect call ===
+usage check `@ linear` failed for function `apply`: linearity is not closed over its call tree: an indirect call through a first-class function value, which has no callee certificate
+=== misplaced row ===
+`@ linear` certifies a function declaration: write it after a `fn`'s return type
+=== uncertified callee ===
+usage check `@ linear` failed for function `top`: linearity is not closed over its call tree: call to `consume` receives an owned value but `consume` carries no linearity certificate; certify `consume` (`@ linear` or `fip`)

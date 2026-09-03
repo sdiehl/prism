@@ -22,7 +22,7 @@ examples/chaos_swarm.pr	whole-program-free-monad
 examples/chars.pr	pure
 examples/class_pattern.pr	pure
 examples/classes.pr	pure
-examples/cli.pr	selective-free-monad
+examples/cli.pr	evidence
 examples/clock.pr	whole-program-free-monad
 examples/collatz.pr	pure
 examples/compose.pr	pure
@@ -101,7 +101,7 @@ examples/recursion_schemes.pr	pure
 examples/recursion_zoo.pr	pure
 examples/regex.pr	pure
 examples/replay_concurrent.pr	whole-program-free-monad
-examples/result_pipeline.pr	selective-free-monad
+examples/result_pipeline.pr	pure
 examples/same_fringe.pr	whole-program-free-monad
 examples/scheduler.pr	whole-program-free-monad
 examples/scheduler_policy.pr	whole-program-free-monad
@@ -309,7 +309,7 @@ tests/cases/run/quickcheck_detect.pr	whole-program-free-monad
 tests/cases/run/ranges.pr	pure
 tests/cases/run/record_pattern_rest.pr	pure
 tests/cases/run/reflect.pr	pure
-tests/cases/run/reified_under_world.pr	whole-program-free-monad
+tests/cases/run/reified_under_world.pr	local-partial
 tests/cases/run/repeat_block.pr	pure
 tests/cases/run/replayable_ok.pr	evidence
 tests/cases/run/rewrite_strategies.pr	whole-program-free-monad
@@ -342,7 +342,6 @@ tests/cases/run/sugar_try.pr	pure
 tests/cases/run/syntax_hostile.pr	selective-free-monad
 tests/cases/run/syntax_walk.pr	evidence
 tests/cases/run/tbuf.pr	pure
-tests/cases/run/teleport.pr	pure
 tests/cases/run/tensor.pr	selective-free-monad
 tests/cases/run/thunk_effect_absorb.pr	whole-program-free-monad
 tests/cases/run/trmc.pr	pure

@@ -4,4 +4,4 @@
 # tests/perf_gate.rs::tier_manifest_holds. `just tier-accept` reseats it DOWNWARD
 # only: a fast-path win shrinks it, but a program joining the slowest rung is
 # refused there and must be a reviewed hand-edit. Do not raise it to pass a gate.
-whole-program-free-monad	51
+whole-program-free-monad	50

@@ -12,6 +12,7 @@ use crate::types::scalar_plan;
 
 mod balance;
 mod borrow;
+mod callable;
 mod check;
 mod imbalance;
 mod rc;
@@ -19,7 +20,12 @@ mod reuse;
 
 pub use balance::balanced;
 pub use borrow::infer_borrow_sigs;
-pub use check::{check_fip, check_fip_linear, fip_annots, replayable_annots, Fips};
+pub use callable::{callable_requirements, check_callable_flow, CallableRequirements};
+pub use check::{
+    bounded_stack_annots, check_alloc, check_bounded_stack, check_linear, fip_annots,
+    linear_annots, replayable_annots, subsumes, Alloc, ClaimError, ClaimErrorKind, ClaimOrigin,
+    Fips,
+};
 pub use imbalance::{Imbalance, TokenFault};
 pub use rc::insert_rc;
 pub use reuse::reuse;
@@ -132,23 +138,28 @@ fn borrowed_call_vars(name: Sym, args: &[Value], sigs: &Sigs) -> Result<Set, Tok
 }
 
 fn count_val(v: &Value, out: &mut BTreeMap<Sym, usize>) {
-    match v {
-        Value::Var(x) => *out.entry(*x).or_default() += 1,
-        Value::Ctor(_, _, fs) | Value::Tuple(fs) | Value::UnboxedTuple(fs) => {
-            for field in fs {
-                count_val(field, out);
+    let mut values = vec![v];
+    while let Some(value) = values.pop() {
+        match value {
+            Value::Var(name) => *out.entry(*name).or_default() += 1,
+            Value::Ctor(_, _, fields) | Value::Tuple(fields) | Value::UnboxedTuple(fields) => {
+                values.extend(fields.iter().rev());
             }
-        }
-        Value::UnboxedRecord(fs) => {
-            for (_, field) in fs {
-                count_val(field, out);
+            Value::UnboxedRecord(fields) => {
+                values.extend(fields.iter().rev().map(|(_, field)| field));
             }
-        }
-        Value::Thunk(c) => {
-            for x in freev(c) {
-                *out.entry(x).or_default() += 1;
+            Value::Thunk(comp) => {
+                for name in freev(comp) {
+                    *out.entry(name).or_default() += 1;
+                }
             }
+            Value::Int(_)
+            | Value::I64(_)
+            | Value::U64(_)
+            | Value::Float(_)
+            | Value::Bool(_)
+            | Value::Unit
+            | Value::Str(_) => {}
         }
-        _ => {}
     }
 }

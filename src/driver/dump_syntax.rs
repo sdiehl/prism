@@ -19,6 +19,7 @@
 //! never emitted; the parse-sugar bit is emitted as `synth` only when set.
 
 use marginalia::{BuiltinKind, Trivia, TriviaTable};
+use prism_syntax::coeffect::CoeffectFact;
 use serde::Serialize;
 use serde_json::{json, Map, Value};
 
@@ -160,6 +161,7 @@ fn rebase_parse(e: ParseError, base: usize) -> ParseError {
     match e {
         ParseError::Syntax(f) => ParseError::Syntax(rebase(f)),
         ParseError::UnexpectedEof(f) => ParseError::UnexpectedEof(rebase(f)),
+        ParseError::Depth(f) => ParseError::Depth(rebase(f)),
     }
 }
 
@@ -622,11 +624,13 @@ fn decl_value(d: &Decl, kind: &str) -> Value {
         Total::Prove => put(&mut m, "total", json!("prove")),
         Total::Assume => put(&mut m, "total", json!("assume")),
     }
-    if let Some(word) = d.fip.keyword() {
+    if let Some(word) = d.fip.render() {
         put(&mut m, "fip", json!(word));
     }
     put_flag(&mut m, "replayable", d.replayable);
     put_flag(&mut m, "no_alloc", d.no_alloc);
+    put_flag(&mut m, CoeffectFact::BoundedStack.name(), d.bounded_stack);
+    put_flag(&mut m, CoeffectFact::Linear.name(), d.linear);
     put(&mut m, "span", sp(d.span));
     Value::Object(m)
 }

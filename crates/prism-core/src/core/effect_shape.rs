@@ -3,11 +3,15 @@
 //! The functions here classify handler resumptions and state-fold clauses. They
 //! never rewrite a program or select a lowering strategy.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    rc::Rc,
+};
 
-use super::cbpv::{Comp, HandleOp, Value};
-use super::fv;
 use prism_common::sym::Sym;
+
+use crate::core::cbpv::{Comp, HandleOp, Value};
+use crate::core::fv;
 
 /// How one handler clause uses its resumption.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -24,8 +28,8 @@ pub struct ResumeUse {
 /// derived fact and recomputes it whenever a handler is rebuilt.
 #[must_use]
 pub fn classify_resume(op: &HandleOp) -> ResumeUse {
-    let aliases = resume_set(op.resume);
-    let tail = strip_resume(&op.body, &aliases).is_some();
+    let aliases = Rc::new(resume_set(op.resume));
+    let tail = tail_resumptive(&op.body, &aliases);
 
     let mut body = &op.body;
     loop {
@@ -39,9 +43,7 @@ pub fn classify_resume(op: &HandleOp) -> ResumeUse {
         }
     }
 
-    let mut calls = 0usize;
-    let mut escapes = false;
-    scan_resume(body, &aliases, &mut calls, &mut escapes);
+    let (calls, escapes) = scan_resume(body, &aliases);
     ResumeUse {
         tail,
         multishot: escapes || calls > 1,
@@ -49,136 +51,187 @@ pub fn classify_resume(op: &HandleOp) -> ResumeUse {
     }
 }
 
-fn scan_resume(comp: &Comp, aliases: &BTreeSet<Sym>, calls: &mut usize, escapes: &mut bool) {
-    match comp {
-        Comp::Force(Value::Var(name)) if aliases.contains(name) => {
-            *calls += 1;
-            return;
-        }
-        Comp::Bind(bound, binder, body) => {
-            if let Comp::Return(Value::Var(name)) = bound.as_ref() {
-                if aliases.contains(name) {
-                    let mut inner = aliases.clone();
+struct ResumeFrame<'a> {
+    comp: &'a Comp,
+    aliases: Rc<BTreeSet<Sym>>,
+}
+
+fn scan_resume(comp: &Comp, aliases: &Rc<BTreeSet<Sym>>) -> (usize, bool) {
+    let mut frames = vec![ResumeFrame {
+        comp,
+        aliases: Rc::clone(aliases),
+    }];
+    let mut calls = 0usize;
+    let mut escapes = false;
+    while let Some(ResumeFrame { comp, aliases }) = frames.pop() {
+        match comp {
+            Comp::Force(Value::Var(name)) if aliases.contains(name) => {
+                calls += 1;
+                continue;
+            }
+            Comp::Bind(bound, binder, body) => {
+                if matches!(bound.as_ref(), Comp::Return(Value::Var(name))
+                    if aliases.contains(name))
+                {
+                    let mut inner = aliases.as_ref().clone();
                     inner.insert(*binder);
-                    scan_resume(body, &inner, calls, escapes);
-                    return;
+                    frames.push(ResumeFrame {
+                        comp: body,
+                        aliases: Rc::new(inner),
+                    });
+                    continue;
+                }
+
+                let body_aliases = if aliases.contains(binder) {
+                    let mut inner = aliases.as_ref().clone();
+                    inner.remove(binder);
+                    Rc::new(inner)
+                } else {
+                    Rc::clone(&aliases)
+                };
+                frames.push(ResumeFrame {
+                    comp: body,
+                    aliases: body_aliases,
+                });
+                frames.push(ResumeFrame {
+                    comp: bound,
+                    aliases,
+                });
+                continue;
+            }
+            _ => {}
+        }
+
+        each_value(comp, &mut |value| {
+            escapes |= value_uses_alias(value, &aliases);
+        });
+        each_subcomp(comp, &mut |child| {
+            frames.push(ResumeFrame {
+                comp: child,
+                aliases: Rc::clone(&aliases),
+            });
+        });
+    }
+    (calls, escapes)
+}
+
+enum UseNode<'a> {
+    Comp(&'a Comp),
+    Value(&'a Value),
+}
+
+fn value_uses_alias(value: &Value, aliases: &BTreeSet<Sym>) -> bool {
+    let mut nodes = vec![UseNode::Value(value)];
+    while let Some(node) = nodes.pop() {
+        match node {
+            UseNode::Comp(comp) => {
+                each_value(comp, &mut |value| nodes.push(UseNode::Value(value)));
+                each_subcomp(comp, &mut |child| nodes.push(UseNode::Comp(child)));
+            }
+            UseNode::Value(Value::Var(name)) if aliases.contains(name) => return true,
+            UseNode::Value(Value::Thunk(comp)) => nodes.push(UseNode::Comp(comp)),
+            UseNode::Value(
+                Value::Ctor(_, _, fields) | Value::Tuple(fields) | Value::UnboxedTuple(fields),
+            ) => {
+                for field in fields {
+                    nodes.push(UseNode::Value(field));
                 }
             }
-            scan_resume(bound, aliases, calls, escapes);
-            if aliases.contains(binder) {
-                let mut inner = aliases.clone();
-                inner.remove(binder);
-                scan_resume(body, &inner, calls, escapes);
-            } else {
-                scan_resume(body, aliases, calls, escapes);
+            UseNode::Value(Value::UnboxedRecord(fields)) => {
+                for (_, field) in fields {
+                    nodes.push(UseNode::Value(field));
+                }
             }
-            return;
+            UseNode::Value(_) => {}
         }
-        _ => {}
     }
-    each_value(comp, &mut |value| {
-        if aliases.iter().any(|alias| value_uses(value, *alias) > 0) {
-            *escapes = true;
-        }
-    });
-    each_subcomp(comp, &mut |child| {
-        scan_resume(child, aliases, calls, escapes);
-    });
+    false
 }
 
 fn resume_in_thunk(comp: &Comp, resume: Sym) -> bool {
-    let mut found = false;
-    each_value(comp, &mut |value| {
-        let mut thunks = Vec::new();
-        thunks_in_value(value, &mut thunks);
-        for thunk in thunks {
-            found |= fv::comp(thunk).contains(&resume);
-        }
-    });
-    each_subcomp(comp, &mut |child| {
-        found |= resume_in_thunk(child, resume);
-    });
-    found
-}
-
-fn value_uses(value: &Value, name: Sym) -> usize {
-    match value {
-        Value::Var(found) => usize::from(*found == name),
-        Value::Thunk(comp) => comp_uses(comp, name),
-        Value::Ctor(_, _, fields) | Value::Tuple(fields) => {
-            fields.iter().map(|field| value_uses(field, name)).sum()
-        }
-        _ => 0,
-    }
-}
-
-fn comp_uses(comp: &Comp, name: Sym) -> usize {
-    let mut uses = 0;
-    each_value(comp, &mut |value| uses += value_uses(value, name));
-    each_subcomp(comp, &mut |child| uses += comp_uses(child, name));
-    uses
-}
-
-fn strip_resume(comp: &Comp, aliases: &BTreeSet<Sym>) -> Option<Comp> {
-    let stripped = strip_resume_go(comp, aliases)?;
-    fv::comp(&stripped).is_disjoint(aliases).then_some(stripped)
-}
-
-fn strip_resume_go(comp: &Comp, aliases: &BTreeSet<Sym>) -> Option<Comp> {
-    match comp {
-        Comp::App(function, args)
-            if matches!(
-                function.as_ref(),
-                Comp::Force(Value::Var(name)) if aliases.contains(name)
-            ) =>
+    let mut comps = vec![comp];
+    let mut thunks = Vec::new();
+    while let Some(comp) = comps.pop() {
+        each_value(comp, &mut |value| thunks_in_value(value, &mut thunks));
+        if thunks
+            .iter()
+            .copied()
+            .any(|thunk| fv::comp(thunk).contains(&resume))
         {
-            let [argument] = args.as_slice() else {
-                return None;
-            };
-            fv::value(argument)
-                .is_disjoint(aliases)
-                .then(|| Comp::Return(argument.clone()))
+            return true;
         }
-        Comp::Bind(bound, binder, body) => {
-            if let Comp::Return(Value::Var(name)) = bound.as_ref() {
-                if aliases.contains(name) {
-                    let mut inner = aliases.clone();
-                    inner.insert(*binder);
-                    return strip_resume(body, &inner);
+        thunks.clear();
+        each_subcomp(comp, &mut |child| comps.push(child));
+    }
+    false
+}
+
+fn tail_resumptive(comp: &Comp, aliases: &Rc<BTreeSet<Sym>>) -> bool {
+    let mut frames = vec![ResumeFrame {
+        comp,
+        aliases: Rc::clone(aliases),
+    }];
+    while let Some(ResumeFrame { comp, aliases }) = frames.pop() {
+        match comp {
+            Comp::App(function, args)
+                if matches!(function.as_ref(), Comp::Force(Value::Var(name))
+                    if aliases.contains(name)) =>
+            {
+                let [argument] = args.as_slice() else {
+                    return false;
+                };
+                if !fv::value(argument).is_disjoint(&aliases) {
+                    return false;
                 }
             }
-            if !fv::comp(bound).is_disjoint(aliases) {
-                return None;
+            Comp::Bind(bound, binder, body) => {
+                if matches!(bound.as_ref(), Comp::Return(Value::Var(name))
+                    if aliases.contains(name))
+                {
+                    let mut inner = aliases.as_ref().clone();
+                    inner.insert(*binder);
+                    frames.push(ResumeFrame {
+                        comp: body,
+                        aliases: Rc::new(inner),
+                    });
+                } else {
+                    if !fv::comp(bound).is_disjoint(&aliases) {
+                        return false;
+                    }
+                    frames.push(ResumeFrame {
+                        comp: body,
+                        aliases,
+                    });
+                }
             }
-            Some(Comp::Bind(
-                bound.clone(),
-                *binder,
-                Box::new(strip_resume(body, aliases)?),
-            ))
-        }
-        Comp::If(value, then_branch, else_branch) => {
-            if !fv::value(value).is_disjoint(aliases) {
-                return None;
+            Comp::If(value, then_branch, else_branch) => {
+                if !fv::value(value).is_disjoint(&aliases) {
+                    return false;
+                }
+                frames.push(ResumeFrame {
+                    comp: else_branch,
+                    aliases: Rc::clone(&aliases),
+                });
+                frames.push(ResumeFrame {
+                    comp: then_branch,
+                    aliases,
+                });
             }
-            Some(Comp::If(
-                value.clone(),
-                Box::new(strip_resume(then_branch, aliases)?),
-                Box::new(strip_resume(else_branch, aliases)?),
-            ))
-        }
-        Comp::Case(value, arms) => {
-            if !fv::value(value).is_disjoint(aliases) {
-                return None;
+            Comp::Case(value, arms) => {
+                if !fv::value(value).is_disjoint(&aliases) {
+                    return false;
+                }
+                for (_, body) in arms.iter().rev() {
+                    frames.push(ResumeFrame {
+                        comp: body,
+                        aliases: Rc::clone(&aliases),
+                    });
+                }
             }
-            Some(Comp::Case(
-                value.clone(),
-                arms.iter()
-                    .map(|(pattern, body)| Some((pattern.clone(), strip_resume(body, aliases)?)))
-                    .collect::<Option<Vec<_>>>()?,
-            ))
+            _ => return false,
         }
-        _ => None,
     }
+    true
 }
 
 /// The resume argument shape accepted by state fusion.
@@ -229,7 +282,7 @@ pub fn is_fold(op: &HandleOp, resume: ResumeUse) -> Option<FoldAKind> {
     let [accumulator] = params.as_slice() else {
         return None;
     };
-    strip_state(body, &resume_set(op.resume), *accumulator).map(|(_, kind)| kind)
+    fold_kind(body, Rc::new(resume_set(op.resume)), *accumulator)
 }
 
 fn resume_set(resume: Sym) -> BTreeSet<Sym> {
@@ -244,153 +297,226 @@ fn fold_argument(value: &Value, accumulator: Sym) -> Option<FoldAKind> {
     }
 }
 
-fn strip_state(
-    comp: &Comp,
-    aliases: &BTreeSet<Sym>,
-    accumulator: Sym,
-) -> Option<(Comp, FoldAKind)> {
-    strip_state_go(comp, aliases, accumulator, &BTreeMap::new())
+type Substitutions<'a> = BTreeMap<Sym, &'a Value>;
+
+enum FoldFrame<'a> {
+    Comp {
+        comp: &'a Comp,
+        aliases: Rc<BTreeSet<Sym>>,
+        substitutions: Rc<Substitutions<'a>>,
+    },
+    Join {
+        mark: usize,
+        branches: usize,
+    },
 }
 
-fn strip_state_go(
-    comp: &Comp,
-    aliases: &BTreeSet<Sym>,
-    accumulator: Sym,
-    substitutions: &BTreeMap<Sym, Value>,
-) -> Option<(Comp, FoldAKind)> {
-    match comp {
-        Comp::Bind(bound, binder, body) => {
-            if let Comp::Return(Value::Var(name)) = bound.as_ref() {
-                if aliases.contains(name) {
-                    let mut inner = aliases.clone();
-                    inner.insert(*binder);
-                    return strip_state_go(body, &inner, accumulator, substitutions);
+fn fold_kind(comp: &Comp, aliases: Rc<BTreeSet<Sym>>, accumulator: Sym) -> Option<FoldAKind> {
+    let mut frames = vec![FoldFrame::Comp {
+        comp,
+        aliases,
+        substitutions: Rc::new(BTreeMap::new()),
+    }];
+    let mut kinds = Vec::new();
+    while let Some(frame) = frames.pop() {
+        match frame {
+            FoldFrame::Comp {
+                comp,
+                aliases,
+                substitutions,
+            } => match comp {
+                Comp::Bind(bound, binder, body) => {
+                    if matches!(bound.as_ref(), Comp::Return(Value::Var(name))
+                        if aliases.contains(name))
+                    {
+                        let mut inner = aliases.as_ref().clone();
+                        inner.insert(*binder);
+                        frames.push(FoldFrame::Comp {
+                            comp: body,
+                            aliases: Rc::new(inner),
+                            substitutions,
+                        });
+                        continue;
+                    }
+
+                    if let Some(kind) =
+                        resume_argument_kind(bound, &aliases, &substitutions, accumulator)
+                    {
+                        let Comp::App(function, args) = body.as_ref() else {
+                            return None;
+                        };
+                        if !matches!(function.as_ref(), Comp::Force(Value::Var(name))
+                            if name == binder)
+                        {
+                            return None;
+                        }
+                        let [state] = args.as_slice() else {
+                            return None;
+                        };
+                        if !fv::value(state).is_disjoint(&aliases) {
+                            return None;
+                        }
+                        kinds.push(kind);
+                        continue;
+                    }
+
+                    if !fv::comp(bound).is_disjoint(&aliases) {
+                        return None;
+                    }
+                    let substitutions = if let Comp::Return(value) = bound.as_ref() {
+                        let mut inner = substitutions.as_ref().clone();
+                        inner.insert(*binder, value);
+                        Rc::new(inner)
+                    } else {
+                        substitutions
+                    };
+                    frames.push(FoldFrame::Comp {
+                        comp: body,
+                        aliases,
+                        substitutions,
+                    });
                 }
+                Comp::If(value, then_branch, else_branch) => {
+                    if !fv::value(value).is_disjoint(&aliases) {
+                        return None;
+                    }
+                    let mark = kinds.len();
+                    frames.push(FoldFrame::Join { mark, branches: 2 });
+                    frames.push(FoldFrame::Comp {
+                        comp: else_branch,
+                        aliases: Rc::clone(&aliases),
+                        substitutions: Rc::clone(&substitutions),
+                    });
+                    frames.push(FoldFrame::Comp {
+                        comp: then_branch,
+                        aliases,
+                        substitutions,
+                    });
+                }
+                Comp::Case(value, arms) => {
+                    if arms.is_empty() || !fv::value(value).is_disjoint(&aliases) {
+                        return None;
+                    }
+                    let mark = kinds.len();
+                    frames.push(FoldFrame::Join {
+                        mark,
+                        branches: arms.len(),
+                    });
+                    for (_, body) in arms.iter().rev() {
+                        frames.push(FoldFrame::Comp {
+                            comp: body,
+                            aliases: Rc::clone(&aliases),
+                            substitutions: Rc::clone(&substitutions),
+                        });
+                    }
+                }
+                _ => return None,
+            },
+            FoldFrame::Join { mark, branches } => {
+                assert_eq!(
+                    kinds.len(),
+                    mark + branches,
+                    "each fold branch produces one kind"
+                );
+                let expected = kinds[mark];
+                if kinds[mark..].iter().any(|kind| *kind != expected) {
+                    return None;
+                }
+                kinds.truncate(mark);
+                kinds.push(expected);
             }
-            if let Some(argument) = resume_argument(bound, aliases, substitutions) {
-                let kind = fold_argument(&argument, accumulator)?;
-                let Comp::App(function, args) = body.as_ref() else {
+        }
+    }
+    let [kind] = kinds.as_slice() else {
+        return None;
+    };
+    Some(*kind)
+}
+
+fn resume_argument_kind<'a>(
+    mut comp: &'a Comp,
+    initial_aliases: &Rc<BTreeSet<Sym>>,
+    initial_substitutions: &Rc<Substitutions<'a>>,
+    accumulator: Sym,
+) -> Option<FoldAKind> {
+    let mut aliases = Rc::clone(initial_aliases);
+    let mut substitutions = Rc::clone(initial_substitutions);
+    loop {
+        match comp {
+            Comp::App(function, args) => {
+                if !matches!(function.as_ref(), Comp::Force(Value::Var(name))
+                    if aliases.contains(name))
+                {
+                    return None;
+                }
+                let [argument] = args.as_slice() else {
                     return None;
                 };
-                if !matches!(
-                    function.as_ref(),
-                    Comp::Force(Value::Var(name)) if name == binder
-                ) {
+                if !fv::value(argument).is_disjoint(&aliases) {
                     return None;
                 }
-                let [state] = args.as_slice() else {
-                    return None;
-                };
-                if !fv::value(state).is_disjoint(aliases) {
-                    return None;
-                }
-                return Some((Comp::Return(state.clone()), kind));
+                return resolve_fold_argument(argument, &substitutions, accumulator);
             }
-            if !fv::comp(bound).is_disjoint(aliases) {
-                return None;
-            }
-            let mut inner = substitutions.clone();
-            if let Comp::Return(value) = bound.as_ref() {
-                inner.insert(*binder, value.clone());
-            }
-            let (tail, kind) = strip_state_go(body, aliases, accumulator, &inner)?;
-            Some((Comp::Bind(bound.clone(), *binder, Box::new(tail)), kind))
-        }
-        Comp::If(value, then_branch, else_branch) => {
-            if !fv::value(value).is_disjoint(aliases) {
-                return None;
-            }
-            let (then_branch, then_kind) =
-                strip_state_go(then_branch, aliases, accumulator, substitutions)?;
-            let (else_branch, else_kind) =
-                strip_state_go(else_branch, aliases, accumulator, substitutions)?;
-            (then_kind == else_kind).then(|| {
-                (
-                    Comp::If(value.clone(), Box::new(then_branch), Box::new(else_branch)),
-                    then_kind,
-                )
-            })
-        }
-        Comp::Case(value, arms) => {
-            if !fv::value(value).is_disjoint(aliases) {
-                return None;
-            }
-            let mut expected = None;
-            let mut lowered = Vec::with_capacity(arms.len());
-            for (pattern, body) in arms {
-                let (body, kind) = strip_state_go(body, aliases, accumulator, substitutions)?;
-                match expected {
-                    Some(previous) if previous != kind => return None,
-                    _ => expected = Some(kind),
-                }
-                lowered.push((pattern.clone(), body));
-            }
-            Some((Comp::Case(value.clone(), lowered), expected?))
-        }
-        _ => None,
-    }
-}
-
-fn resume_argument(
-    comp: &Comp,
-    aliases: &BTreeSet<Sym>,
-    substitutions: &BTreeMap<Sym, Value>,
-) -> Option<Value> {
-    match comp {
-        Comp::App(function, args) => {
-            if !matches!(
-                function.as_ref(),
-                Comp::Force(Value::Var(name)) if aliases.contains(name)
-            ) {
-                return None;
-            }
-            let [argument] = args.as_slice() else {
-                return None;
-            };
-            fv::value(argument)
-                .is_disjoint(aliases)
-                .then(|| resolve_value(argument, substitutions))
-        }
-        Comp::Bind(bound, binder, body) => {
-            if let Comp::Return(Value::Var(name)) = bound.as_ref() {
-                if aliases.contains(name) {
-                    let mut inner = aliases.clone();
+            Comp::Bind(bound, binder, body) => {
+                if matches!(bound.as_ref(), Comp::Return(Value::Var(name))
+                    if aliases.contains(name))
+                {
+                    let mut inner = aliases.as_ref().clone();
                     inner.insert(*binder);
-                    return resume_argument(body, &inner, substitutions);
+                    aliases = Rc::new(inner);
+                    comp = body;
+                    continue;
                 }
+                if !fv::comp(bound).is_disjoint(&aliases) {
+                    return None;
+                }
+                if let Comp::Return(value) = bound.as_ref() {
+                    let mut inner = substitutions.as_ref().clone();
+                    inner.insert(*binder, value);
+                    substitutions = Rc::new(inner);
+                }
+                comp = body;
             }
-            if !fv::comp(bound).is_disjoint(aliases) {
-                return None;
-            }
-            let mut inner = substitutions.clone();
-            if let Comp::Return(value) = bound.as_ref() {
-                inner.insert(*binder, value.clone());
-            }
-            resume_argument(body, aliases, &inner)
+            _ => return None,
         }
-        _ => None,
     }
 }
 
-fn resolve_value(value: &Value, substitutions: &BTreeMap<Sym, Value>) -> Value {
-    match value {
-        Value::Var(name) => substitutions.get(name).map_or_else(
-            || value.clone(),
-            |inner| resolve_value(inner, substitutions),
-        ),
-        _ => value.clone(),
+fn resolve_fold_argument<'a>(
+    mut value: &'a Value,
+    substitutions: &Substitutions<'a>,
+    accumulator: Sym,
+) -> Option<FoldAKind> {
+    let mut seen = BTreeSet::new();
+    while let Value::Var(name) = value {
+        let Some(inner) = substitutions.get(name) else {
+            break;
+        };
+        if !seen.insert(*name) {
+            return None;
+        }
+        value = inner;
     }
+    fold_argument(value, accumulator)
 }
 
 fn thunks_in_value<'a>(value: &'a Value, thunks: &mut Vec<&'a Comp>) {
-    match value {
-        Value::Thunk(comp) => thunks.push(comp),
-        Value::Ctor(_, _, fields) | Value::Tuple(fields) => {
-            for field in fields {
-                thunks_in_value(field, thunks);
+    let mut values = vec![value];
+    while let Some(value) = values.pop() {
+        match value {
+            Value::Thunk(comp) => thunks.push(comp),
+            Value::Ctor(_, _, fields) | Value::Tuple(fields) | Value::UnboxedTuple(fields) => {
+                for field in fields {
+                    values.push(field);
+                }
             }
+            Value::UnboxedRecord(fields) => {
+                for (_, field) in fields {
+                    values.push(field);
+                }
+            }
+            _ => {}
         }
-        _ => {}
     }
 }
 
@@ -476,5 +602,177 @@ fn each_subcomp<'a>(comp: &'a Comp, visit: &mut impl FnMut(&'a Comp)) {
         | Comp::Do(..)
         | Comp::StrBuiltin(..)
         | Comp::Io(..) => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{mem, thread};
+
+    use super::*;
+    use crate::core::CorePat;
+
+    const DEEP_COMP_COUNT: usize = 25_000;
+    const ORDINARY_TEST_STACK: usize = 2 * 1024 * 1024;
+
+    fn mixed_path(mut body: Comp) -> Comp {
+        let ignored = Sym::new("ignored");
+        for depth in 0..DEEP_COMP_COUNT {
+            if depth % 2 == 0 {
+                let suspended = Value::Thunk(Box::new(Comp::Return(Value::Int(0))));
+                body = Comp::Bind(
+                    Box::new(Comp::Return(Value::Tuple(vec![suspended]))),
+                    ignored,
+                    Box::new(body),
+                );
+            } else {
+                body = Comp::Case(Value::Unit, vec![(CorePat::Wild, body)]);
+            }
+        }
+        body
+    }
+
+    fn mixed_value(mut value: Value) -> Value {
+        let constructor = Sym::new("Deep.Value");
+        let field = Sym::new("field");
+        for depth in 0..DEEP_COMP_COUNT {
+            value = match depth % 4 {
+                0 => Value::Tuple(vec![value]),
+                1 => Value::Ctor(constructor, 0, vec![value]),
+                2 => Value::UnboxedTuple(vec![value]),
+                _ => Value::UnboxedRecord(vec![(field, value)]),
+            };
+        }
+        value
+    }
+
+    fn resume_call(resume: Sym, argument: Value) -> Comp {
+        Comp::App(Box::new(Comp::Force(Value::Var(resume))), vec![argument])
+    }
+
+    fn fold_path(resume: Sym, accumulator: Sym) -> Comp {
+        let state_alias = Sym::new("state_alias");
+        let continuation = Sym::new("continuation");
+        let tail = Comp::Bind(
+            Box::new(resume_call(resume, Value::Var(state_alias))),
+            continuation,
+            Box::new(Comp::App(
+                Box::new(Comp::Force(Value::Var(continuation))),
+                vec![Value::Int(0)],
+            )),
+        );
+        mixed_path(Comp::Bind(
+            Box::new(Comp::Return(Value::Var(accumulator))),
+            state_alias,
+            Box::new(tail),
+        ))
+    }
+
+    #[test]
+    fn resume_classification_handles_deep_mixed_paths_on_an_ordinary_stack() {
+        thread::Builder::new()
+            .name("deep-resume-classification".into())
+            .stack_size(ORDINARY_TEST_STACK)
+            .spawn(|| {
+                let resume = Sym::new("resume");
+                let body = Comp::If(
+                    Value::Bool(true),
+                    Box::new(mixed_path(resume_call(
+                        resume,
+                        mixed_value(Value::Thunk(Box::new(Comp::Return(Value::Int(0))))),
+                    ))),
+                    Box::new(mixed_path(resume_call(
+                        resume,
+                        mixed_value(Value::Thunk(Box::new(Comp::Return(Value::Int(1))))),
+                    ))),
+                );
+                let op = HandleOp {
+                    name: Sym::new("Deep.resume"),
+                    params: Vec::new(),
+                    resume,
+                    body,
+                };
+
+                assert_eq!(
+                    classify_resume(&op),
+                    ResumeUse {
+                        tail: true,
+                        multishot: true,
+                        in_thunk: false,
+                    }
+                );
+                mem::forget(op);
+            })
+            .expect("spawn deep resume-classification test")
+            .join()
+            .expect("deep resume-classification test panicked");
+    }
+
+    #[test]
+    fn unboxed_products_do_not_hide_resumptions() {
+        let resume = Sym::new("resume");
+        let captured = Value::Thunk(Box::new(Comp::Return(Value::Var(resume))));
+        let op = HandleOp {
+            name: Sym::new("Unboxed.resume"),
+            params: Vec::new(),
+            resume,
+            body: Comp::Return(Value::UnboxedRecord(vec![
+                (
+                    Sym::new("escaped"),
+                    Value::UnboxedTuple(vec![Value::Var(resume)]),
+                ),
+                (Sym::new("captured"), captured),
+            ])),
+        };
+
+        assert_eq!(
+            classify_resume(&op),
+            ResumeUse {
+                tail: false,
+                multishot: true,
+                in_thunk: true,
+            }
+        );
+    }
+
+    #[test]
+    fn fold_classification_handles_deep_mixed_paths_on_an_ordinary_stack() {
+        thread::Builder::new()
+            .name("deep-fold-classification".into())
+            .stack_size(ORDINARY_TEST_STACK)
+            .spawn(|| {
+                let resume = Sym::new("resume");
+                let accumulator = Sym::new("accumulator");
+                let body = Comp::If(
+                    Value::Bool(true),
+                    Box::new(fold_path(resume, accumulator)),
+                    Box::new(fold_path(resume, accumulator)),
+                );
+                let op = HandleOp {
+                    name: Sym::new("Deep.fold"),
+                    params: Vec::new(),
+                    resume,
+                    body: Comp::Return(Value::Thunk(Box::new(Comp::Lam(
+                        vec![accumulator],
+                        Box::new(body),
+                    )))),
+                };
+
+                assert_eq!(
+                    is_fold(
+                        &op,
+                        ResumeUse {
+                            tail: false,
+                            multishot: false,
+                            in_thunk: false,
+                        }
+                    ),
+                    Some(FoldAKind::Acc)
+                );
+                mem::forget(op);
+            })
+            .expect("spawn deep fold-classification test")
+            .join()
+            .expect("deep fold-classification test panicked");
     }
 }

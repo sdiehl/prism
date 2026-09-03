@@ -6,11 +6,11 @@ use crate::types::ty::{EffRow, Label};
 use prism_common::sym::Sym;
 use prism_syntax::names;
 
+use super::super::traverse::Visit;
 use super::super::verify::VerifyEnv;
 use super::super::{TypedComp, TypedCoreFn};
 use super::evidence::OpIds;
 use super::plan::collect_calls;
-use super::walk::each_subterm;
 
 /// The direct effects retained by each declaration around its reified
 /// operation runtime.
@@ -58,15 +58,12 @@ pub fn plan(
     let mut labels = BTreeMap::<Sym, BTreeSet<Label>>::new();
     let mut calls = BTreeMap::<Sym, BTreeSet<Sym>>::new();
     for function in functions {
-        let mut rows = Vec::new();
-        collect_comp(function.body(), &mut rows);
-        labels.insert(
-            function.name(),
-            rows.iter()
-                .flat_map(|row| row.labels().into_iter().cloned())
-                .filter(|label| !reified.contains(&label.name))
-                .collect(),
-        );
+        let mut collector = LabelCollector {
+            reified: &reified,
+            labels: BTreeSet::new(),
+        };
+        collector.walk_comp(function.body());
+        labels.insert(function.name(), collector.labels);
         let mut callees = BTreeSet::new();
         collect_calls(function.body(), &mut callees);
         calls.insert(function.name(), callees);
@@ -105,7 +102,21 @@ pub fn plan(
     Ok(ResidualRows(planned))
 }
 
-fn collect_comp(comp: &TypedComp, rows: &mut Vec<EffRow>) {
-    rows.push(comp.sig().effects().clone());
-    each_subterm(comp, &mut |child| collect_comp(child, rows));
+struct LabelCollector<'a> {
+    reified: &'a BTreeSet<Sym>,
+    labels: BTreeSet<Label>,
+}
+
+impl Visit for LabelCollector<'_> {
+    fn comp(&mut self, comp: &TypedComp) -> bool {
+        self.labels.extend(
+            comp.sig()
+                .effects()
+                .labels()
+                .into_iter()
+                .filter(|label| !self.reified.contains(&label.name))
+                .cloned(),
+        );
+        true
+    }
 }

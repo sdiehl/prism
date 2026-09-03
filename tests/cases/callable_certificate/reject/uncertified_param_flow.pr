@@ -1,0 +1,3 @@
+fn apply(f : ((Int) -> Int) @ noalloc, x : Int) : Int = f(x)
+
+fn wrap(g : (Int) -> Int, x : Int) : Int = apply(g, x)

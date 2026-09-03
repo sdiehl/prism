@@ -12,7 +12,9 @@ use std::path::Path;
 #[cfg(feature = "native")]
 use crate::core::fbip::Sigs;
 #[cfg(feature = "native")]
-use crate::core::{pass_fingerprint, LoweredCore, PassStage};
+use crate::core::opt::optimization_fingerprint;
+#[cfg(feature = "native")]
+use crate::core::{LoweredCore, PassStage};
 #[cfg(feature = "native")]
 use crate::error::Error;
 #[cfg(feature = "native")]
@@ -20,7 +22,7 @@ use crate::lineage::{FactOutcome, QueryKind};
 #[cfg(feature = "native")]
 use crate::resolve::Root;
 #[cfg(feature = "native")]
-use crate::store::disk::{atomic_write, resolve_store_path, Store, Written};
+use crate::store::disk::{atomic_write_now, Store, Written};
 #[cfg(feature = "native")]
 use crate::types::CtorInfo;
 #[cfg(feature = "native")]
@@ -70,6 +72,10 @@ const CHECKED_VERDICT_SCHEMA: &str = "prism-checked-verdict-query-v1";
 // the query row references it by its content hash like every other query.
 #[cfg(feature = "native")]
 const CHECKED_VERDICT_OK_PAYLOAD: &[u8] = b"checked-verdict-ok";
+#[cfg(feature = "native")]
+const FUNCTION_SUMMARIES_QUERY: &str = "function-summaries";
+#[cfg(feature = "native")]
+const FUNCTION_SUMMARIES_SCHEMA: &str = "prism-function-summaries-query-v1";
 #[cfg(feature = "native")]
 const IDENTITY_LINKED_SEMANTIC: &str = "linked-native-semantic";
 #[cfg(feature = "native")]
@@ -122,10 +128,10 @@ impl NativeArtifactCache {
         roots: &[Root],
         cfg: &Config,
     ) -> Result<Option<Self>, Error> {
-        if !cfg.flags.compiler_cache || cfg.flags.store {
+        if !cfg.flags().compiler_cache || cfg.flags().store {
             return Ok(None);
         }
-        let store = Store::open_or_create(resolve_store_path(cfg.flags.store_path.as_deref()))?;
+        let store = cfg.open_store()?;
         let key = linked_native_raw_key(src, roots, cfg)?;
         Ok(Some(Self {
             store,
@@ -150,10 +156,10 @@ impl NativeArtifactCache {
         native_kont_table: &str,
         cfg: &Config,
     ) -> Result<Option<Self>, Error> {
-        if !cfg.flags.compiler_cache || cfg.flags.store {
+        if !cfg.flags().compiler_cache || cfg.flags().store {
             return Ok(None);
         }
-        let store = Store::open_or_create(resolve_store_path(cfg.flags.store_path.as_deref()))?;
+        let store = cfg.open_store()?;
         let mut h = semantic_query_hasher(
             LINKED_NATIVE_SEMANTIC_SCHEMA,
             &core()?,
@@ -194,10 +200,10 @@ impl NativeArtifactCache {
         native_kont_table: &str,
         cfg: &Config,
     ) -> Result<Option<Self>, Error> {
-        if !cfg.flags.compiler_cache || cfg.flags.store {
+        if !cfg.flags().compiler_cache || cfg.flags().store {
             return Ok(None);
         }
-        let store = Store::open_or_create(resolve_store_path(cfg.flags.store_path.as_deref()))?;
+        let store = cfg.open_store()?;
         let h = semantic_query_hasher(LLVM_BITCODE_SCHEMA, core, ctors, native_kont_table, cfg)?;
         Ok(Some(Self {
             store,
@@ -230,7 +236,7 @@ impl NativeArtifactCache {
         toolchain_context: &str,
         cfg: &Config,
     ) -> Result<Option<Self>, Error> {
-        if cfg.flags.store {
+        if cfg.flags().store {
             return Ok(None);
         }
         // Runtime translation units are identical across every program built by
@@ -241,7 +247,7 @@ impl NativeArtifactCache {
         // or compiler-pass configuration: equal runtime bytes compiled by the
         // same target toolchain are the same object whatever program later
         // links them.
-        let store = Store::open_or_create(resolve_store_path(cfg.flags.store_path.as_deref()))?;
+        let store = cfg.open_store()?;
         let mut hasher = blake3::Hasher::new();
         field(&mut hasher, RUNTIME_OBJECT_SCHEMA.as_bytes());
         field(&mut hasher, name.as_bytes());
@@ -269,10 +275,10 @@ impl NativeArtifactCache {
         profile: Option<RuntimeProfile>,
         cfg: &Config,
     ) -> Result<Option<Self>, Error> {
-        if !cfg.flags.compiler_cache || cfg.flags.store {
+        if !cfg.flags().compiler_cache || cfg.flags().store {
             return Ok(None);
         }
-        let store = Store::open_or_create(resolve_store_path(cfg.flags.store_path.as_deref()))?;
+        let store = cfg.open_store()?;
         let mut hasher = blake3::Hasher::new();
         field(&mut hasher, schema.as_bytes());
         field(&mut hasher, compiler_binary_fingerprint()?.as_bytes());
@@ -294,6 +300,11 @@ impl NativeArtifactCache {
         }))
     }
 
+    /// The content-addressed query key, identifying this artifact's inputs.
+    pub(super) fn key(&self) -> &str {
+        &self.key
+    }
+
     pub(super) fn record_decision(
         &self,
         cfg: &Config,
@@ -312,7 +323,7 @@ impl NativeArtifactCache {
         } else {
             QueryKind::Object
         };
-        if let Some(session) = &cfg.session {
+        if let Some(session) = cfg.session() {
             session.record_decision(QueryDecision::new(
                 kind,
                 self.identity.clone(),
@@ -360,7 +371,9 @@ impl NativeArtifactCache {
                 format!("cached artifact hashes to {actual}, expected {output_hash}"),
             )));
         }
-        atomic_write(out, &bytes)?;
+        // Eager on purpose: this publishes the user's output artifact, which
+        // must exist (and be chmod-able) the moment materialize returns.
+        atomic_write_now(out, &bytes)?;
         if executable {
             make_executable(out)?;
         }
@@ -396,14 +409,8 @@ fn semantic_query_hasher(
     for stage in [PassStage::PreLowering, PassStage::Late] {
         field(
             &mut h,
-            pass_fingerprint(
-                cfg.opt(),
-                cfg.passes.as_ref(),
-                stage,
-                &cfg.disabled,
-                &cfg.flags,
-            )
-            .as_bytes(),
+            optimization_fingerprint(&cfg.optimization_plan(), stage, cfg.optimizer_options())
+                .as_bytes(),
         );
     }
     field(&mut h, &lowered_core_identity(core)?);
@@ -456,10 +463,10 @@ impl CheckVerdictCache {
         lock_manifest: Option<&[u8]>,
         cfg: &Config,
     ) -> Result<Option<Self>, Error> {
-        if !cfg.flags.compiler_cache || cfg.flags.store {
+        if !cfg.flags().compiler_cache || cfg.flags().store {
             return Ok(None);
         }
-        let store = Store::open_or_create(resolve_store_path(cfg.flags.store_path.as_deref()))?;
+        let store = cfg.open_store()?;
         let mut h = blake3::Hasher::new();
         field(&mut h, CHECKED_VERDICT_SCHEMA.as_bytes());
         field(&mut h, compiler_binary_fingerprint()?.as_bytes());
@@ -471,11 +478,11 @@ impl CheckVerdictCache {
         );
         field(
             &mut h,
-            source_inputs_digest(src, roots, cfg.flags.query_threads)?.as_bytes(),
+            source_inputs_digest(src, roots, cfg.flags().query_threads)?.as_bytes(),
         );
         // The build mode splits the key exactly as it splits the raw build key:
         // test mode checks `test fn` bodies production mode never sees.
-        field(&mut h, &[u8::from(cfg.mode == super::BuildMode::Test)]);
+        field(&mut h, &[u8::from(cfg.mode() == super::BuildMode::Test)]);
         // The stable-lock manifest gates single-file checks (a locked migration
         // whose generated behavior drifted must fail), so its exact bytes join
         // the key; its absence is a distinct state, not an empty manifest.
@@ -535,7 +542,7 @@ fn linked_native_raw_key(src: &str, roots: &[Root], cfg: &Config) -> Result<Stri
     );
     field(
         &mut h,
-        source_inputs_digest(src, roots, cfg.flags.query_threads)?.as_bytes(),
+        source_inputs_digest(src, roots, cfg.flags().query_threads)?.as_bytes(),
     );
     // The build mode changes which declarations survive into the binary
     // (production strips `test fn`; test retains them) without entering the LLVM
@@ -545,8 +552,108 @@ fn linked_native_raw_key(src: &str, roots: &[Root], cfg: &Config) -> Result<Stri
     // The output path is deliberately absent: linked bytes are a function of
     // the program alone, so one entry serves every destination the same
     // program is built to.
-    field(&mut h, &[u8::from(cfg.mode == super::BuildMode::Test)]);
+    field(&mut h, &[u8::from(cfg.mode() == super::BuildMode::Test)]);
     Ok(h.finalize().to_hex().to_string())
+}
+
+/// The durable per-function summary table: the encoded facts the optimizer
+/// consults, keyed by the inputs that determine them.
+///
+/// The summarized subject is the optimized pre-lowering typed Core, which is a
+/// pure function of the source tree, the compiler binary, the frontend
+/// artifact identity, and the pass configuration, so those inputs form the
+/// key. A finer post-optimization Core identity key lands with the first
+/// cross-source consumer; today the store's job is durability plus the
+/// byte-identity reconcile below.
+#[cfg(feature = "native")]
+pub(super) struct SummaryCache {
+    store: Store,
+    key: String,
+}
+
+#[cfg(feature = "native")]
+impl SummaryCache {
+    /// `None` when the compiler cache is off (or the store is the opt-in
+    /// definition store), matching every other durable query's gate.
+    ///
+    /// # Errors
+    /// Fails only on a store-open failure.
+    pub(super) fn for_subject(
+        src: &str,
+        roots: &[Root],
+        cfg: &Config,
+    ) -> Result<Option<Self>, Error> {
+        if !cfg.flags().compiler_cache || cfg.flags().store {
+            return Ok(None);
+        }
+        let store = cfg.open_store()?;
+        let mut h = blake3::Hasher::new();
+        field(&mut h, FUNCTION_SUMMARIES_SCHEMA.as_bytes());
+        field(&mut h, compiler_binary_fingerprint()?.as_bytes());
+        field(
+            &mut h,
+            cfg.artifact_identity_for("frontend")
+                .fingerprint()
+                .as_bytes(),
+        );
+        // Summaries read the optimized pre-lowering term, so the pre-lowering
+        // pass configuration shapes them directly; Late joins for safety,
+        // mirroring the semantic build key's stage coverage.
+        for stage in [PassStage::PreLowering, PassStage::Late] {
+            field(
+                &mut h,
+                optimization_fingerprint(&cfg.optimization_plan(), stage, cfg.optimizer_options())
+                    .as_bytes(),
+            );
+        }
+        field(
+            &mut h,
+            source_inputs_digest(src, roots, cfg.flags().query_threads)?.as_bytes(),
+        );
+        // The build mode changes which declarations reach the mid end (test
+        // mode keeps `test fn` bodies), so it splits the key like every other
+        // source-keyed query.
+        field(&mut h, &[u8::from(cfg.mode() == super::BuildMode::Test)]);
+        Ok(Some(Self {
+            store,
+            key: h.finalize().to_hex().to_string(),
+        }))
+    }
+
+    /// Store the freshly encoded table, or check it byte-for-byte against the
+    /// stored one when this key was already answered.
+    ///
+    /// A hit with different bytes is a determinism breach (equal keys must
+    /// yield identical summaries) and fails loudly; a query binding whose
+    /// object was swept by gc is a normal miss and is re-stored, like
+    /// `materialize_file` above.
+    ///
+    /// # Errors
+    /// Fails on a store read/write failure or a byte-identity mismatch.
+    pub(super) fn reconcile(&self, fresh: &[u8]) -> Result<(), Error> {
+        if let Some(output_hash) = self.store.get_query(FUNCTION_SUMMARIES_QUERY, &self.key)? {
+            match self.store.get(&output_hash) {
+                Ok(stored) => {
+                    if stored == fresh {
+                        return Ok(());
+                    }
+                    return Err(Error::InternalInvariant(format!(
+                        "{FUNCTION_SUMMARIES_QUERY}: stored summaries for an equal \
+                         key differ from the freshly computed table"
+                    )));
+                }
+                Err(e) if e.kind() == ErrorKind::NotFound => {}
+                Err(e) => return Err(Error::Io(e)),
+            }
+        }
+        let output_hash = blake3::hash(fresh).to_hex().to_string();
+        match self.store.put(&output_hash, fresh)? {
+            Written::New | Written::Hit => {}
+        }
+        self.store
+            .put_query(FUNCTION_SUMMARIES_QUERY, &self.key, &output_hash)?;
+        Ok(())
+    }
 }
 
 #[cfg(all(feature = "native", unix))]

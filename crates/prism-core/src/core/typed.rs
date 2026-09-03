@@ -9,6 +9,8 @@ mod authority;
 mod build;
 mod cse;
 pub mod effect_lower;
+mod exact_size;
+mod facts;
 mod fuse;
 mod inline;
 mod newtypes;
@@ -17,6 +19,8 @@ mod reuse;
 mod simplify;
 pub mod specialize;
 mod specialize_support;
+pub mod summary;
+pub(crate) mod traverse;
 pub mod verify;
 pub mod violation;
 
@@ -25,6 +29,7 @@ pub use build::{build_typed, build_verify_env, core_fn_sig, dict_type};
 // The raw typed passes, exposed for the driver's ordered stage runner (which
 // owns verification boundaries and the SCC fixed-point cache).
 pub use cse::cse;
+pub use exact_size::{exact_size, ExactSizeStats};
 pub use fuse::fuse;
 pub use inline::inline;
 pub use newtypes::erase_newtypes;
@@ -35,7 +40,8 @@ pub use effect_lower::abi::LoweredReprProof;
 pub use effect_lower::decline::Decline;
 pub use effect_lower::explain::explain as explain_effect_tiers;
 pub use effect_lower::{
-    lower_effects, prepare as prepare_effects, EffectPlan, Prepared, TypedLowering,
+    lower_effects, lower_effects_with_options, prepare as prepare_effects,
+    prepare_with_options as prepare_effects_with_options, EffectPlan, Prepared, TypedLowering,
 };
 pub use rc::insert_rc;
 pub use reuse::reuse;
@@ -52,17 +58,13 @@ use crate::types::ty::{EffRow, Label};
 use crate::types::Type;
 use prism_common::sym::Sym;
 
+use self::verify::{
+    discard_comp_sig, discard_core_fn_sig, discard_core_instantiation, discard_core_type,
+    discard_type,
+};
+pub(crate) use super::work::on_core_stack;
 use super::{builtins::Builtin, builtins::FloatOp};
 use super::{CheckedHandler, Comp, CoreFn, CoreOp, CorePat, HandleOp, IoOp, NegLane, Value};
-
-// Erasure walks a whole function body as one non-tail recursion, so a deeply
-// nested definition can outgrow a small host stack. The same segment-growing
-// guard the builder and the proof checker use bounds it, per top-level
-// function, so the depth a program may reach does not depend on which thread
-// happened to call it.
-const MEBIBYTE: usize = 1024 * 1024;
-pub(crate) const CORE_MIN_STACK: usize = 4 * MEBIBYTE;
-pub(crate) const CORE_GROW_STACK: usize = 8 * MEBIBYTE;
 
 /// A value type in typed Core.
 ///
@@ -319,6 +321,22 @@ impl TypedBinder {
             BinderErasure::RcSequence => Sym::new("_"),
         }
     }
+
+    fn into_name(self) -> Sym {
+        let Self {
+            name,
+            ty,
+            erasure: _,
+        } = self;
+        discard_core_type(ty);
+        name
+    }
+
+    fn into_erased_name(self) -> Sym {
+        let name = self.erase_name();
+        discard_core_type(self.ty);
+        name
+    }
 }
 
 /// A Core case pattern whose introduced binders retain their types.
@@ -345,22 +363,25 @@ impl TypedPattern {
     fn erase(self) -> CorePat {
         match self {
             Self::Wild => CorePat::Wild,
-            Self::Var(binder) => CorePat::Var(binder.name),
+            Self::Var(binder) => CorePat::Var(binder.into_name()),
             Self::Ctor {
                 name,
-                instantiation: _,
+                instantiation,
                 fields,
-            } => CorePat::Ctor(
-                name,
-                fields
-                    .into_iter()
-                    .map(|binder| binder.map(|binder| binder.name))
-                    .collect(),
-            ),
+            } => {
+                discard_instantiations(instantiation);
+                CorePat::Ctor(
+                    name,
+                    fields
+                        .into_iter()
+                        .map(|binder| binder.map(TypedBinder::into_name))
+                        .collect(),
+                )
+            }
             Self::Tuple(fields) => CorePat::Tuple(
                 fields
                     .into_iter()
-                    .map(|binder| binder.map(|binder| binder.name))
+                    .map(|binder| binder.map(TypedBinder::into_name))
                     .collect(),
             ),
         }
@@ -406,57 +427,201 @@ impl TypedValue {
     /// on, and the verifier asks it to refuse an operation that acts on none.
     #[must_use]
     pub fn referenced_binding(&self) -> Option<Sym> {
-        match &self.kind {
-            TypedValueKind::Var { name, .. } => Some(*name),
-            TypedValueKind::Reinterpret(inner)
-            | TypedValueKind::LoweredRepr {
-                value: inner,
-                proof: _,
+        let mut value = self;
+        loop {
+            match &value.kind {
+                TypedValueKind::Var { name, .. } => return Some(*name),
+                TypedValueKind::Reinterpret(inner)
+                | TypedValueKind::LoweredRepr {
+                    value: inner,
+                    proof: _,
+                }
+                | TypedValueKind::NewtypeRepr { value: inner, .. } => value = inner,
+                _ => return None,
             }
-            | TypedValueKind::NewtypeRepr { value: inner, .. } => inner.referenced_binding(),
-            _ => None,
         }
     }
 
     fn erase(self) -> Value {
-        match self.kind {
-            TypedValueKind::Var {
-                name,
-                instantiation: _,
-            } => Value::Var(name),
-            TypedValueKind::Int(value) => Value::Int(value),
-            TypedValueKind::I64(value) => Value::I64(value),
-            TypedValueKind::U64(value) => Value::U64(value),
-            TypedValueKind::Float(value) => Value::Float(value),
-            TypedValueKind::Bool(value) => Value::Bool(value),
-            TypedValueKind::Unit => Value::Unit,
-            TypedValueKind::Str(value) => Value::Str(value),
-            TypedValueKind::Reinterpret(value)
-            | TypedValueKind::LoweredRepr { value, proof: _ }
-            | TypedValueKind::NewtypeRepr {
-                constructor: _,
-                instantiation: _,
-                value,
-            } => value.erase(),
-            TypedValueKind::Thunk(body) => Value::Thunk(Box::new(body.erase())),
-            TypedValueKind::Ctor {
+        let ErasedNode::Value(value) = erase_node(EraseFrame::Value(self)) else {
+            unreachable!("a typed value erases to a raw value")
+        };
+        value
+    }
+}
+
+fn discard_instantiations(instantiations: Vec<CoreInstantiation>) {
+    for instantiation in instantiations {
+        discard_core_instantiation(instantiation);
+    }
+}
+
+fn discard_label(label: Label) {
+    for argument in label.args {
+        discard_type(argument);
+    }
+}
+
+fn discard_forward(forward: TypedForward) {
+    let TypedForward {
+        operation: _,
+        effect,
+    } = forward;
+    discard_label(effect);
+}
+
+fn erase_handle_op(arm: TypedHandleOp) -> HandleOp {
+    let TypedHandleOp {
+        name,
+        instantiation,
+        params,
+        resume,
+        body,
+    } = arm;
+    discard_instantiations(instantiation);
+    HandleOp {
+        name,
+        params: params.into_iter().map(TypedBinder::into_name).collect(),
+        resume: resume.into_name(),
+        body: body.erase(),
+    }
+}
+
+fn erase_handler(handler: TypedHandler) -> CheckedHandler {
+    let TypedHandler { arms, forwarded } = handler;
+    for forward in forwarded {
+        discard_forward(forward);
+    }
+    CheckedHandler::new(arms.into_iter().map(erase_handle_op).collect())
+        .expect("typed handler uniqueness survives erasure")
+}
+
+fn pop_value(results: &mut Vec<ErasedNode>) -> Value {
+    let Some(ErasedNode::Value(value)) = results.pop() else {
+        unreachable!("value-erasure frames preserve result kinds")
+    };
+    value
+}
+
+fn pop_comp(results: &mut Vec<ErasedNode>) -> Comp {
+    let Some(ErasedNode::Comp(comp)) = results.pop() else {
+        unreachable!("computation-erasure frames preserve result kinds")
+    };
+    comp
+}
+
+fn pop_values(results: &mut Vec<ErasedNode>, count: usize) -> Vec<Value> {
+    let start = results.len() - count;
+    results
+        .drain(start..)
+        .map(|node| {
+            let ErasedNode::Value(value) = node else {
+                unreachable!("value lists contain only erased values")
+            };
+            value
+        })
+        .collect()
+}
+
+fn pop_comps(results: &mut Vec<ErasedNode>, count: usize) -> Vec<Comp> {
+    let start = results.len() - count;
+    results
+        .drain(start..)
+        .map(|node| {
+            let ErasedNode::Comp(comp) = node else {
+                unreachable!("computation lists contain only erased computations")
+            };
+            comp
+        })
+        .collect()
+}
+
+fn push_values(work: &mut Vec<EraseFrame>, values: Vec<TypedValue>) {
+    work.extend(values.into_iter().rev().map(EraseFrame::Value));
+}
+
+fn erase_node(root: EraseFrame) -> ErasedNode {
+    let mut work = vec![root];
+    let mut results = Vec::new();
+    while let Some(frame) = work.pop() {
+        erase_frame(frame, &mut work, &mut results);
+    }
+    let result = results.pop().expect("erasure produces one raw node");
+    debug_assert!(results.is_empty());
+    result
+}
+
+#[allow(clippy::too_many_lines)]
+fn erase_frame(frame: EraseFrame, work: &mut Vec<EraseFrame>, results: &mut Vec<ErasedNode>) {
+    match frame {
+        EraseFrame::Value(value) => erase_value_frame(value, work, results),
+        EraseFrame::Comp(comp) => erase_comp_frame(*comp, work),
+        EraseFrame::FinishValue(finish) => finish_value(finish, results),
+        EraseFrame::FinishComp(finish) => finish_comp(finish, results),
+    }
+}
+
+fn erase_value_frame(value: TypedValue, work: &mut Vec<EraseFrame>, results: &mut Vec<ErasedNode>) {
+    let TypedValue { ty, kind } = value;
+    discard_core_type(ty);
+    match kind {
+        TypedValueKind::Var {
+            name,
+            instantiation,
+        } => {
+            discard_instantiations(instantiation);
+            results.push(ErasedNode::Value(Value::Var(name)));
+        }
+        TypedValueKind::Int(value) => results.push(ErasedNode::Value(Value::Int(value))),
+        TypedValueKind::I64(value) => results.push(ErasedNode::Value(Value::I64(value))),
+        TypedValueKind::U64(value) => results.push(ErasedNode::Value(Value::U64(value))),
+        TypedValueKind::Float(value) => results.push(ErasedNode::Value(Value::Float(value))),
+        TypedValueKind::Bool(value) => results.push(ErasedNode::Value(Value::Bool(value))),
+        TypedValueKind::Unit => results.push(ErasedNode::Value(Value::Unit)),
+        TypedValueKind::Str(value) => results.push(ErasedNode::Value(Value::Str(value))),
+        TypedValueKind::Reinterpret(value) | TypedValueKind::LoweredRepr { value, proof: _ } => {
+            work.push(EraseFrame::Value(*value));
+        }
+        TypedValueKind::NewtypeRepr {
+            constructor: _,
+            instantiation,
+            value,
+        } => {
+            discard_instantiations(instantiation);
+            work.push(EraseFrame::Value(*value));
+        }
+        TypedValueKind::Thunk(body) => {
+            work.push(EraseFrame::FinishValue(ValueFinish::Thunk));
+            work.push(EraseFrame::Comp(body));
+        }
+        TypedValueKind::Ctor {
+            name,
+            tag,
+            instantiation,
+            fields,
+        } => {
+            discard_instantiations(instantiation);
+            work.push(EraseFrame::FinishValue(ValueFinish::Ctor {
                 name,
                 tag,
-                instantiation: _,
-                fields,
-            } => Value::Ctor(name, tag, fields.into_iter().map(Self::erase).collect()),
-            TypedValueKind::Tuple(fields) => {
-                Value::Tuple(fields.into_iter().map(Self::erase).collect())
-            }
-            TypedValueKind::UnboxedTuple(fields) => {
-                Value::UnboxedTuple(fields.into_iter().map(Self::erase).collect())
-            }
-            TypedValueKind::UnboxedRecord(fields) => Value::UnboxedRecord(
-                fields
-                    .into_iter()
-                    .map(|(name, value)| (name, value.erase()))
-                    .collect(),
-            ),
+                fields: fields.len(),
+            }));
+            push_values(work, fields);
+        }
+        TypedValueKind::Tuple(fields) => {
+            work.push(EraseFrame::FinishValue(ValueFinish::Tuple(fields.len())));
+            push_values(work, fields);
+        }
+        TypedValueKind::UnboxedTuple(fields) => {
+            work.push(EraseFrame::FinishValue(ValueFinish::UnboxedTuple(
+                fields.len(),
+            )));
+            push_values(work, fields);
+        }
+        TypedValueKind::UnboxedRecord(fields) => {
+            let (names, fields): (Vec<_>, Vec<_>) = fields.into_iter().unzip();
+            work.push(EraseFrame::FinishValue(ValueFinish::UnboxedRecord(names)));
+            push_values(work, fields);
         }
     }
 }
@@ -539,21 +704,24 @@ impl TypedValueKind {
     /// an encoding here. Mirrors `Value::literal_scalar_type` post-erasure.
     #[must_use]
     pub fn literal_scalar_type(&self) -> Option<Type> {
-        match self {
-            Self::Int(_) => Some(Type::Int),
-            Self::I64(_) => Some(Type::I64),
-            Self::U64(_) => Some(Type::U64),
-            Self::Float(_) => Some(Type::Float),
-            Self::Bool(_) => Some(Type::Bool),
-            Self::Unit => Some(Type::Unit),
-            Self::Str(_) => Some(Type::Str),
-            Self::Reinterpret(inner)
-            | Self::LoweredRepr {
-                value: inner,
-                proof: _,
+        let mut kind = self;
+        loop {
+            match kind {
+                Self::Int(_) => return Some(Type::Int),
+                Self::I64(_) => return Some(Type::I64),
+                Self::U64(_) => return Some(Type::U64),
+                Self::Float(_) => return Some(Type::Float),
+                Self::Bool(_) => return Some(Type::Bool),
+                Self::Unit => return Some(Type::Unit),
+                Self::Str(_) => return Some(Type::Str),
+                Self::Reinterpret(inner)
+                | Self::LoweredRepr {
+                    value: inner,
+                    proof: _,
+                }
+                | Self::NewtypeRepr { value: inner, .. } => kind = &inner.kind,
+                _ => return None,
             }
-            | Self::NewtypeRepr { value: inner, .. } => inner.kind.literal_scalar_type(),
-            _ => None,
         }
     }
 }
@@ -613,15 +781,6 @@ impl TypedHandleOp {
             params,
             resume,
             body,
-        }
-    }
-
-    fn erase(self) -> HandleOp {
-        HandleOp {
-            name: self.name,
-            params: self.params.into_iter().map(|binder| binder.name).collect(),
-            resume: self.resume.name,
-            body: self.body.erase(),
         }
     }
 }
@@ -706,8 +865,7 @@ impl TypedHandler {
     }
 
     fn erase(self) -> CheckedHandler {
-        CheckedHandler::new(self.arms.into_iter().map(TypedHandleOp::erase).collect())
-            .expect("typed handler uniqueness survives erasure")
+        erase_handler(self)
     }
 }
 
@@ -741,87 +899,11 @@ impl TypedComp {
         Self { sig, kind }
     }
 
-    #[allow(clippy::too_many_lines)]
     fn erase(self) -> Comp {
-        match self.kind {
-            TypedCompKind::Return(value) => Comp::Return(value.erase()),
-            TypedCompKind::Bind(first, binder, rest) => Comp::Bind(
-                Box::new(first.erase()),
-                binder.erase_name(),
-                Box::new(rest.erase()),
-            ),
-            TypedCompKind::Force(value) => Comp::Force(value.erase()),
-            TypedCompKind::Lam(params, body) => Comp::Lam(
-                params.into_iter().map(|binder| binder.name).collect(),
-                Box::new(body.erase()),
-            ),
-            TypedCompKind::App {
-                callee,
-                instantiation: _,
-                args,
-            } => Comp::App(
-                Box::new(callee.erase()),
-                args.into_iter().map(TypedValue::erase).collect(),
-            ),
-            TypedCompKind::If(cond, yes, no) => {
-                Comp::If(cond.erase(), Box::new(yes.erase()), Box::new(no.erase()))
-            }
-            TypedCompKind::Prim(op, lhs, rhs) => Comp::Prim(op, lhs.erase(), rhs.erase()),
-            TypedCompKind::Call {
-                callee: name,
-                instantiation: _,
-                args,
-            } => Comp::Call(name, args.into_iter().map(TypedValue::erase).collect()),
-            TypedCompKind::Io(op, args) => {
-                Comp::Io(op, args.into_iter().map(TypedValue::erase).collect())
-            }
-            TypedCompKind::Error(value) => Comp::Error(value.erase()),
-            TypedCompKind::Case(scrutinee, arms) => Comp::Case(
-                scrutinee.erase(),
-                arms.into_iter()
-                    .map(|(pattern, body)| (pattern.erase(), body.erase()))
-                    .collect(),
-            ),
-            TypedCompKind::FloatBuiltin(op, value) => Comp::FloatBuiltin(op, value.erase()),
-            TypedCompKind::Neg(lane, value) => Comp::Neg(lane, value.erase()),
-            TypedCompKind::UnboxedProject(value, field) => {
-                Comp::UnboxedProject(value.erase(), field)
-            }
-            TypedCompKind::Do {
-                operation: name,
-                instantiation: _,
-                args,
-            } => Comp::Do(name, args.into_iter().map(TypedValue::erase).collect()),
-            TypedCompKind::Handle {
-                body,
-                return_binder,
-                return_body,
-                ops,
-            } => Comp::Handle {
-                body: Box::new(body.erase()),
-                return_var: return_binder.map(|binder| binder.name),
-                return_body: return_body.map(|body| Box::new(body.erase())),
-                ops: ops.erase(),
-            },
-            TypedCompKind::Mask(effects, body) => Comp::Mask(effects, Box::new(body.erase())),
-            TypedCompKind::StrBuiltin {
-                op,
-                instantiation: _,
-                args,
-            } => Comp::StrBuiltin(op, args.into_iter().map(TypedValue::erase).collect()),
-            TypedCompKind::Dup(value) => Comp::Dup(value.erase()),
-            TypedCompKind::Drop(value) => Comp::Drop(value.erase()),
-            TypedCompKind::WithReuse { token, freed, body } => Comp::WithReuse {
-                token: token.name,
-                freed: freed.erase(),
-                body: Box::new(body.erase()),
-            },
-            TypedCompKind::Reuse(token, value) => Comp::Reuse(token.name, value.erase()),
-            TypedCompKind::InitAt(cell, ctor) => Comp::InitAt(cell.erase(), ctor.erase()),
-            TypedCompKind::RefNew(value) => Comp::RefNew(value.erase()),
-            TypedCompKind::RefGet(value) => Comp::RefGet(value.erase()),
-            TypedCompKind::RefSet(cell, value) => Comp::RefSet(cell.erase(), value.erase()),
-        }
+        let ErasedNode::Comp(comp) = erase_node(EraseFrame::Comp(Box::new(self))) else {
+            unreachable!("a typed computation erases to a raw computation")
+        };
+        comp
     }
 }
 
@@ -926,6 +1008,341 @@ pub enum TypedCompKind {
     RefSet(TypedValue, TypedValue),
 }
 
+enum EraseFrame {
+    Value(TypedValue),
+    // Boxed so a frame stays small; every push site already holds the box
+    // its node kind carried, so no allocation is added.
+    Comp(Box<TypedComp>),
+    FinishValue(ValueFinish),
+    FinishComp(CompFinish),
+}
+
+enum ValueFinish {
+    Thunk,
+    Ctor {
+        name: Sym,
+        tag: usize,
+        fields: usize,
+    },
+    Tuple(usize),
+    UnboxedTuple(usize),
+    UnboxedRecord(Vec<Sym>),
+}
+
+enum CompFinish {
+    Return,
+    Bind(Sym),
+    Force,
+    Lam(Vec<Sym>),
+    App(usize),
+    If,
+    Prim(CoreOp),
+    Call(Sym, usize),
+    Io(IoOp, usize),
+    Error,
+    Case(Vec<CorePat>),
+    FloatBuiltin(FloatOp),
+    Neg(NegLane),
+    UnboxedProject(Sym),
+    Do(Sym, usize),
+    Handle {
+        return_var: Option<Sym>,
+        has_return: bool,
+        ops: CheckedHandler,
+    },
+    Mask(Vec<Sym>),
+    StrBuiltin(Builtin, usize),
+    Dup,
+    Drop,
+    WithReuse(Sym),
+    Reuse(Sym),
+    InitAt,
+    RefNew,
+    RefGet,
+    RefSet,
+}
+
+enum ErasedNode {
+    Value(Value),
+    Comp(Comp),
+}
+
+#[allow(clippy::too_many_lines)]
+fn erase_comp_frame(comp: TypedComp, work: &mut Vec<EraseFrame>) {
+    let TypedComp { sig, kind } = comp;
+    discard_comp_sig(sig);
+    match kind {
+        TypedCompKind::Return(value) => {
+            work.push(EraseFrame::FinishComp(CompFinish::Return));
+            work.push(EraseFrame::Value(value));
+        }
+        TypedCompKind::Bind(first, binder, rest) => {
+            work.push(EraseFrame::FinishComp(CompFinish::Bind(
+                binder.into_erased_name(),
+            )));
+            work.push(EraseFrame::Comp(rest));
+            work.push(EraseFrame::Comp(first));
+        }
+        TypedCompKind::Force(value) => {
+            work.push(EraseFrame::FinishComp(CompFinish::Force));
+            work.push(EraseFrame::Value(value));
+        }
+        TypedCompKind::Lam(params, body) => {
+            work.push(EraseFrame::FinishComp(CompFinish::Lam(
+                params.into_iter().map(TypedBinder::into_name).collect(),
+            )));
+            work.push(EraseFrame::Comp(body));
+        }
+        TypedCompKind::App {
+            callee,
+            instantiation,
+            args,
+        } => {
+            discard_instantiations(instantiation);
+            work.push(EraseFrame::FinishComp(CompFinish::App(args.len())));
+            push_values(work, args);
+            work.push(EraseFrame::Comp(callee));
+        }
+        TypedCompKind::If(condition, yes, no) => {
+            work.push(EraseFrame::FinishComp(CompFinish::If));
+            work.push(EraseFrame::Comp(no));
+            work.push(EraseFrame::Comp(yes));
+            work.push(EraseFrame::Value(condition));
+        }
+        TypedCompKind::Prim(op, left, right) => {
+            work.push(EraseFrame::FinishComp(CompFinish::Prim(op)));
+            work.push(EraseFrame::Value(right));
+            work.push(EraseFrame::Value(left));
+        }
+        TypedCompKind::Call {
+            callee,
+            instantiation,
+            args,
+        } => {
+            discard_instantiations(instantiation);
+            work.push(EraseFrame::FinishComp(CompFinish::Call(callee, args.len())));
+            push_values(work, args);
+        }
+        TypedCompKind::Io(op, args) => {
+            work.push(EraseFrame::FinishComp(CompFinish::Io(op, args.len())));
+            push_values(work, args);
+        }
+        TypedCompKind::Error(value) => {
+            work.push(EraseFrame::FinishComp(CompFinish::Error));
+            work.push(EraseFrame::Value(value));
+        }
+        TypedCompKind::Case(scrutinee, arms) => {
+            let (patterns, bodies): (Vec<_>, Vec<_>) = arms
+                .into_iter()
+                .map(|(pattern, body)| (pattern.erase(), body))
+                .unzip();
+            work.push(EraseFrame::FinishComp(CompFinish::Case(patterns)));
+            work.extend(
+                bodies
+                    .into_iter()
+                    .rev()
+                    .map(|body| EraseFrame::Comp(Box::new(body))),
+            );
+            work.push(EraseFrame::Value(scrutinee));
+        }
+        TypedCompKind::FloatBuiltin(op, value) => {
+            work.push(EraseFrame::FinishComp(CompFinish::FloatBuiltin(op)));
+            work.push(EraseFrame::Value(value));
+        }
+        TypedCompKind::Neg(lane, value) => {
+            work.push(EraseFrame::FinishComp(CompFinish::Neg(lane)));
+            work.push(EraseFrame::Value(value));
+        }
+        TypedCompKind::UnboxedProject(value, field) => {
+            work.push(EraseFrame::FinishComp(CompFinish::UnboxedProject(field)));
+            work.push(EraseFrame::Value(value));
+        }
+        TypedCompKind::Do {
+            operation,
+            instantiation,
+            args,
+        } => {
+            discard_instantiations(instantiation);
+            work.push(EraseFrame::FinishComp(CompFinish::Do(
+                operation,
+                args.len(),
+            )));
+            push_values(work, args);
+        }
+        TypedCompKind::Handle {
+            body,
+            return_binder,
+            return_body,
+            ops,
+        } => {
+            let has_return = return_body.is_some();
+            work.push(EraseFrame::FinishComp(CompFinish::Handle {
+                return_var: return_binder.map(TypedBinder::into_name),
+                has_return,
+                ops: ops.erase(),
+            }));
+            if let Some(return_body) = return_body {
+                work.push(EraseFrame::Comp(return_body));
+            }
+            work.push(EraseFrame::Comp(body));
+        }
+        TypedCompKind::Mask(effects, body) => {
+            work.push(EraseFrame::FinishComp(CompFinish::Mask(effects)));
+            work.push(EraseFrame::Comp(body));
+        }
+        TypedCompKind::StrBuiltin {
+            op,
+            instantiation,
+            args,
+        } => {
+            discard_instantiations(instantiation);
+            work.push(EraseFrame::FinishComp(CompFinish::StrBuiltin(
+                op,
+                args.len(),
+            )));
+            push_values(work, args);
+        }
+        TypedCompKind::Dup(value) => {
+            work.push(EraseFrame::FinishComp(CompFinish::Dup));
+            work.push(EraseFrame::Value(value));
+        }
+        TypedCompKind::Drop(value) => {
+            work.push(EraseFrame::FinishComp(CompFinish::Drop));
+            work.push(EraseFrame::Value(value));
+        }
+        TypedCompKind::WithReuse { token, freed, body } => {
+            work.push(EraseFrame::FinishComp(CompFinish::WithReuse(
+                token.into_name(),
+            )));
+            work.push(EraseFrame::Comp(body));
+            work.push(EraseFrame::Value(freed));
+        }
+        TypedCompKind::Reuse(token, value) => {
+            work.push(EraseFrame::FinishComp(CompFinish::Reuse(token.into_name())));
+            work.push(EraseFrame::Value(value));
+        }
+        TypedCompKind::InitAt(cell, constructor) => {
+            work.push(EraseFrame::FinishComp(CompFinish::InitAt));
+            work.push(EraseFrame::Value(constructor));
+            work.push(EraseFrame::Value(cell));
+        }
+        TypedCompKind::RefNew(value) => {
+            work.push(EraseFrame::FinishComp(CompFinish::RefNew));
+            work.push(EraseFrame::Value(value));
+        }
+        TypedCompKind::RefGet(value) => {
+            work.push(EraseFrame::FinishComp(CompFinish::RefGet));
+            work.push(EraseFrame::Value(value));
+        }
+        TypedCompKind::RefSet(cell, value) => {
+            work.push(EraseFrame::FinishComp(CompFinish::RefSet));
+            work.push(EraseFrame::Value(value));
+            work.push(EraseFrame::Value(cell));
+        }
+    }
+}
+
+fn finish_value(finish: ValueFinish, results: &mut Vec<ErasedNode>) {
+    let value = match finish {
+        ValueFinish::Thunk => Value::Thunk(Box::new(pop_comp(results))),
+        ValueFinish::Ctor { name, tag, fields } => {
+            Value::Ctor(name, tag, pop_values(results, fields))
+        }
+        ValueFinish::Tuple(fields) => Value::Tuple(pop_values(results, fields)),
+        ValueFinish::UnboxedTuple(fields) => Value::UnboxedTuple(pop_values(results, fields)),
+        ValueFinish::UnboxedRecord(names) => {
+            let fields = pop_values(results, names.len());
+            Value::UnboxedRecord(names.into_iter().zip(fields).collect())
+        }
+    };
+    results.push(ErasedNode::Value(value));
+}
+
+#[allow(clippy::too_many_lines)]
+fn finish_comp(finish: CompFinish, results: &mut Vec<ErasedNode>) {
+    let comp = match finish {
+        CompFinish::Return => Comp::Return(pop_value(results)),
+        CompFinish::Bind(binder) => {
+            let rest = pop_comp(results);
+            let first = pop_comp(results);
+            Comp::Bind(Box::new(first), binder, Box::new(rest))
+        }
+        CompFinish::Force => Comp::Force(pop_value(results)),
+        CompFinish::Lam(params) => Comp::Lam(params, Box::new(pop_comp(results))),
+        CompFinish::App(argument_count) => {
+            let arguments = pop_values(results, argument_count);
+            let callee = pop_comp(results);
+            Comp::App(Box::new(callee), arguments)
+        }
+        CompFinish::If => {
+            let no = pop_comp(results);
+            let yes = pop_comp(results);
+            let condition = pop_value(results);
+            Comp::If(condition, Box::new(yes), Box::new(no))
+        }
+        CompFinish::Prim(op) => {
+            let right = pop_value(results);
+            let left = pop_value(results);
+            Comp::Prim(op, left, right)
+        }
+        CompFinish::Call(callee, argument_count) => {
+            Comp::Call(callee, pop_values(results, argument_count))
+        }
+        CompFinish::Io(op, argument_count) => Comp::Io(op, pop_values(results, argument_count)),
+        CompFinish::Error => Comp::Error(pop_value(results)),
+        CompFinish::Case(patterns) => {
+            let bodies = pop_comps(results, patterns.len());
+            let scrutinee = pop_value(results);
+            Comp::Case(scrutinee, patterns.into_iter().zip(bodies).collect())
+        }
+        CompFinish::FloatBuiltin(op) => Comp::FloatBuiltin(op, pop_value(results)),
+        CompFinish::Neg(lane) => Comp::Neg(lane, pop_value(results)),
+        CompFinish::UnboxedProject(field) => Comp::UnboxedProject(pop_value(results), field),
+        CompFinish::Do(operation, argument_count) => {
+            Comp::Do(operation, pop_values(results, argument_count))
+        }
+        CompFinish::Handle {
+            return_var,
+            has_return,
+            ops,
+        } => {
+            let return_body = has_return.then(|| Box::new(pop_comp(results)));
+            let body = Box::new(pop_comp(results));
+            Comp::Handle {
+                body,
+                return_var,
+                return_body,
+                ops,
+            }
+        }
+        CompFinish::Mask(effects) => Comp::Mask(effects, Box::new(pop_comp(results))),
+        CompFinish::StrBuiltin(op, argument_count) => {
+            Comp::StrBuiltin(op, pop_values(results, argument_count))
+        }
+        CompFinish::Dup => Comp::Dup(pop_value(results)),
+        CompFinish::Drop => Comp::Drop(pop_value(results)),
+        CompFinish::WithReuse(token) => {
+            let body = Box::new(pop_comp(results));
+            let freed = pop_value(results);
+            Comp::WithReuse { token, freed, body }
+        }
+        CompFinish::Reuse(token) => Comp::Reuse(token, pop_value(results)),
+        CompFinish::InitAt => {
+            let constructor = pop_value(results);
+            let cell = pop_value(results);
+            Comp::InitAt(cell, constructor)
+        }
+        CompFinish::RefNew => Comp::RefNew(pop_value(results)),
+        CompFinish::RefGet => Comp::RefGet(pop_value(results)),
+        CompFinish::RefSet => {
+            let value = pop_value(results);
+            let cell = pop_value(results);
+            Comp::RefSet(cell, value)
+        }
+    };
+    results.push(ErasedNode::Comp(comp));
+}
+
 /// One typed top-level Core function.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TypedCoreFn {
@@ -985,12 +1402,20 @@ impl TypedCoreFn {
     }
 
     fn erase(self) -> CoreFn {
-        stacker::maybe_grow(CORE_MIN_STACK, CORE_GROW_STACK, || CoreFn {
-            name: self.name,
-            params: self.params.into_iter().map(|binder| binder.name).collect(),
-            body: self.body.erase(),
-            dict_arity: self.dict_arity,
-        })
+        let Self {
+            name,
+            params,
+            body,
+            sig,
+            dict_arity,
+        } = self;
+        discard_core_fn_sig(sig);
+        CoreFn {
+            name,
+            params: params.into_iter().map(TypedBinder::into_name).collect(),
+            body: body.erase(),
+            dict_arity,
+        }
     }
 }
 
@@ -1022,12 +1447,15 @@ pub enum ReuseLowered {}
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::{collections::BTreeMap, mem, thread};
 
     use crate::core::hash::hash_program;
     use crate::core::Core;
 
     use super::*;
+
+    const DEEP_ERASURE_DEPTH: usize = 20_000;
+    const ORDINARY_TEST_STACK: usize = 2 * 1024 * 1024;
 
     fn source(ty: Type) -> CoreType {
         CoreType::Source(ty)
@@ -1095,5 +1523,68 @@ mod tests {
         };
         let arm = || TypedHandleOp::new(Sym::new("get"), Vec::new(), Vec::new(), resume(), body());
         assert_eq!(TypedHandler::new(vec![arm(), arm()]), Err(Sym::new("get")));
+    }
+
+    #[test]
+    fn erasure_handles_deep_terms_values_and_witnesses_on_an_ordinary_stack() {
+        thread::Builder::new()
+            .name("deep-typed-erasure".into())
+            .stack_size(ORDINARY_TEST_STACK)
+            .spawn(|| {
+                let mut witness = Type::Int;
+                for _ in 0..DEEP_ERASURE_DEPTH {
+                    witness = Type::OrNull(Box::new(witness));
+                }
+                let mut value = TypedValue::new(CoreType::Source(witness), TypedValueKind::Int(0));
+                for _ in 0..DEEP_ERASURE_DEPTH {
+                    value = TypedValue::new(
+                        source(Type::Int),
+                        TypedValueKind::Reinterpret(Box::new(value)),
+                    );
+                }
+
+                let mut body =
+                    TypedComp::new(pure(source(Type::Int)), TypedCompKind::Return(value));
+                for _ in 0..DEEP_ERASURE_DEPTH {
+                    let first = TypedComp::new(
+                        pure(source(Type::Unit)),
+                        TypedCompKind::Return(TypedValue::new(
+                            source(Type::Unit),
+                            TypedValueKind::Unit,
+                        )),
+                    );
+                    body = TypedComp::new(
+                        pure(source(Type::Int)),
+                        TypedCompKind::Bind(
+                            Box::new(first),
+                            TypedBinder::new(Sym::new("_step"), source(Type::Unit)),
+                            Box::new(body),
+                        ),
+                    );
+                }
+
+                let function = TypedCoreFn::new(
+                    Sym::new("deep_erasure"),
+                    Vec::new(),
+                    body,
+                    CoreFnSig::new(Vec::new(), Vec::new(), pure(source(Type::Int))),
+                    0,
+                );
+                let erased = function.erase();
+                let mut cursor = &erased.body;
+                for _ in 0..DEEP_ERASURE_DEPTH {
+                    let Comp::Bind(first, binder, rest) = cursor else {
+                        panic!("erasure changed the deep bind spine");
+                    };
+                    assert!(matches!(first.as_ref(), Comp::Return(Value::Unit)));
+                    assert_eq!(binder.as_str(), "_step");
+                    cursor = rest;
+                }
+                assert!(matches!(cursor, Comp::Return(Value::Int(0))));
+                mem::forget(erased);
+            })
+            .expect("spawn deep typed erasure test")
+            .join()
+            .expect("deep typed erasure test panicked");
     }
 }

@@ -7,8 +7,12 @@ use prism_syntax::names;
 
 impl Elab<'_> {
     pub(super) fn needs_dict(&self, name: &str) -> bool {
-        self.checked.methods.contains_key(&Sym::from(name))
-            || self.checked.constrained.contains_key(&Sym::from(name))
+        self.checked.dispatch.methods.contains_key(&Sym::from(name))
+            || self
+                .checked
+                .dispatch
+                .constrained
+                .contains_key(&Sym::from(name))
     }
 
     pub(super) fn value_global(&self, name: &str) -> Result<Comp, Error> {
@@ -42,6 +46,7 @@ impl Elab<'_> {
     pub(super) fn method_sig(&self, class: Sym, idx: usize) -> Result<(String, usize), Error> {
         let methods = &self
             .checked
+            .dispatch
             .classes
             .get(&class)
             .ok_or_else(|| Error::InternalInvariant(format!("no class info for `{class}`")))?
@@ -82,6 +87,7 @@ impl Elab<'_> {
                 let parent = self.dict_value(d, binds)?;
                 let cls = self
                     .checked
+                    .dispatch
                     .classes
                     .get(&Sym::from(subclass))
                     .ok_or_else(|| {
@@ -160,7 +166,7 @@ impl Elab<'_> {
             other => {
                 let mut binds = Vec::new();
                 let dv = self.dict_value(other, &mut binds)?;
-                let cls = self.checked.classes.get(&class).ok_or_else(|| {
+                let cls = self.checked.dispatch.classes.get(&class).ok_or_else(|| {
                     Error::InternalInvariant(format!("no class info for `{class}`"))
                 })?;
                 let nsup = cls.supers.len();
@@ -191,7 +197,8 @@ impl Elab<'_> {
         let ds = self.hir.evidence(id).map(<[Dict]>::to_vec).ok_or_else(|| {
             Error::InternalInvariant(format!("no dictionary resolution for `{name}` at {id:?}"))
         })?;
-        if let Some((class, idx)) = self.checked.methods.get(&Sym::from(name)).copied() {
+        if let Some(method) = self.checked.dispatch.methods.get(&Sym::from(name)).copied() {
+            let (class, idx) = (method.class, method.index);
             let (_, arity) = self.method_sig(class, idx)?;
             let ps: Vec<String> = (0..arity).map(names::generated_param).collect();
             let vals = ps.iter().map(|p| Value::Var(p.clone().into())).collect();
@@ -240,7 +247,8 @@ impl Elab<'_> {
                 return Ok(Comp::StrBuiltin(Builtin::SortPrim, args));
             }
         }
-        if let Some((class, idx)) = self.checked.methods.get(&Sym::from(name)).copied() {
+        if let Some(method) = self.checked.dispatch.methods.get(&Sym::from(name)).copied() {
+            let (class, idx) = (method.class, method.index);
             let (_, arity) = self.method_sig(class, idx)?;
             if vals.len() == arity {
                 return self.method_invoke(class, idx, first_dict(&ds, name)?, vals);

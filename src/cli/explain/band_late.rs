@@ -88,8 +88,9 @@ pub(super) const ENTRIES: &[Explanation] = &[
         prose: "Nesting in the input ran past the parser's depth budget. The budget is spent one \
                 level at a time and refused structurally at the current token, so deeply nested \
                 or adversarial input yields an ordinary diagnostic instead of exhausting the \
-                stack. The code belongs to the Prism-language parser written in Prism; the \
-                compiler's own parser bounds depth separately.",
+                stack. Both parsers issue it: the compiler refuses token-stream nesting past its \
+                budget before building any tree, and the Prism-language parser written in Prism \
+                spends the same budget one `descend` at a time.",
         example: "import Syntax.Cursor (cursor_of)\nimport Syntax.Parse.Support (..)\n\nfn main() \
                   : Int =\n  match descend(0, cursor_of(Nil, 0)) of\n    PFault(d) => \
                   println(d.code)\n    _ => println(\"budget left\")\n  0",

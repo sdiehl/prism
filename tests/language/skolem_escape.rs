@@ -87,7 +87,7 @@ fn no_unquantified_skolem_in_corpus_schemes() {
         let Ok(checked) = prism::check(&src) else {
             continue;
         };
-        for d in &checked.decls {
+        for d in &checked.defs.decls {
             let mut tvars = BTreeSet::new();
             d.ty.free_ty_vars(&mut tvars);
             let mut rvars = BTreeSet::new();

@@ -6,6 +6,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
+use std::{panic, thread};
 
 use prism::core::CoreOp;
 use prism::flags::EffectTier;
@@ -36,6 +37,9 @@ use prism::types::CtorInfo;
 use prism::types::Type;
 use prism_common::sym::Sym;
 use prism_syntax::ast::Grade;
+
+const MEBIBYTE: usize = 1024 * 1024;
+const ORDINARY_TEST_STACK: usize = 2 * MEBIBYTE;
 
 fn sym(name: &str) -> Sym {
     Sym::new(name)
@@ -233,10 +237,10 @@ fn assert_typed_lowering(
         panic!("input fixture is invalid: {violations:#?}");
     }
     let out = lower_effects(input, env, ctors, flags, grades).expect("typed lowering succeeds");
-    if let Err(violations) = audit_typed_core(&out.core, &out.env) {
+    if let Err(violations) = audit_typed_core(out.core(), out.env()) {
         panic!("lowered typed Core is invalid: {violations:#?}");
     }
-    prism::core::residual_effects(&out.core.clone().erase())
+    prism::core::residual_effects(&out.core().clone().erase())
         .expect("typed lowering must eliminate raw effects");
     out
 }
@@ -266,9 +270,9 @@ fn pure_program_lowers_with_reachability_pruning() {
         &VerifyEnv::new(),
         &BTreeMap::new(),
     );
-    assert_eq!(out.strategy, EffectStrategy::Pure);
+    assert_eq!(out.strategy(), EffectStrategy::Pure);
     let names: Vec<&str> = out
-        .core
+        .core()
         .functions()
         .iter()
         .map(|f| f.name().as_str())
@@ -281,8 +285,8 @@ fn pure_program_lowers_with_reachability_pruning() {
 fn entryless_program_is_left_unpruned() {
     let helper = int_fn("helper", &["x"], ret(var("x", int())));
     let out = assert_lowering(vec![helper], &VerifyEnv::new(), &BTreeMap::new());
-    assert_eq!(out.core.functions().len(), 1);
-    assert_eq!(out.strategy, EffectStrategy::Pure);
+    assert_eq!(out.core().functions().len(), 1);
+    assert_eq!(out.strategy(), EffectStrategy::Pure);
 }
 
 // An unhandled effect takes the selective free-monad path and retains the
@@ -316,7 +320,7 @@ fn effectful_program_routes_to_the_selective_free_monad() {
         0,
     );
     let out = assert_lowering(vec![main], &env, &BTreeMap::new());
-    assert_eq!(out.strategy, EffectStrategy::SelectiveFreeMonad);
+    assert_eq!(out.strategy(), EffectStrategy::SelectiveFreeMonad);
 }
 
 #[test]
@@ -418,15 +422,15 @@ fn every_effect_strategy_and_lowering_flag_boundary_is_accounted_for() {
                         let out =
                             assert_typed_lowering(typed.clone(), &env, &ctors, &flags, &grades);
                         assert_eq!(
-                            *rung.get_or_insert(out.strategy),
-                            out.strategy,
+                            *rung.get_or_insert_with(|| out.strategy()),
+                            out.strategy(),
                             "{} at {}: the auxiliary flags must not move the rung",
                             fixture.name,
                             effect_tier.label()
                         );
                         if fixture.name == "local" {
                             assert!(
-                                out.warning.is_some(),
+                                out.warning().is_some(),
                                 "quiet must not remove the structured fallback warning"
                             );
                         }
@@ -437,13 +441,13 @@ fn every_effect_strategy_and_lowering_flag_boundary_is_accounted_for() {
                             // whole-program scope declares every handler open,
                             // leaving the driver nothing to take.
                             let native_driver = native_effects
-                                && out.strategy == EffectStrategy::SelectiveFreeMonad;
+                                && out.strategy() == EffectStrategy::SelectiveFreeMonad;
                             assert_eq!(
-                                functions_use_constructor(out.core.functions(), "EResume"),
+                                functions_use_constructor(out.core().functions(), "EResume"),
                                 native_driver,
                                 "the native-effects cell must exercise the native driver"
                             );
-                            assert_eq!(out.ctors.contains_key("EResume"), native_driver);
+                            assert_eq!(out.constructors().contains_key("EResume"), native_driver);
                         }
                     }
                 }
@@ -477,7 +481,7 @@ fn direct_io_survives_selective_free_monad_reification() {
     );
     let (typed, env, ctors, grades) = compiled;
     let out = assert_typed_lowering(typed, &env, &ctors, &flags, &grades);
-    assert_eq!(out.strategy, EffectStrategy::SelectiveFreeMonad);
+    assert_eq!(out.strategy(), EffectStrategy::SelectiveFreeMonad);
 }
 
 #[test]
@@ -490,9 +494,9 @@ fn an_open_callback_row_coalesces_into_the_monadic_ambient() {
             "effect Ask\n  ask() : Int\n\nfn apply(f : (Int) -> Int ! {| e}, x : Int) = f(x)\n\nfn use(f : (Int) -> Int ! {IO}) : Int ! {Ask, IO} =\n  let answer = ask()\n  apply(f, answer)\n\nfn main() = use(\\(n) -> let _ = println(n) in n)\n",
         );
     let out = assert_typed_lowering(typed, &env, &ctors, &flags, &grades);
-    assert_eq!(out.strategy, EffectStrategy::SelectiveFreeMonad);
+    assert_eq!(out.strategy(), EffectStrategy::SelectiveFreeMonad);
     let use_fn = out
-        .core
+        .core()
         .functions()
         .iter()
         .find(|function| function.name().as_str() == "use")
@@ -540,7 +544,7 @@ fn typed_from_source(
     let program = prism::syntax::desugar::desugar(resolved).expect("fixture desugars");
     let checked = prism::types::check(&program).expect("fixture typechecks");
     let grades = checked.op_grades();
-    let ctors = checked.ctors.clone();
+    let ctors = checked.defs.ctors.clone();
     let elaboration = prism::core::elaborate_typed(&program, &checked).expect("fixture elaborates");
     let (_compat, typed, env) = elaboration.into_parts();
     (typed, env, ctors, grades)
@@ -568,10 +572,10 @@ fn assert_compiled_lowering(
     }
     let flags = DynFlags::default();
     let out = lower_effects(typed, &env, &ctors, &flags, &grades).expect("typed lowering succeeds");
-    if let Err(violations) = audit_typed_core(&out.core, &out.env) {
+    if let Err(violations) = audit_typed_core(out.core(), out.env()) {
         panic!("lowered typed Core is invalid: {violations:#?}");
     }
-    prism::core::residual_effects(&out.core.clone().erase())
+    prism::core::residual_effects(&out.core().clone().erase())
         .expect("typed lowering must eliminate raw effects");
     out
 }
@@ -588,7 +592,7 @@ fn var_block_erases_to_a_cell() {
   x
 ",
     );
-    assert_eq!(out.strategy, EffectStrategy::Pure);
+    assert_eq!(out.strategy(), EffectStrategy::Pure);
 }
 
 // Nested vars erase inside out, keeping the two cells distinct.
@@ -603,7 +607,7 @@ fn nested_var_blocks_erase_to_two_cells() {
   x + y
 ",
     );
-    assert_eq!(out.strategy, EffectStrategy::Pure);
+    assert_eq!(out.strategy(), EffectStrategy::Pure);
 }
 
 // A guard `return` with no loop: the return handler erases to `Step`
@@ -613,7 +617,7 @@ fn guard_return_erases_to_step_threading() {
     let out = assert_source_lowering(
             "fn classify(n : Int) : Int =\n  if n < 0 then\n    return 0 - 1\n  1\n\nfn main() : Int = classify(0 - 8)\n",
         );
-    assert_eq!(out.strategy, EffectStrategy::Pure);
+    assert_eq!(out.strategy(), EffectStrategy::Pure);
 }
 
 // A return inside a match arm threads through the arm.
@@ -622,7 +626,7 @@ fn return_in_match_arm_erases() {
     let out = assert_source_lowering(
             "fn describe(n : Int) : Int =\n  match n of\n    0 => return 100\n    _ => n * 2\n\nfn main() : Int = describe(0)\n",
         );
-    assert_eq!(out.strategy, EffectStrategy::Pure);
+    assert_eq!(out.strategy(), EffectStrategy::Pure);
 }
 
 // A `while` loop with a `break`: the loop erases to a generated
@@ -632,14 +636,14 @@ fn break_loop_erases_to_a_driver() {
     let out = assert_program_lowering(
             "fn count_to(n : Int) : Int =\n  var i := 0\n  while true do\n    if i >= n then\n      break\n    i := i + 1\n  i\n\nfn main() : Int = count_to(5)\n",
         );
-    assert_eq!(out.strategy, EffectStrategy::Pure);
+    assert_eq!(out.strategy(), EffectStrategy::Pure);
     assert!(
-        out.core
+        out.core()
             .functions()
             .iter()
             .any(|f| f.name().as_str().ends_with("@loopdrv")),
         "a driver is generated: {:?}",
-        out.core
+        out.core()
             .functions()
             .iter()
             .map(|f| f.name().as_str())
@@ -654,7 +658,7 @@ fn tail_resumptive_handler_lowers_by_evidence() {
     let out = assert_program_lowering(
             "effect Ask\n  ask() : Int\n\nfn reader() : Int ! {Ask} = ask() + 1\n\nfn main() : Int =\n  handle reader() with {\n    ask() resume k => k(41),\n    return x => x\n  }\n",
         );
-    assert_eq!(out.strategy, EffectStrategy::Evidence);
+    assert_eq!(out.strategy(), EffectStrategy::Evidence);
 }
 
 // The evidence signature prepass replaces `run`'s source residual row with a
@@ -674,14 +678,14 @@ fn evidence_rewrites_residual_rows_through_the_whole_body() {
         let (typed, env, ctors, grades) = typed_from_program(src);
         let evidence =
             assert_typed_lowering(typed.clone(), &env, &ctors, &DynFlags::default(), &grades);
-        assert_eq!(evidence.strategy, EffectStrategy::Evidence);
+        assert_eq!(evidence.strategy(), EffectStrategy::Evidence);
 
         let state_flags = DynFlags {
             effect_tier: EffectTier::StateFusion,
             ..DynFlags::default()
         };
         let state = assert_typed_lowering(typed, &env, &ctors, &state_flags, &grades);
-        assert_eq!(state.strategy, EffectStrategy::SelectiveFreeMonad);
+        assert_eq!(state.strategy(), EffectStrategy::SelectiveFreeMonad);
     }
 }
 
@@ -693,6 +697,18 @@ fn evidence_rewrites_residual_rows_through_the_whole_body() {
 // whole-program convention.
 #[test]
 fn declared_effectful_callbacks_hidden_in_data_route_whole() {
+    let result = thread::Builder::new()
+        .name("effect-lowering-normal-stack".into())
+        .stack_size(ORDINARY_TEST_STACK)
+        .spawn(assert_hidden_callbacks_route_whole)
+        .expect("spawning ordinary-stack lowering probe")
+        .join();
+    if let Err(payload) = result {
+        panic::resume_unwind(payload);
+    }
+}
+
+fn assert_hidden_callbacks_route_whole() {
     let src = include_str!("../cases/run/row_widen_named_effect_list.pr");
     for effect_tier in [EffectTier::Auto, EffectTier::StateFusion] {
         let (typed, env, ctors, grades) = typed_from_program(src);
@@ -701,7 +717,7 @@ fn declared_effectful_callbacks_hidden_in_data_route_whole() {
             ..DynFlags::default()
         };
         let lowered = assert_typed_lowering(typed, &env, &ctors, &flags, &grades);
-        assert_eq!(lowered.strategy, EffectStrategy::WholeProgramFreeMonad);
+        assert_eq!(lowered.strategy(), EffectStrategy::WholeProgramFreeMonad);
     }
 }
 
@@ -716,7 +732,7 @@ fn returned_stream_thunks_lower_by_evidence() {
     let out = assert_program_lowering(include_str!(
         "../../examples/fixtures/compiler/stream_fuse.pr"
     ));
-    assert_eq!(out.strategy, EffectStrategy::Evidence);
+    assert_eq!(out.strategy(), EffectStrategy::Evidence);
 }
 
 // A whole arena program through the real cascade, and the first higher-order
@@ -733,7 +749,7 @@ fn returned_stream_thunks_lower_by_evidence() {
 #[test]
 fn arena_program_lowers_exactly() {
     let out = assert_program_lowering("import Arena (..)\n\nfn build(n : Int, acc : List(Int)) : List(Int) =\n  if n == 0 then\n    acc\n  else\n    build(n - 1, Cons(n, acc))\n\nfn total(xs : List(Int)) : Int =\n  match xs of\n    Nil => 0\n    Cons(h, t) => h + total(t)\n\nfn scratch() : Int = total(build(3, Nil))\n\nfn main() : Int = with_arena(scratch)\n");
-    assert_eq!(out.strategy, EffectStrategy::Evidence);
+    assert_eq!(out.strategy(), EffectStrategy::Evidence);
 }
 
 #[test]
@@ -744,9 +760,9 @@ fn arena_program_forced_to_the_free_monad_lowers_exactly() {
     };
     let (typed, env, ctors, grades) = typed_from_program(include_str!("../../examples/arena.pr"));
     let out = assert_typed_lowering(typed, &env, &ctors, &flags, &grades);
-    assert_eq!(out.strategy, EffectStrategy::WholeProgramFreeMonad);
+    assert_eq!(out.strategy(), EffectStrategy::WholeProgramFreeMonad);
     assert!(
-        out.core
+        out.core()
             .functions()
             .iter()
             .any(|function| contains_init_at(function.body())),
@@ -794,7 +810,7 @@ fn a_program_without_an_arena_is_untouched_by_preparation() {
 fn assert_state_fusion_routes(src: &str) {
     let out = assert_program_lowering(src);
     assert_eq!(
-        out.strategy,
+        out.strategy(),
         EffectStrategy::StateFusion,
         "the fixture must exercise the State production rung"
     );
@@ -894,13 +910,13 @@ fn production_state_corpus_routes_and_eliminates_effects() {
         let flags = DynFlags::default();
         let threaded = lower_effects(typed, &env, &ctors, &flags, &grades)
             .unwrap_or_else(|e| panic!("{path}: the typed production rung fails: {e:?}"));
-        assert_eq!(threaded.strategy, EffectStrategy::StateFusion);
+        assert_eq!(threaded.strategy(), EffectStrategy::StateFusion);
         assert_eq!(
-            audit_typed_core(&threaded.core, &threaded.env),
+            audit_typed_core(threaded.core(), threaded.env()),
             Ok(()),
             "{path}: typed State output must verify"
         );
-        prism::core::residual_effects(&threaded.core.erase())
+        prism::core::residual_effects(&threaded.core().clone().erase())
             .unwrap_or_else(|error| panic!("{path}: {error}"));
     }
 }
@@ -992,17 +1008,17 @@ fn native_function_answer_region_matches_the_typed_production_route() {
         ..DynFlags::default()
     };
     let out = assert_typed_lowering(source.clone(), &env, &ctors, &flags, &grades);
-    assert_eq!(out.strategy, EffectStrategy::SelectiveFreeMonad);
+    assert_eq!(out.strategy(), EffectStrategy::SelectiveFreeMonad);
     let prepared = prepare(source, &env, &ctors, &flags, &grades).expect("typed preparation");
-    let ops = operation_ids(&prepared.fns).expect("operation ids");
-    let effects = EffectPlan::analyze(&prepared.fns);
+    let ops = operation_ids(prepared.functions()).expect("operation ids");
+    let effects = EffectPlan::analyze(prepared.functions());
     let latent = effects.latent();
-    let plan = analysis::plan(&prepared.fns, &effects, false);
+    let plan = analysis::plan(prepared.functions(), &effects, false);
     assert_eq!(plan.scope, analysis::MonadicScope::Selective);
 
     let mut fresh = Fresh::new();
     let mut lowered = monadic::lower_selective(
-        &prepared.fns,
+        prepared.functions(),
         &ops,
         &mut fresh,
         &EffRow::Empty,
@@ -1016,14 +1032,14 @@ fn native_function_answer_region_matches_the_typed_production_route() {
     .expect("native function-answer region lowers");
     lowered.push(abi::ebind_fn());
     lowered.push(abi::qapply_fn());
-    let mut lowered_env = prepared.env.clone();
+    let mut lowered_env = prepared.env().clone();
     abi::insert(&mut lowered_env);
     let typed = verify_typed_core(
         UncheckedTypedCore::<EffectLowered>::new(lowered),
         &lowered_env,
     )
     .expect("native function-answer lowering must mint effect-lowered authority");
-    assert_eq!(typed.erase(), out.core.clone().erase());
+    assert_eq!(typed.erase(), out.core().clone().erase());
 
     let off_flags = DynFlags {
         effect_tier: EffectTier::FreeMonad,
@@ -1033,15 +1049,15 @@ fn native_function_answer_region_matches_the_typed_production_route() {
     };
     let off_source = typed_from_program(src).0;
     let off_out = assert_typed_lowering(off_source, &env, &ctors, &off_flags, &grades);
-    assert_eq!(off_out.strategy, EffectStrategy::SelectiveFreeMonad);
+    assert_eq!(off_out.strategy(), EffectStrategy::SelectiveFreeMonad);
     assert_ne!(
-        out.core.erase(),
-        off_out.core.clone().erase(),
+        out.core().clone().erase(),
+        off_out.core().clone().erase(),
         "the native-effects flag must exercise distinct production lowerings"
     );
     let mut off_fresh = Fresh::new();
     let mut off_functions = monadic::lower_selective(
-        &prepared.fns,
+        prepared.functions(),
         &ops,
         &mut off_fresh,
         &EffRow::Empty,
@@ -1055,14 +1071,14 @@ fn native_function_answer_region_matches_the_typed_production_route() {
     .expect("typed non-native function-answer fallback");
     off_functions.push(abi::ebind_fn());
     off_functions.push(abi::qapply_fn());
-    let mut off_env = prepared.env;
+    let mut off_env = prepared.env().clone();
     abi::insert(&mut off_env);
     let off = verify_typed_core(
         UncheckedTypedCore::<EffectLowered>::new(off_functions),
         &off_env,
     )
     .expect("non-native fallback must mint effect-lowered authority");
-    assert_eq!(off.erase(), off_out.core.erase());
+    assert_eq!(off.erase(), off_out.core().clone().erase());
 }
 
 #[test]
@@ -1075,35 +1091,38 @@ fn whole_program_trampoline_is_deterministic_and_verifies() {
         ..DynFlags::default()
     };
     let out = assert_typed_lowering(source.clone(), &env, &ctors, &flags, &grades);
-    assert_eq!(out.strategy, EffectStrategy::WholeProgramFreeMonad);
+    assert_eq!(out.strategy(), EffectStrategy::WholeProgramFreeMonad);
     assert!(out
-        .core
+        .core()
         .functions()
         .iter()
         .any(|function| function.name().as_str() == "prism_drive"));
-    assert!(functions_use_constructor(out.core.functions(), "EBounce"));
-    assert!(out.ctors.contains_key("EBounce"));
+    assert!(functions_use_constructor(out.core().functions(), "EBounce"));
+    assert!(out.constructors().contains_key("EBounce"));
 
     let off_flags = DynFlags {
         trampoline: false,
         ..flags.clone()
     };
     let off = assert_typed_lowering(source.clone(), &env, &ctors, &off_flags, &grades);
-    assert_eq!(off.strategy, EffectStrategy::WholeProgramFreeMonad);
+    assert_eq!(off.strategy(), EffectStrategy::WholeProgramFreeMonad);
     assert!(!off
-        .core
+        .core()
         .functions()
         .iter()
         .any(|function| function.name().as_str() == "prism_drive"));
-    assert!(!functions_use_constructor(off.core.functions(), "EBounce"));
-    assert!(!off.ctors.contains_key("EBounce"));
+    assert!(!functions_use_constructor(
+        off.core().functions(),
+        "EBounce"
+    ));
+    assert!(!off.constructors().contains_key("EBounce"));
 
     let prepared = prepare(source, &env, &ctors, &flags, &grades).expect("typed preparation");
-    let ops = operation_ids(&prepared.fns).expect("operation ids");
-    let residual = residual::plan(&prepared.fns, &ops, &prepared.env)
+    let ops = operation_ids(prepared.functions()).expect("operation ids");
+    let residual = residual::plan(prepared.functions(), &ops, prepared.env())
         .expect("residual rows are declaration-owned");
     let mut fresh = Fresh::new();
-    let mut lowered = monadic::lower_whole(&prepared.fns, &ops, &mut fresh, &residual)
+    let mut lowered = monadic::lower_whole(prepared.functions(), &ops, &mut fresh, &residual)
         .expect("whole-program monadic lowering");
     let make = lowered
         .iter()
@@ -1138,14 +1157,14 @@ fn whole_program_trampoline_is_deterministic_and_verifies() {
     lowered = trampoline::trampolinize(&lowered, &mut fresh).expect("typed trampoline lowering");
     lowered.push(trampoline::prism_drive_fn());
 
-    let mut lowered_env = prepared.env;
+    let mut lowered_env = prepared.env().clone();
     abi::insert(&mut lowered_env);
     let typed = verify_typed_core(
         UncheckedTypedCore::<EffectLowered>::new(lowered),
         &lowered_env,
     )
     .expect("trampoline lowering must mint effect-lowered authority");
-    assert_eq!(typed.erase(), out.core.erase());
+    assert_eq!(typed.erase(), out.core().clone().erase());
 
     // The control asks for the free-monad rung without pinning its scope, so
     // the cascade settles on the confined one and the trampoline stays out of a
@@ -1163,17 +1182,17 @@ fn whole_program_trampoline_is_deterministic_and_verifies() {
         &selective_flags,
         &selective_grades,
     );
-    assert_eq!(selective.strategy, EffectStrategy::SelectiveFreeMonad);
+    assert_eq!(selective.strategy(), EffectStrategy::SelectiveFreeMonad);
     assert!(!selective
-        .core
+        .core()
         .functions()
         .iter()
         .any(|function| function.name().as_str() == "prism_drive"));
     assert!(!functions_use_constructor(
-        selective.core.functions(),
+        selective.core().functions(),
         "EBounce"
     ));
-    assert!(!selective.ctors.contains_key("EBounce"));
+    assert!(!selective.constructors().contains_key("EBounce"));
 }
 
 #[test]
@@ -1195,11 +1214,11 @@ fn main() =
         ..DynFlags::default()
     };
     let out = assert_typed_lowering(source, &env, &ctors, &flags, &grades);
-    assert_eq!(out.strategy, EffectStrategy::WholeProgramFreeMonad);
+    assert_eq!(out.strategy(), EffectStrategy::WholeProgramFreeMonad);
     let ambient = Sym::from(prism_syntax::names::FREE_MONAD_ROW);
     let io = EffRow::canonical([Label::bare("IO")], EffRow::Var(ambient));
     let make = out
-        .core
+        .core()
         .functions()
         .iter()
         .find(|function| function.name().as_str() == "make")
@@ -1240,7 +1259,7 @@ fn one_producer_answer_chain_sets_the_convention_for_the_whole_program() {
         .expect("the typed cascade selects a strategy");
     assert_ne!(recognized, EffectStrategy::StateFusion);
     let out = assert_typed_lowering(typed, &env, &ctors, &flags, &grades);
-    assert_eq!(out.strategy, recognized);
+    assert_eq!(out.strategy(), recognized);
 }
 
 // A gate-positive program the State rung still declines, which is the shape
@@ -1273,7 +1292,7 @@ fn a_read_whose_value_is_computed_with_declines_below_the_gate() {
         .expect("the typed cascade selects a strategy");
     assert_ne!(recognized, EffectStrategy::StateFusion);
     let out = assert_typed_lowering(typed, &env, &ctors, &flags, &grades);
-    assert_eq!(out.strategy, recognized);
+    assert_eq!(out.strategy(), recognized);
 }
 
 // Two independent chains, each folding its own effect at its own accumulator
@@ -1349,7 +1368,7 @@ fn main() : Int ! {} =
     // that cannot thread an accumulator.
     assert_ne!(recognized, EffectStrategy::StateFusion);
     let out = assert_typed_lowering(typed, &env, &ctors, &flags, &grades);
-    assert_eq!(out.strategy, recognized);
+    assert_eq!(out.strategy(), recognized);
 }
 
 // The clause classification, not the declared grade, decides multishot
@@ -1426,9 +1445,9 @@ fn local_partial_region_matches_the_pinned_program_split() {
     let (typed, env, ctors, grades) = typed_from_program(src);
     let flags = DynFlags::default();
     let prepared = prepare(typed, &env, &ctors, &flags, &grades).expect("typed preparation");
-    let effects = EffectPlan::analyze(&prepared.fns);
+    let effects = EffectPlan::analyze(prepared.functions());
     let (region, entries) =
-        analysis::local_region(&prepared.fns, &effects).expect("clean local region");
+        analysis::local_region(prepared.functions(), &effects).expect("clean local region");
     assert!(region.contains(&sym("logged")));
     assert!(region.contains(&sym("run_all")));
     assert!(!region.contains(&sym("weight")));
@@ -1468,7 +1487,7 @@ fn main() =
   stream + logged(f)
 ",
     );
-    assert_eq!(out.strategy, EffectStrategy::WholeProgramFreeMonad);
+    assert_eq!(out.strategy(), EffectStrategy::WholeProgramFreeMonad);
 }
 
 fn dynamic_application_program(value: &str, consumer: &str) -> String {
@@ -1514,21 +1533,21 @@ fn main() =
 fn local_partial_rejects_a_closure_returned_by_dynamic_application() {
     let source = dynamic_application_program("make_through(\\() -> \\() -> 7)", "invoke");
     let out = assert_program_lowering(&source);
-    assert_eq!(out.strategy, EffectStrategy::WholeProgramFreeMonad);
+    assert_eq!(out.strategy(), EffectStrategy::WholeProgramFreeMonad);
 }
 
 #[test]
 fn scalar_dynamic_application_preserves_the_local_split() {
     let source = dynamic_application_program("make_through(\\() -> 7)", "identity");
     let out = assert_program_lowering(&source);
-    assert_eq!(out.strategy, EffectStrategy::LocalPartial);
+    assert_eq!(out.strategy(), EffectStrategy::LocalPartial);
 }
 
 #[test]
 fn applying_the_returned_closure_recovers_its_scalar_result() {
     let source = dynamic_application_program("invoke(make_through(\\() -> \\() -> 7))", "identity");
     let out = assert_program_lowering(&source);
-    assert_eq!(out.strategy, EffectStrategy::LocalPartial);
+    assert_eq!(out.strategy(), EffectStrategy::LocalPartial);
 }
 
 #[test]
@@ -1564,14 +1583,14 @@ fn answered() =
 fn main() = logged(answered())
 ";
     let out = assert_program_lowering(source);
-    assert_eq!(out.strategy, EffectStrategy::WholeProgramFreeMonad);
+    assert_eq!(out.strategy(), EffectStrategy::WholeProgramFreeMonad);
 }
 
 #[test]
 fn state_backed_local_partial_routes_and_is_exact() {
     let src = include_str!("../cases/run/local_mono_combined.pr");
     let out = assert_program_lowering(src);
-    assert_eq!(out.strategy, EffectStrategy::LocalPartial);
+    assert_eq!(out.strategy(), EffectStrategy::LocalPartial);
 }
 
 #[test]
@@ -1604,8 +1623,8 @@ fn main() = println(logged() + answered())
 ";
     let (typed, env, ctors, grades) = typed_from_program(src);
     let out = assert_typed_lowering(typed, &env, &ctors, &DynFlags::default(), &grades);
-    assert_eq!(out.strategy, EffectStrategy::LocalPartial);
-    assert_eq!(audit_typed_core(&out.core, &out.env), Ok(()));
+    assert_eq!(out.strategy(), EffectStrategy::LocalPartial);
+    assert_eq!(audit_typed_core(out.core(), out.env()), Ok(()));
 }
 
 #[test]
@@ -1724,17 +1743,17 @@ fn local_partial_composition(
     let (typed, env, ctors, grades) = typed_from_program(src);
     let flags = DynFlags::default();
     let prepared = prepare(typed, &env, &ctors, &flags, &grades).expect("typed preparation");
-    let effects = EffectPlan::analyze(&prepared.fns);
+    let effects = EffectPlan::analyze(prepared.functions());
     let (latent, flow) = (effects.latent(), effects.flow());
     let (region, entries) =
-        analysis::local_region(&prepared.fns, &effects).expect("clean local region");
+        analysis::local_region(prepared.functions(), &effects).expect("clean local region");
     let rest: Vec<TypedCoreFn> = prepared
-        .fns
+        .functions()
         .iter()
         .filter(|function| !region.contains(&function.name()))
         .cloned()
         .collect();
-    let ops = operation_ids(&prepared.fns).expect("operation ids");
+    let ops = operation_ids(prepared.functions()).expect("operation ids");
     let mut fresh = Fresh::new();
     assert!(
         evidence::try_lower_ev(
@@ -1742,14 +1761,14 @@ fn local_partial_composition(
             latent,
             flow,
             &ops,
-            &prepared.env,
+            prepared.env(),
             &DriftLog::new(true),
             &mut fresh,
         )
         .is_none(),
         "the fused rest takes the State rung"
     );
-    let state_analysis = state::StateAnalysis::new(&ops, latent, flow, &prepared.env);
+    let state_analysis = state::StateAnalysis::new(&ops, latent, flow, prepared.env());
     let state_plan = state::fold_uniform(&rest, &state_analysis).expect("state rest plan");
     assert!(state::threads(&state_plan, &rest, &state_analysis));
     let lowered = state::thread_program(
@@ -1761,10 +1780,10 @@ fn local_partial_composition(
     )
     .expect("fused rest threads");
     let artifacts = assemble_local_partial(
-        &prepared.fns,
+        prepared.functions(),
         lowered,
-        &prepared.env,
-        &prepared.ctors,
+        prepared.env(),
+        prepared.constructors(),
         &LoweringAnalysis {
             ops: &ops,
             plan: &effects,
@@ -1794,52 +1813,52 @@ fn typed_local_decline_digests(point: LocalDeclinePoint) -> (String, String) {
         lower_effects(typed, &env, &ctors, &flags, &grades)
             .expect("the typed late decline must fall through")
     });
-    assert_eq!(probed.strategy, EffectStrategy::WholeProgramFreeMonad);
+    assert_eq!(probed.strategy(), EffectStrategy::WholeProgramFreeMonad);
 
     let (typed, env, ctors, grades) = typed_from_program(src);
     let prepared =
         prepare(typed, &env, &ctors, &flags, &grades).expect("typed preparation succeeds");
-    let ops = operation_ids(&prepared.fns).expect("operation ids");
-    let effects = EffectPlan::analyze(&prepared.fns);
+    let ops = operation_ids(prepared.functions()).expect("operation ids");
+    let effects = EffectPlan::analyze(prepared.functions());
     let analysis = LoweringAnalysis {
         ops: &ops,
         plan: &effects,
     };
     let mut fresh = Fresh::new();
     let Decision::Lowered(clean) = monadic_fallback(
-        &prepared.fns,
-        &prepared.env,
-        &prepared.ctors,
+        prepared.functions(),
+        prepared.env(),
+        prepared.constructors(),
         &flags,
         &analysis,
         &mut fresh,
     )
     .expect("clean typed fallback lowers");
     let clean = *clean;
-    assert_eq!(clean.strategy, EffectStrategy::WholeProgramFreeMonad);
-    assert_eq!(probed.ctors, clean.ctors);
-    assert_eq!(probed.warning, clean.warning);
+    assert_eq!(clean.strategy(), EffectStrategy::WholeProgramFreeMonad);
+    assert_eq!(probed.constructors(), clean.constructors());
+    assert_eq!(probed.warning(), clean.warning());
 
     for lowering in [&probed, &clean] {
-        assert_eq!(audit_typed_core(&lowering.core, &lowering.env), Ok(()));
-        prism::core::residual_effects(&lowering.core.clone().erase())
+        assert_eq!(audit_typed_core(lowering.core(), lowering.env()), Ok(()));
+        prism::core::residual_effects(&lowering.core().clone().erase())
             .expect("typed fallback leaves no raw effects");
         assert!(lowering
-            .core
+            .core()
             .functions()
             .iter()
             .any(|function| function.name().as_str() == "prism_drive"));
         assert!(functions_use_constructor(
-            lowering.core.functions(),
+            lowering.core().functions(),
             "EBounce"
         ));
-        assert!(lowering.ctors.contains_key("EBounce"));
+        assert!(lowering.constructors().contains_key("EBounce"));
     }
 
-    let probed = blake3::hash(prism::core::pp_core(&probed.core.erase()).as_bytes())
+    let probed = blake3::hash(prism::core::pp_core(&probed.core().clone().erase()).as_bytes())
         .to_hex()
         .to_string();
-    let clean = blake3::hash(prism::core::pp_core(&clean.core.erase()).as_bytes())
+    let clean = blake3::hash(prism::core::pp_core(&clean.core().clone().erase()).as_bytes())
         .to_hex()
         .to_string();
     assert_ne!(

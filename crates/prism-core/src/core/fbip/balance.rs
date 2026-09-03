@@ -1,12 +1,24 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, mem};
 
 use prism_common::sym::Sym;
 
-use super::super::cbpv::{Comp, Core, Value};
-use super::super::effect_check::{residual_effect_node, HANDLE_NODE};
-use super::super::fv::{comp as freev, pat_vars};
+use crate::core::cbpv::{Comp, Core, CorePat, Value};
+use crate::core::effect_check::{residual_effect_node, HANDLE_NODE};
+use crate::core::fv::{comp as freev, pat_vars};
+
 use super::imbalance::{Imbalance, TokenFault};
 use super::{borrow_mask, borrowed_at, borrowed_call_vars, count_val, Set, Sigs};
+
+type Env = BTreeMap<Sym, i64>;
+
+struct CaseState<'a> {
+    arms: &'a [(CorePat, Comp)],
+    index: usize,
+    loaned_scrutinee: bool,
+    base: Env,
+    merged: Option<Env>,
+    outer_external: Set,
+}
 
 // Verify inserted RC operations with a linear token simulation. Counts must
 // remain nonnegative, reach zero at scope exit, and agree across branches.
@@ -15,7 +27,7 @@ use super::{borrow_mask, borrowed_at, borrowed_call_vars, count_val, Set, Sigs};
 /// was found in.
 pub fn balanced(core: &Core, sigs: &Sigs) -> Result<(), Imbalance> {
     for f in &core.fns {
-        // `sim` does not enter handler clauses, so reject unlowered Core.
+        // Token simulation is defined only for lowered Core.
         if let Some(node) = residual_effect_node(&f.body) {
             return Err(Imbalance::in_function(
                 TokenFault::UnloweredEffect { node },
@@ -23,7 +35,7 @@ pub fn balanced(core: &Core, sigs: &Sigs) -> Result<(), Imbalance> {
             ));
         }
         let mask = sigs.get(&f.name).map(Vec::as_slice);
-        let mut env: BTreeMap<Sym, i64> = f
+        let mut env: Env = f
             .params
             .iter()
             .enumerate()
@@ -36,7 +48,7 @@ pub fn balanced(core: &Core, sigs: &Sigs) -> Result<(), Imbalance> {
             .filter(|(index, _)| borrowed_at(mask, *index))
             .map(|(_, param)| *param)
             .collect();
-        sim(&f.body, &mut env, sigs, &external)
+        simulate(&f.body, &mut env, sigs, &external)
             .map_err(|fault| Imbalance::in_function(fault, f.name))?;
         for (v, n) in &env {
             if v.as_str() != "_" && *n != 0 {
@@ -53,57 +65,7 @@ pub fn balanced(core: &Core, sigs: &Sigs) -> Result<(), Imbalance> {
     Ok(())
 }
 
-fn use_val(v: &Value, env: &mut BTreeMap<Sym, i64>, sigs: &Sigs) -> Result<(), TokenFault> {
-    let mut counts = BTreeMap::new();
-    count_val(v, &mut counts);
-    for (x, k) in counts {
-        consume(x, i64::try_from(k).unwrap_or(i64::MAX), env)?;
-    }
-    verify_thunks(v, sigs)
-}
-
-// Closure parameters start owned; captures start borrowed.
-fn sim_lambda(params: &Set, body: &Comp, sigs: &Sigs) -> Result<(), TokenFault> {
-    let free = freev(body);
-    let external: Set = free.difference(params).copied().collect();
-    let mut env: BTreeMap<Sym, i64> = free.into_iter().map(|x| (x, 0)).collect();
-    for p in params {
-        env.insert(*p, 1);
-    }
-    sim(body, &mut env, sigs, &external)?;
-    for (x, n) in &env {
-        if x.as_str() != "_" && *n != 0 {
-            return Err(TokenFault::ThunkCapture {
-                var: *x,
-                tokens: *n,
-            });
-        }
-    }
-    Ok(())
-}
-
-// Closure bodies hide inside thunk values, so the top-level per-function walk
-// never reaches them. Re-run the simulation on each thunk body: lambda params
-// start owned (one token), captures start borrowed (zero, so a use without a
-// preceding dup drives below zero and fails). Catches an under-dup'd capture.
-fn verify_thunks(v: &Value, sigs: &Sigs) -> Result<(), TokenFault> {
-    match v {
-        Value::Thunk(c) => {
-            let (params, body): (Set, &Comp) = match &**c {
-                Comp::Lam(ps, b) => (ps.iter().copied().collect(), b),
-                other => (Set::new(), other),
-            };
-            sim_lambda(&params, body, sigs)
-        }
-        Value::Ctor(_, _, fs) | Value::Tuple(fs) | Value::UnboxedTuple(fs) => {
-            fs.iter().try_for_each(|f| verify_thunks(f, sigs))
-        }
-        Value::UnboxedRecord(fs) => fs.iter().try_for_each(|(_, f)| verify_thunks(f, sigs)),
-        _ => Ok(()),
-    }
-}
-
-fn consume(x: Sym, k: i64, env: &mut BTreeMap<Sym, i64>) -> Result<(), TokenFault> {
+fn consume(x: Sym, k: i64, env: &mut Env) -> Result<(), TokenFault> {
     if x.as_str() == "_" {
         return Ok(());
     }
@@ -115,186 +77,366 @@ fn consume(x: Sym, k: i64, env: &mut BTreeMap<Sym, i64>) -> Result<(), TokenFaul
     Ok(())
 }
 
-fn sim(
-    c: &Comp,
-    env: &mut BTreeMap<Sym, i64>,
-    sigs: &Sigs,
-    external: &Set,
-) -> Result<(), TokenFault> {
-    match c {
-        Comp::Dup(Value::Var(x)) => {
-            *env.entry(*x).or_insert(0) += 1;
-            Ok(())
+enum Frame<'a> {
+    Comp(&'a Comp),
+    UseValue(&'a Value),
+    VerifyValue(&'a Value),
+    BindRight {
+        binder: Sym,
+        body: &'a Comp,
+        outer_external: Set,
+    },
+    RestoreExternal(Set),
+    BranchElse {
+        alternative: &'a Comp,
+        base: Env,
+    },
+    BranchMerge {
+        left: Env,
+        base: Env,
+    },
+    FinishCaseArm {
+        state: CaseState<'a>,
+        pattern_vars: Set,
+    },
+    WithReuseBody {
+        token: Sym,
+        body: &'a Comp,
+        outer_external: Set,
+    },
+    FinishLambda {
+        parent_env: Env,
+        parent_external: Set,
+    },
+}
+
+struct Simulator<'a> {
+    sigs: &'a Sigs,
+    env: Env,
+    external: Set,
+    frames: Vec<Frame<'a>>,
+}
+
+impl<'a> Simulator<'a> {
+    fn run(&mut self, root: &'a Comp) -> Result<(), TokenFault> {
+        self.frames.push(Frame::Comp(root));
+        while let Some(frame) = self.frames.pop() {
+            self.step(frame)?;
         }
-        Comp::Drop(Value::Var(x)) => consume(*x, 1, env),
-        Comp::Bind(m, x, n) => {
-            // A bind whose right side merely renames a loaned reference extends
-            // the loan instead of spending a token: the binder reads the same
-            // cell the loan keeps live, so it starts with no token of its own
-            // and joins the loaned set for the rest of the chain. The inserter
-            // applies the identical syntactic rule, so a loaned rename never
-            // carries a retain for this simulation to spend.
-            if let Comp::Return(Value::Var(v)) = &**m {
-                if external.contains(v) && x.as_str() != "_" {
-                    env.insert(*x, 0);
-                    let mut nested_external = external.clone();
-                    nested_external.insert(*x);
-                    return sim(n, env, sigs, &nested_external);
-                }
-            }
-            sim(m, env, sigs, external)?;
-            if x.as_str() != "_" {
-                env.insert(*x, 1);
-            }
-            let mut nested_external = external.clone();
-            nested_external.remove(x);
-            sim(n, env, sigs, &nested_external)
-        }
-        Comp::If(_, t, e) => {
-            let mut et = env.clone();
-            sim(t, &mut et, sigs, external)?;
-            let mut ee = env.clone();
-            sim(e, &mut ee, sigs, external)?;
-            merge(&et, &ee, env)
-        }
-        Comp::Case(scrut, arms) => {
-            // Matching on a loaned cell reads it without spending a token: the
-            // cell drops nothing in the arms, and the pattern binders are loans
-            // on its fields (kept live by the same owner that keeps the parent
-            // live), so they join the loaned set instead of shadowing it.
-            let loaned_scrutinee = matches!(scrut, Value::Var(v) if external.contains(v));
-            let mut merged: Option<BTreeMap<Sym, i64>> = None;
-            for (p, body) in arms {
-                let mut ea = env.clone();
-                let mut pv = Set::new();
-                pat_vars(p, &mut pv);
-                for v in &pv {
-                    ea.insert(*v, 0);
-                }
-                let mut arm_external = external.clone();
-                for var in &pv {
-                    if loaned_scrutinee {
-                        arm_external.insert(*var);
-                    } else {
-                        arm_external.remove(var);
-                    }
-                }
-                sim(body, &mut ea, sigs, &arm_external)?;
-                for v in &pv {
-                    if ea.get(v).copied().unwrap_or(0) != 0 {
-                        return Err(TokenFault::ArmLeak { field: *v });
-                    }
-                    ea.remove(v);
-                }
-                merged = Some(match merged {
-                    None => ea,
-                    Some(prev) => {
-                        let mut out = env.clone();
-                        merge(&prev, &ea, &mut out)?;
-                        out
-                    }
-                });
-            }
-            if let Some(m) = merged {
-                *env = m;
-            }
-            Ok(())
-        }
-        Comp::Return(v)
-        | Comp::Force(v)
-        | Comp::Error(v)
-        | Comp::FloatBuiltin(_, v)
-        | Comp::Neg(_, v)
-        | Comp::UnboxedProject(v, _)
-        | Comp::RefNew(v)
-        | Comp::RefGet(v) => use_val(v, env, sigs),
-        Comp::RefSet(c, v) => {
-            use_val(c, env, sigs)?;
-            use_val(v, env, sigs)
-        }
-        // Free the dropped cell, then bind its token (one credit) over the body;
-        // a `Reuse` inside the body spends it, so the body brings the token back
-        // to zero on every path (enforced by the branch-merge and end-of-scope
-        // checks), exactly as the threaded `bind (reuse_token ..)` form did.
-        Comp::WithReuse { token, freed, body } => {
-            use_val(freed, env, sigs)?;
-            env.insert(*token, 1);
-            let mut body_external = external.clone();
-            body_external.remove(token);
-            sim(body, env, sigs, &body_external)
-        }
-        Comp::App(f, args) => {
-            for x in freev(f) {
-                consume(x, 1, env)?;
-            }
-            for a in args {
-                use_val(a, env, sigs)?;
-            }
-            Ok(())
-        }
-        Comp::Prim(_, a, b) => {
-            use_val(a, env, sigs)?;
-            use_val(b, env, sigs)
-        }
-        Comp::Call(g, args) => {
-            let mask = borrow_mask(*g, sigs);
-            let borrowed = borrowed_call_vars(*g, args, sigs)?;
-            let mut consumed = BTreeMap::new();
-            for (index, arg) in args.iter().enumerate() {
-                if !borrowed_at(mask, index) {
-                    count_val(arg, &mut consumed);
-                }
-            }
-            for var in borrowed {
-                let live = env.get(&var).copied().unwrap_or(0);
-                let spent =
-                    i64::try_from(consumed.get(&var).copied().unwrap_or(0)).unwrap_or(i64::MAX);
-                if !external.contains(&var) && live - spent < 1 {
-                    return Err(TokenFault::BorrowNotLive { var, callee: *g });
-                }
-            }
-            for (i, a) in args.iter().enumerate() {
-                if !borrowed_at(mask, i) {
-                    use_val(a, env, sigs)?;
-                }
-            }
-            Ok(())
-        }
-        Comp::Do(_, args) | Comp::StrBuiltin(_, args) | Comp::Io(_, args) => {
-            for a in args {
-                use_val(a, env, sigs)?;
-            }
-            Ok(())
-        }
-        Comp::Reuse(tok, v) => {
-            consume(*tok, 1, env)?;
-            use_val(v, env, sigs)
-        }
-        // Arena node: this check runs on lowered Core, where arena placement
-        // has already happened, so the node is reachable; both the cell and
-        // the constructed value are consumed.
-        Comp::InitAt(cell, v) => {
-            use_val(cell, env, sigs)?;
-            use_val(v, env, sigs)
-        }
-        Comp::Mask(_, b) => sim(b, env, sigs, external),
-        // A bare lambda computation moves no tokens in the enclosing scope
-        // (its captures are loans, unlike a thunk's, which `count_val`
-        // charges), but its body must balance like any closure body. The
-        // thunk walk covers only the outermost lambda under a `Thunk`; this
-        // arm covers a curried inner lambda and a bare top-level one, which
-        // previously went unsimulated entirely.
-        Comp::Lam(ps, b) => sim_lambda(&ps.iter().copied().collect(), b, sigs),
-        // Dup/Drop of a non-variable value: the counting arms above cover the
-        // variable forms, and the RC inserter only ever emits those, so
-        // nothing is counted here.
-        Comp::Dup(_) | Comp::Drop(_) => Ok(()),
-        // A handler's clauses would go unsimulated, so an unlowered tree is
-        // refused rather than certified. The per-function guard in `balanced`
-        // rejects it first; this arm keeps the refusal even for a bare
-        // simulation entered without that guard.
-        Comp::Handle { .. } => Err(TokenFault::UnloweredEffect { node: HANDLE_NODE }),
+        Ok(())
     }
+
+    fn step(&mut self, frame: Frame<'a>) -> Result<(), TokenFault> {
+        match frame {
+            Frame::Comp(comp) => self.comp(comp),
+            Frame::UseValue(value) => self.use_value(value),
+            Frame::VerifyValue(value) => {
+                self.verify_value(value);
+                Ok(())
+            }
+            Frame::BindRight {
+                binder,
+                body,
+                outer_external,
+            } => {
+                if binder.as_str() != "_" {
+                    self.env.insert(binder, 1);
+                }
+                self.external.clone_from(&outer_external);
+                self.external.remove(&binder);
+                self.frames.push(Frame::RestoreExternal(outer_external));
+                self.frames.push(Frame::Comp(body));
+                Ok(())
+            }
+            Frame::RestoreExternal(external) => {
+                self.external = external;
+                Ok(())
+            }
+            Frame::BranchElse { alternative, base } => {
+                let left = mem::replace(&mut self.env, base.clone());
+                self.frames.push(Frame::BranchMerge { left, base });
+                self.frames.push(Frame::Comp(alternative));
+                Ok(())
+            }
+            Frame::BranchMerge { left, mut base } => {
+                merge(&left, &self.env, &mut base)?;
+                self.env = base;
+                Ok(())
+            }
+            Frame::FinishCaseArm {
+                state,
+                pattern_vars,
+            } => self.finish_case_arm(state, pattern_vars),
+            Frame::WithReuseBody {
+                token,
+                body,
+                outer_external,
+            } => {
+                self.env.insert(token, 1);
+                self.external.clone_from(&outer_external);
+                self.external.remove(&token);
+                self.frames.push(Frame::RestoreExternal(outer_external));
+                self.frames.push(Frame::Comp(body));
+                Ok(())
+            }
+            Frame::FinishLambda {
+                parent_env,
+                parent_external,
+            } => {
+                for (var, tokens) in &self.env {
+                    if var.as_str() != "_" && *tokens != 0 {
+                        return Err(TokenFault::ThunkCapture {
+                            var: *var,
+                            tokens: *tokens,
+                        });
+                    }
+                }
+                self.env = parent_env;
+                self.external = parent_external;
+                Ok(())
+            }
+        }
+    }
+
+    fn comp(&mut self, comp: &'a Comp) -> Result<(), TokenFault> {
+        match comp {
+            Comp::Dup(Value::Var(var)) => {
+                *self.env.entry(*var).or_insert(0) += 1;
+            }
+            Comp::Drop(Value::Var(var)) => consume(*var, 1, &mut self.env)?,
+            Comp::Bind(bound, binder, body) => {
+                // Renaming a loan extends it without spending or minting a token.
+                if let Comp::Return(Value::Var(var)) = &**bound {
+                    if self.external.contains(var) && binder.as_str() != "_" {
+                        self.env.insert(*binder, 0);
+                        let outer_external = self.external.clone();
+                        self.external.insert(*binder);
+                        self.frames.push(Frame::RestoreExternal(outer_external));
+                        self.frames.push(Frame::Comp(body));
+                        return Ok(());
+                    }
+                }
+                self.frames.push(Frame::BindRight {
+                    binder: *binder,
+                    body,
+                    outer_external: self.external.clone(),
+                });
+                self.frames.push(Frame::Comp(bound));
+            }
+            Comp::If(_, consequent, alternative) => {
+                self.frames.push(Frame::BranchElse {
+                    alternative,
+                    base: self.env.clone(),
+                });
+                self.frames.push(Frame::Comp(consequent));
+            }
+            Comp::Case(scrutinee, arms) => {
+                if !arms.is_empty() {
+                    // Fields borrowed from a loaned scrutinee remain loans.
+                    self.begin_case_arm(CaseState {
+                        arms,
+                        index: 0,
+                        loaned_scrutinee: matches!(
+                            scrutinee,
+                            Value::Var(var) if self.external.contains(var)
+                        ),
+                        base: self.env.clone(),
+                        merged: None,
+                        outer_external: self.external.clone(),
+                    });
+                }
+            }
+            Comp::Return(value)
+            | Comp::Force(value)
+            | Comp::Error(value)
+            | Comp::FloatBuiltin(_, value)
+            | Comp::Neg(_, value)
+            | Comp::UnboxedProject(value, _)
+            | Comp::RefNew(value)
+            | Comp::RefGet(value) => self.frames.push(Frame::UseValue(value)),
+            Comp::RefSet(cell, value) | Comp::InitAt(cell, value) => {
+                self.frames.push(Frame::UseValue(value));
+                self.frames.push(Frame::UseValue(cell));
+            }
+            Comp::WithReuse { token, freed, body } => {
+                self.frames.push(Frame::WithReuseBody {
+                    token: *token,
+                    body,
+                    outer_external: self.external.clone(),
+                });
+                self.frames.push(Frame::UseValue(freed));
+            }
+            Comp::App(function, args) => {
+                for var in freev(function) {
+                    consume(var, 1, &mut self.env)?;
+                }
+                self.push_values(args);
+            }
+            Comp::Prim(_, left, right) => {
+                self.frames.push(Frame::UseValue(right));
+                self.frames.push(Frame::UseValue(left));
+            }
+            Comp::Call(callee, args) => self.call(*callee, args)?,
+            Comp::Do(_, args) | Comp::StrBuiltin(_, args) | Comp::Io(_, args) => {
+                self.push_values(args);
+            }
+            Comp::Reuse(token, value) => {
+                consume(*token, 1, &mut self.env)?;
+                self.frames.push(Frame::UseValue(value));
+            }
+            Comp::Mask(_, body) => self.frames.push(Frame::Comp(body)),
+            // Lambda bodies run in an isolated token environment. Captures are
+            // loans, while parameters start with one owned token.
+            Comp::Lam(params, body) => self.enter_lambda(params, body),
+            // The RC inserter emits Dup and Drop only for variables.
+            Comp::Dup(_) | Comp::Drop(_) => {}
+            Comp::Handle { .. } => {
+                return Err(TokenFault::UnloweredEffect { node: HANDLE_NODE });
+            }
+        }
+        Ok(())
+    }
+
+    fn use_value(&mut self, value: &'a Value) -> Result<(), TokenFault> {
+        let mut counts = BTreeMap::new();
+        count_val(value, &mut counts);
+        for (var, count) in counts {
+            consume(var, i64::try_from(count).unwrap_or(i64::MAX), &mut self.env)?;
+        }
+        self.frames.push(Frame::VerifyValue(value));
+        Ok(())
+    }
+
+    fn verify_value(&mut self, value: &'a Value) {
+        match value {
+            Value::Thunk(comp) => match &**comp {
+                Comp::Lam(params, body) => self.enter_lambda(params, body),
+                body => self.enter_lambda(&[], body),
+            },
+            Value::Ctor(_, _, fields) | Value::Tuple(fields) | Value::UnboxedTuple(fields) => {
+                for field in fields.iter().rev() {
+                    self.frames.push(Frame::VerifyValue(field));
+                }
+            }
+            Value::UnboxedRecord(fields) => {
+                for (_, field) in fields.iter().rev() {
+                    self.frames.push(Frame::VerifyValue(field));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn enter_lambda(&mut self, params: &[Sym], body: &'a Comp) {
+        let params: Set = params.iter().copied().collect();
+        let free = freev(body);
+        let external = free.difference(&params).copied().collect();
+        let mut env: Env = free.into_iter().map(|var| (var, 0)).collect();
+        for param in params {
+            env.insert(param, 1);
+        }
+        let parent_env = mem::replace(&mut self.env, env);
+        let parent_external = mem::replace(&mut self.external, external);
+        self.frames.push(Frame::FinishLambda {
+            parent_env,
+            parent_external,
+        });
+        self.frames.push(Frame::Comp(body));
+    }
+
+    fn call(&mut self, callee: Sym, args: &'a [Value]) -> Result<(), TokenFault> {
+        let mask = borrow_mask(callee, self.sigs);
+        let borrowed = borrowed_call_vars(callee, args, self.sigs)?;
+        let mut consumed = BTreeMap::new();
+        for (index, arg) in args.iter().enumerate() {
+            if !borrowed_at(mask, index) {
+                count_val(arg, &mut consumed);
+            }
+        }
+        for var in borrowed {
+            let live = self.env.get(&var).copied().unwrap_or(0);
+            let spent = i64::try_from(consumed.get(&var).copied().unwrap_or(0)).unwrap_or(i64::MAX);
+            if !self.external.contains(&var) && live - spent < 1 {
+                return Err(TokenFault::BorrowNotLive { var, callee });
+            }
+        }
+        for (index, arg) in args.iter().enumerate().rev() {
+            if !borrowed_at(mask, index) {
+                self.frames.push(Frame::UseValue(arg));
+            }
+        }
+        Ok(())
+    }
+
+    fn push_values(&mut self, values: &'a [Value]) {
+        for value in values.iter().rev() {
+            self.frames.push(Frame::UseValue(value));
+        }
+    }
+
+    fn begin_case_arm(&mut self, state: CaseState<'a>) {
+        let (pattern, body) = &state.arms[state.index];
+        let mut pattern_vars = Set::new();
+        pat_vars(pattern, &mut pattern_vars);
+        self.env = state.base.clone();
+        for var in &pattern_vars {
+            self.env.insert(*var, 0);
+        }
+        self.external.clone_from(&state.outer_external);
+        for var in &pattern_vars {
+            if state.loaned_scrutinee {
+                self.external.insert(*var);
+            } else {
+                self.external.remove(var);
+            }
+        }
+        self.frames.push(Frame::FinishCaseArm {
+            state,
+            pattern_vars,
+        });
+        self.frames.push(Frame::Comp(body));
+    }
+
+    fn finish_case_arm(
+        &mut self,
+        mut state: CaseState<'a>,
+        pattern_vars: Set,
+    ) -> Result<(), TokenFault> {
+        for var in pattern_vars {
+            if self.env.get(&var).copied().unwrap_or(0) != 0 {
+                return Err(TokenFault::ArmLeak { field: var });
+            }
+            self.env.remove(&var);
+        }
+        self.external.clone_from(&state.outer_external);
+        state.merged = Some(match state.merged {
+            None => self.env.clone(),
+            Some(previous) => {
+                let mut out = state.base.clone();
+                merge(&previous, &self.env, &mut out)?;
+                out
+            }
+        });
+        state.index += 1;
+        if state.index < state.arms.len() {
+            self.begin_case_arm(state);
+        } else {
+            self.env = state.merged.expect("a completed case has an arm");
+        }
+        Ok(())
+    }
+}
+
+fn simulate(root: &Comp, env: &mut Env, sigs: &Sigs, external: &Set) -> Result<(), TokenFault> {
+    let mut simulator = Simulator {
+        sigs,
+        env: env.clone(),
+        external: external.clone(),
+        frames: Vec::new(),
+    };
+    simulator.run(root)?;
+    *env = simulator.env;
+    Ok(())
 }
 
 fn merge(
@@ -322,10 +464,48 @@ fn merge(
 
 #[cfg(test)]
 mod tests {
-    use std::iter;
+    use std::{iter, mem, thread};
 
     use super::*;
     use crate::core::cbpv::{CheckedHandler, CoreFn};
+
+    const DEEP_BALANCE_DEPTH: usize = 20_000;
+    const ORDINARY_TEST_STACK: usize = 2 * 1024 * 1024;
+
+    #[test]
+    fn balanced_handles_deep_computations_and_thunks_on_an_ordinary_stack() {
+        thread::Builder::new()
+            .name("deep-balance".into())
+            .stack_size(ORDINARY_TEST_STACK)
+            .spawn(|| {
+                let mut value = Value::Thunk(Box::new(Comp::Return(Value::Unit)));
+                for _ in 0..DEEP_BALANCE_DEPTH {
+                    value = Value::Tuple(vec![value]);
+                }
+                let mut body = Comp::Return(value);
+                for _ in 0..DEEP_BALANCE_DEPTH {
+                    body = Comp::Bind(
+                        Box::new(Comp::Return(Value::Int(0))),
+                        Sym::new("_"),
+                        Box::new(body),
+                    );
+                }
+                let core = Core {
+                    fns: vec![CoreFn {
+                        name: Sym::new("deep_balance"),
+                        params: Vec::new(),
+                        body,
+                        dict_arity: 0,
+                    }],
+                };
+
+                assert_eq!(balanced(&core, &Sigs::new()), Ok(()));
+                mem::forget(core);
+            })
+            .expect("spawn deep balance test")
+            .join()
+            .expect("deep balance test panicked");
+    }
 
     #[test]
     fn borrowed_immediate_needs_no_retained_token() {

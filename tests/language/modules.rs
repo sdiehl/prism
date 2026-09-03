@@ -255,9 +255,10 @@ fn module_programs_reject_with_expected_surface(
 fn warnings(src: &str) -> Vec<String> {
     check_at(&with_prelude(src), base())
         .expect("should type check")
+        .reports
         .warnings
-        .into_iter()
-        .map(|w| w.msg)
+        .iter()
+        .map(|warning| warning.msg.clone())
         .collect()
 }
 

@@ -674,18 +674,14 @@ pub fn reachable_fns(core: &Core) -> BTreeSet<Sym> {
 pub fn calls_in(c: &Comp, out: &mut Vec<Sym>) {
     struct Calls<'a>(&'a mut Vec<Sym>);
     impl Visit for Calls<'_> {
-        fn visit_comp(&mut self, c: &Comp) {
-            if let Comp::Call(name, args) = c {
+        fn comp(&mut self, c: &Comp) -> bool {
+            if let Comp::Call(name, _) = c {
                 self.0.push(*name);
-                for a in args {
-                    self.visit_value(a);
-                }
-            } else {
-                self.descend_comp(c);
             }
+            true
         }
     }
-    Visit::visit_comp(&mut Calls(out), c);
+    Calls(out).walk_comp(c);
 }
 
 #[cfg(test)]

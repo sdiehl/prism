@@ -12,7 +12,10 @@ use crate::types::sig::parse_checked_signature;
 use crate::types::ty::{EffRow, Kind, Label};
 use crate::types::{CtorInfo, EffOpInfo, Type};
 
-use super::super::verify::representation_preserving_stable;
+use super::super::verify::{
+    clone_type, rename_row_variable_in_row, rename_row_variable_in_type, rename_type_variable,
+    rename_type_variable_in_row, representation_preserving_stable,
+};
 use super::super::violation::{BuildError, SchemeError};
 use super::super::{
     scheme_to_fn_sig, CompSig, ConstructorSig, CoreFnSig, CoreQuantifier, CoreType, LoweredType,
@@ -216,35 +219,80 @@ fn peel_quantifiers(mut ty: &Type) -> (Vec<CoreQuantifier>, &Type) {
 }
 
 pub(crate) fn lower_value_type(ty: &Type) -> CoreType {
-    let (quantifiers, body) = peel_quantifiers(ty);
-    match body {
-        Type::Fun(params, effects, result) => {
-            let (quantifiers, params, effects, result) =
-                hygienic_nested_fn(quantifiers, params, effects, result);
-            let signature = CoreFnSig::new(
-                quantifiers,
-                params.iter().map(lower_value_type).collect(),
-                CompSig::new(lower_value_type(&result), effects),
-            );
-            CoreType::Thunk(Box::new(CompSig::new(
-                CoreType::Function(Box::new(signature)),
-                EffRow::Empty,
-            )))
-        }
-        Type::Coeffect(inner, _) => lower_value_type(inner),
-        _ => CoreType::Source(ty.clone()),
+    enum Task {
+        Type(Type),
+        Function(Vec<CoreQuantifier>, usize, EffRow),
     }
+
+    let mut work = vec![Task::Type(clone_type(ty))];
+    let mut output = Vec::new();
+    while let Some(task) = work.pop() {
+        match task {
+            Task::Type(mut ty) => {
+                let mut quantifiers = Vec::new();
+                let body = loop {
+                    match ty {
+                        Type::Forall(name, body) => {
+                            quantifiers.push(CoreQuantifier::Type(name));
+                            ty = *body;
+                        }
+                        Type::RowForall(name, body) => {
+                            quantifiers.push(CoreQuantifier::Row(name));
+                            ty = *body;
+                        }
+                        body => break body,
+                    }
+                };
+                match body {
+                    Type::Fun(params, effects, result) => {
+                        let (quantifiers, params, effects, result) =
+                            hygienic_nested_fn(quantifiers, params, effects, *result);
+                        work.push(Task::Function(quantifiers, params.len(), effects));
+                        work.push(Task::Type(result));
+                        work.extend(params.into_iter().rev().map(Task::Type));
+                    }
+                    Type::Coeffect(inner, _) => work.push(Task::Type(*inner)),
+                    body => {
+                        let source =
+                            quantifiers
+                                .into_iter()
+                                .rev()
+                                .fold(body, |body, quantifier| match quantifier {
+                                    CoreQuantifier::Type(name) => {
+                                        Type::Forall(name, Box::new(body))
+                                    }
+                                    CoreQuantifier::Row(name) => {
+                                        Type::RowForall(name, Box::new(body))
+                                    }
+                                });
+                        output.push(CoreType::Source(source));
+                    }
+                }
+            }
+            Task::Function(quantifiers, param_count, effects) => {
+                let result = output.pop().expect("function result type is available");
+                let start = output.len() - param_count;
+                let params = output.drain(start..).collect();
+                let signature = CoreFnSig::new(quantifiers, params, CompSig::new(result, effects));
+                output.push(CoreType::Thunk(Box::new(CompSig::new(
+                    CoreType::Function(Box::new(signature)),
+                    EffRow::Empty,
+                ))));
+            }
+        }
+    }
+    output.pop().expect("type lowering produces one Core type")
 }
 
 fn hygienic_nested_fn(
     mut quantifiers: Vec<CoreQuantifier>,
-    params: &[Type],
-    effects: &EffRow,
-    result: &Type,
+    params: Vec<Type>,
+    effects: EffRow,
+    result: Type,
 ) -> (Vec<CoreQuantifier>, Vec<Type>, EffRow, Type) {
-    let mut params = params.to_vec();
-    let mut effects = effects.clone();
-    let mut result = result.clone();
+    let mut params = params;
+    let mut effects = effects;
+    let mut result = result;
     for (index, quantifier) in quantifiers.iter_mut().enumerate() {
         match quantifier {
             CoreQuantifier::Type(name) => {
@@ -252,10 +300,10 @@ fn hygienic_nested_fn(
                 let fresh = Sym::from(names::typed_bound(old.as_str(), index));
                 params = params
                     .iter()
-                    .map(|ty| ty.subst_var(old, &Type::Var(fresh)))
+                    .map(|ty| rename_type_variable(ty, old, fresh))
                     .collect();
-                effects = effects.map_args(&|ty| ty.subst_var(old, &Type::Var(fresh)));
-                result = result.subst_var(old, &Type::Var(fresh));
+                effects = rename_type_variable_in_row(&effects, old, fresh);
+                result = rename_type_variable(&result, old, fresh);
                 *name = fresh;
             }
             CoreQuantifier::Row(name) => {
@@ -263,10 +311,10 @@ fn hygienic_nested_fn(
                 let fresh = Sym::from(names::typed_bound(old.as_str(), index));
                 params = params
                     .iter()
-                    .map(|ty| ty.subst_row_var(old, &EffRow::Var(fresh)))
+                    .map(|ty| rename_row_variable_in_type(ty, old, fresh))
                     .collect();
-                effects = effects.subst_row_var(old, &EffRow::Var(fresh));
-                result = result.subst_row_var(old, &EffRow::Var(fresh));
+                effects = rename_row_variable_in_row(&effects, old, fresh);
+                result = rename_row_variable_in_type(&result, old, fresh);
                 *name = fresh;
             }
         }

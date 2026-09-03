@@ -41,7 +41,9 @@ pub fn replay_to(core: &Core, frames: &[Obs], n: usize) -> Result<TracedRun, Str
         cursor: 0,
         budget: Some(n),
     };
-    run_traced(core, &mut sink, &mut input, tape)
+    // Stepping a recorded trace never moves a computation: replay serves every
+    // observation from the tape, and a mobility envelope is not one.
+    run_traced(core, &mut sink, &mut input, tape, None)
 }
 
 // A short, one-line description of one observation, tag and payload both.

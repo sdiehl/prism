@@ -47,8 +47,9 @@ const VALUE_TAG_UNIT: &str = "unit";
 // Capability prefixes whose event kinds are reserved: no operation label may
 // use them until their capability protocols are defined, so
 // external tooling reading event streams can rely on the prefixes staying
-// meaningless until then. Mirrors the reserved seam effects in `names`.
-pub const RESERVED_EVENT_CAPABILITIES: &[&str] = &[prism_syntax::names::NET_EFFECT];
+// meaningless until then. Mirrors the reserved seam effects in `names`, from
+// which `Net` graduated once its protocol below was fixed.
+pub const RESERVED_EVENT_CAPABILITIES: &[&str] = &[prism_syntax::names::PREEMPT_EFFECT];
 
 /// Canonical capability operation in the provenance protocol.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -73,6 +74,21 @@ pub enum CapOp {
     ConsolePrint,
     ConsoleNewline,
     ConsoleEprint,
+    // The stream-socket boundary. These are recorded observations but not replay
+    // frames: a socket read cannot be answered from a trace without the peer that
+    // produced it, so `Net` stays outside the replayable capability set and a
+    // durable function that performs it is rejected by the row check rather than
+    // silently reaching a live socket on resume. The labels and their frame
+    // shapes are fixed here now so that a later recording transport handler
+    // extends the protocol instead of breaking it.
+    NetListen,
+    NetAccept,
+    NetConnect,
+    NetRecv,
+    NetSend,
+    NetClose,
+    NetLocalAddr,
+    NetPeerAddr,
 }
 
 impl CapOp {
@@ -100,6 +116,14 @@ impl CapOp {
             Self::ConsolePrint => "Console.print",
             Self::ConsoleNewline => "Console.newline",
             Self::ConsoleEprint => "Console.eprint",
+            Self::NetListen => "Net.listen",
+            Self::NetAccept => "Net.accept",
+            Self::NetConnect => "Net.connect",
+            Self::NetRecv => "Net.recv",
+            Self::NetSend => "Net.send",
+            Self::NetClose => "Net.close",
+            Self::NetLocalAddr => "Net.local_addr",
+            Self::NetPeerAddr => "Net.peer_addr",
         }
     }
 }
@@ -124,6 +148,14 @@ pub const OP_ENTROPY_READ: CapOp = CapOp::EntropyRead;
 pub const OP_CONSOLE_PRINT: CapOp = CapOp::ConsolePrint;
 pub const OP_CONSOLE_NEWLINE: CapOp = CapOp::ConsoleNewline;
 pub const OP_CONSOLE_EPRINT: CapOp = CapOp::ConsoleEprint;
+pub const OP_NET_LISTEN: CapOp = CapOp::NetListen;
+pub const OP_NET_ACCEPT: CapOp = CapOp::NetAccept;
+pub const OP_NET_CONNECT: CapOp = CapOp::NetConnect;
+pub const OP_NET_RECV: CapOp = CapOp::NetRecv;
+pub const OP_NET_SEND: CapOp = CapOp::NetSend;
+pub const OP_NET_CLOSE: CapOp = CapOp::NetClose;
+pub const OP_NET_LOCAL_ADDR: CapOp = CapOp::NetLocalAddr;
+pub const OP_NET_PEER_ADDR: CapOp = CapOp::NetPeerAddr;
 
 /// Every capability op, in canonical order: the one home the op families are
 /// enumerated from (the `--at-op` selector set and the reserved-prefix check).
@@ -148,6 +180,14 @@ pub const ALL_CAP_OPS: &[CapOp] = &[
     OP_CONSOLE_PRINT,
     OP_CONSOLE_NEWLINE,
     OP_CONSOLE_EPRINT,
+    OP_NET_LISTEN,
+    OP_NET_ACCEPT,
+    OP_NET_CONNECT,
+    OP_NET_RECV,
+    OP_NET_SEND,
+    OP_NET_CLOSE,
+    OP_NET_LOCAL_ADDR,
+    OP_NET_PEER_ADDR,
 ];
 
 /// The canonical `&'static` label of `s` when it names a capability op, else

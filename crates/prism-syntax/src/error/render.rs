@@ -105,6 +105,9 @@ impl Error {
                     ParseError::UnexpectedEof(f) => {
                         (span_range(&f.span), "expected more input here")
                     }
+                    ParseError::Depth(f) => {
+                        (span_range(&f.span), "nesting crosses the budget here")
+                    }
                 };
                 write_report(
                     &map,

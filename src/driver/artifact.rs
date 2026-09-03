@@ -4,7 +4,8 @@ use std::process::Command;
 
 // The C-toolchain seam lives in native-only `codegen::rt`, so toolchain identity
 // uses the same feature gate. A non-native host build has no native backend.
-use crate::core::{CorePass, OptLevel, PassSpec, HASH_SCHEME};
+use crate::core::opt::{CorePass, OptLevel, OptimizationPlan, PassPipeline, PassSet};
+use crate::core::HASH_SCHEME;
 #[cfg(feature = "native")]
 use prism_native::rt::{cc, cc_flags, cc_overridden};
 
@@ -27,6 +28,7 @@ pub struct ArtifactIdentity {
     pub direct_object: bool,
     pub scheduler: &'static str,
     pub effect_tier: &'static str,
+    pub effect_exclude: String,
     pub erasures: bool,
     pub native_effects: bool,
     pub trampoline: bool,
@@ -60,6 +62,7 @@ pub enum ArtifactField {
     DirectObject,
     Scheduler,
     EffectTier,
+    EffectExclude,
     Erasures,
     NativeEffects,
     Trampoline,
@@ -90,6 +93,7 @@ impl ArtifactField {
             Self::DirectObject => "direct-object",
             Self::Scheduler => "scheduler",
             Self::EffectTier => "effect-tier",
+            Self::EffectExclude => "effect-exclude",
             Self::Erasures => "erasures",
             Self::NativeEffects => "native-effects",
             Self::Trampoline => "trampoline",
@@ -138,6 +142,7 @@ impl ArtifactIdentity {
     pub fn from_config(cfg: &Config, backend: impl Into<String>) -> Self {
         let backend = backend.into();
         let native_toolchain = native_toolchain_identity(&backend);
+        let (opt, passes, disabled) = optimization_labels(&cfg.optimization_plan());
         Self {
             compiler_version: env!("CARGO_PKG_VERSION"),
             hash_scheme: HASH_SCHEME,
@@ -146,20 +151,21 @@ impl ArtifactIdentity {
             source_root: None,
             stdlib_root: None,
             package_roots: Vec::new(),
-            opt: opt_label(cfg.opt()),
-            passes: pass_spec_label(cfg.passes.as_ref()),
-            disabled: disabled_label(&cfg.disabled),
+            opt,
+            passes,
+            disabled,
             backend_opt: cfg.backend_opt().as_str().to_string(),
             direct_object: cfg.direct_object(),
             scheduler: cfg.scheduler().label(),
-            effect_tier: cfg.flags.effect_tier.label(),
-            erasures: cfg.flags.erasures,
-            native_effects: cfg.flags.native_effects,
-            trampoline: cfg.flags.trampoline,
-            fuse: cfg.flags.fuse,
-            borrow_infer: cfg.flags.borrow_infer,
-            rt_checks: cfg.flags.rt_checks,
-            native_kont_frames: cfg.flags.native_kont_frames,
+            effect_tier: cfg.flags().effect_tier.label(),
+            effect_exclude: cfg.flags().effect_exclude.label(),
+            erasures: cfg.flags().erasures,
+            native_effects: cfg.flags().native_effects,
+            trampoline: cfg.flags().trampoline,
+            fuse: cfg.flags().fuse,
+            borrow_infer: cfg.flags().borrow_infer,
+            rt_checks: cfg.flags().rt_checks,
+            native_kont_frames: cfg.flags().native_kont_frames,
             native_toolchain,
         }
     }
@@ -242,6 +248,17 @@ impl ArtifactIdentity {
         rows.extend([
             ArtifactRow::new(ArtifactField::Scheduler, self.scheduler),
             ArtifactRow::new(ArtifactField::EffectTier, self.effect_tier),
+        ]);
+        // Preserve default artifact identity. Exclusions are an opt-in
+        // experimental lowering policy, so only the behavior-changing case
+        // contributes a row.
+        if !self.effect_exclude.is_empty() {
+            rows.push(ArtifactRow::new(
+                ArtifactField::EffectExclude,
+                self.effect_exclude.clone(),
+            ));
+        }
+        rows.extend([
             ArtifactRow::new(ArtifactField::Erasures, self.erasures.to_string()),
             ArtifactRow::new(
                 ArtifactField::NativeEffects,
@@ -314,34 +331,42 @@ fn scheme_root(scheme: &str, root: &str) -> String {
     format!("{scheme}:{root}")
 }
 
-const fn opt_label(opt: OptLevel) -> &'static str {
-    match opt {
-        OptLevel::O0 => "O0",
-        OptLevel::O1 => "O1",
-        OptLevel::O2 => "O2",
+fn optimization_labels(plan: &OptimizationPlan) -> (&'static str, String, String) {
+    match plan {
+        OptimizationPlan::Level { level, disabled } => (
+            match level {
+                OptLevel::O0 => "O0",
+                OptLevel::O1 => "O1",
+                OptLevel::O2 => "O2",
+            },
+            "level-default".to_string(),
+            disabled_label(disabled),
+        ),
+        OptimizationPlan::Explicit(pipeline) => (
+            "explicit",
+            pass_pipeline_label(pipeline),
+            "none".to_string(),
+        ),
     }
 }
 
-fn pass_spec_label(spec: Option<&PassSpec>) -> String {
-    spec.map_or_else(
-        || "level-default".to_string(),
-        |spec| {
-            format!(
-                "pre:{};late:{}",
-                pass_list_label(&spec.pre),
-                pass_list_label(&spec.late)
-            )
-        },
+fn pass_pipeline_label(pipeline: &PassPipeline) -> String {
+    format!(
+        "pre:{};late:{}",
+        pass_list_label(pipeline.pre()),
+        pass_list_label(pipeline.late())
     )
 }
 
-fn disabled_label(disabled: &[CorePass]) -> String {
+fn disabled_label(disabled: &PassSet) -> String {
     if disabled.is_empty() {
         return "none".to_string();
     }
-    let mut names: Vec<&str> = disabled.iter().map(|pass| pass.name()).collect();
-    names.sort_unstable();
-    names.join(",")
+    disabled
+        .iter()
+        .map(CorePass::name)
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn pass_list_label(passes: &[CorePass]) -> String {
@@ -398,7 +423,7 @@ mod tests {
     fn direct_object_mode_has_a_distinct_artifact_identity() {
         let normal = ArtifactIdentity::from_config(&Config::default(), "llvm");
         let mut cfg = Config::default();
-        cfg.flags.direct_object = true;
+        cfg.update_flags(|flags| flags.direct_object = true);
         let direct = ArtifactIdentity::from_config(&cfg, "llvm");
 
         assert_ne!(normal.fingerprint(), direct.fingerprint());
@@ -406,5 +431,26 @@ mod tests {
             .rows()
             .iter()
             .any(|row| { row.field == ArtifactField::DirectObject && row.value == "true" }));
+    }
+
+    #[test]
+    fn effect_exclusions_are_canonical_behavior_identity() {
+        let normal = ArtifactIdentity::from_config(&Config::default(), "llvm");
+        assert!(!row_fields(&normal).contains(&ArtifactField::EffectExclude));
+
+        let mut cfg = Config::default();
+        cfg.update_flags(|flags| {
+            flags.effect_exclude =
+                crate::flags::RungExclude::parse("local-partial state-fusion local-partial");
+        });
+        let excluded = ArtifactIdentity::from_config(&cfg, "llvm");
+        let row = excluded
+            .rows()
+            .into_iter()
+            .find(|row| row.field == ArtifactField::EffectExclude)
+            .expect("a nonempty exclusion policy participates in identity");
+
+        assert_eq!(row.value, "state-fusion,local-partial");
+        assert_ne!(normal.fingerprint(), excluded.fingerprint());
     }
 }

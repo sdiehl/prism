@@ -39,9 +39,9 @@ use synonyms::expand_synonyms;
 
 pub use prism_syntax::sugar::{
     assign_stmt, build_stable, compound_assign, compound_stmt, decl_mods, dot_call, dot_op_removed,
-    grade_word_msg, interp_lit, let_pat, let_stmt, lift_noalloc, mig_dir, open_if, pattern_decl,
-    seq_stmt, try_mark, with_rest, with_stmt, IfTail, StableItem, DECLINE_DIM_ARITH, FLIP_CLASS,
-    FLIP_EFFECT, FLIP_INSTANCE, GRADE_MANY_CLAUSE, MIGRATE_RESUME, MIGRATE_RET_ORDER,
+    grade_word_msg, interp_lit, let_pat, let_stmt, mig_dir, open_if, pattern_decl, seq_stmt,
+    try_mark, with_rest, with_stmt, IfTail, StableItem, DECLINE_DIM_ARITH, FLIP_CLASS, FLIP_EFFECT,
+    FLIP_INSTANCE, GRADE_MANY_CLAUSE, MIGRATE_RESUME, MIGRATE_RET_ORDER,
 };
 
 // Per-op record: owning effect name, that effect's type parameters, signature.
@@ -344,6 +344,8 @@ fn lift_lam(
         fip: Fip::No,
         replayable: false,
         no_alloc: false,
+        bounded_stack: false,
+        linear: false,
         span,
     })
 }
@@ -445,15 +447,29 @@ fn reject_coeffect_tys(prog: &Program) -> Result<(), TypeError> {
                 }
                 .at(span));
             }
-            // A wired closure-usage row (`@ once` / `@ portable`) on a function type
-            // is a valid contract; it flows to the type checker. Anything else is
-            // misplaced: `@ noalloc` was lifted at the fn root, `@ noescape` is
-            // admitted only on a function domain (below), and a usage row on a
-            // non-function type has no closure boundary to constrain.
-            if row.is_closure_contract() && matches!(**inner, Ty::Fun(..)) {
+            // A wired callable-contract row (`@ once` / `@ many` / `@ portable`,
+            // optionally joined by the `@ noalloc` certificate) on a function
+            // type is a valid contract; it flows to the type checker, and the
+            // allocation certificate is proved or demanded at the claim-check
+            // seam. Anything else is misplaced, with the fix chosen by what the
+            // row is: a closure contract on a non-function type has no closure
+            // boundary to constrain, while a declaration claim on a
+            // non-function type (`@ noalloc` / `@ bounded_stack` / `@ linear`)
+            // belongs at the fn root and `@ noescape` is admitted only on a
+            // function domain (below).
+            if row.is_callable_contract() && matches!(**inner, Ty::Fun(..)) {
                 return check(inner, span);
             }
-            return Err(ErrKind::CoeffectRowMisplaced.at(span));
+            if row.is_closure_contract() {
+                return Err(ErrKind::CoeffectUsageRowMisplaced {
+                    row: row.to_string(),
+                }
+                .at(span));
+            }
+            return Err(ErrKind::CoeffectRowMisplaced {
+                row: row.to_string(),
+            }
+            .at(span));
         }
         // A function type's domain may carry the scoped-token contract
         // (`(Builder @ noescape) -> a`): the callback promises that argument does
@@ -657,15 +673,113 @@ fn is_portable_param(p: &Param) -> bool {
     matches!(&p.ty, Some(Ty::Coeffect(inner, row)) if matches!(**inner, Ty::Fun(..)) && row.is_portable())
 }
 
-// A written type whose values are portable (encodable) by construction: the
-// scalars and tuples/datatype spines over them. The AST dual of
-// `kont::portable_value_type`; a captured value of such a type may cross a
-// `@ portable` boundary.
-fn is_portable_annotation(t: &Ty) -> bool {
+// A written type whose values are portable (encodable) by construction. The AST
+// dual of `kont::portable_value_type`; a captured value of such a type may cross
+// a `@ portable` boundary.
+//
+// A datatype is judged by what it holds, not by what its name looks like. Naming
+// a type says nothing about whether its values travel: `type Box = Box(() -> Int)`
+// takes no type arguments and still carries a closure, so a rule that inspected
+// only the arguments would let any nullary wrapper smuggle an unportable value
+// across the boundary. The judgment therefore substitutes the arguments into the
+// declaration and asks the same question of every constructor field.
+struct Portable<'a> {
+    decls: BTreeMap<&'a str, &'a super::ast::DataDecl>,
+    opaque: &'a BTreeSet<String>,
+}
+
+impl<'a> Portable<'a> {
+    fn new(prog: &'a Program) -> Self {
+        Self {
+            decls: prog.types.iter().map(|d| (d.name.as_str(), d)).collect(),
+            opaque: &prog.opaques,
+        }
+    }
+
+    fn judge(&self, t: &Ty) -> bool {
+        self.walk(t, &mut BTreeSet::new())
+    }
+
+    // `open` holds the datatypes already being judged further up this walk. A
+    // recursive type mentions itself (`Cons(a, List(a))`), and a self-reference
+    // is portable exactly when the question the outer call is still answering is,
+    // so assuming it here terminates the walk without weakening it: the type
+    // arguments of every occurrence are judged before this guard is consulted,
+    // which is what stops `type T(a) = C(a) | D(T(() -> Int))` from being
+    // admitted on the strength of its own name.
+    fn walk(&self, t: &Ty, open: &mut BTreeSet<&'a str>) -> bool {
+        match t {
+            Ty::Int | Ty::I64 | Ty::U64 | Ty::Bool | Ty::Unit | Ty::Float | Ty::Char | Ty::Str => {
+                true
+            }
+            Ty::Tuple(ts) | Ty::UnboxedTuple(ts) => ts.iter().all(|x| self.walk(x, open)),
+            Ty::UnboxedRecord(fs) => fs.iter().all(|(_, x)| self.walk(x, open)),
+            Ty::Con(name, args) => {
+                if !args.iter().all(|a| self.walk(a, open)) {
+                    return false;
+                }
+                // An opaque type's constructors are hidden from here, so its
+                // fields cannot be inspected and it is refused. A type this
+                // program has no declaration for is refused for the same reason:
+                // an unreadable definition is not a portable one.
+                if self.opaque.contains(name) {
+                    return false;
+                }
+                let Some((&key, decl)) = self.decls.get_key_value(name.as_str()) else {
+                    return false;
+                };
+                // No visible constructors is no evidence, not a vacuous yes. A
+                // module that hid its representation arrives here with an empty
+                // constructor list, and so does an uninhabited type; judging
+                // either portable would turn "nothing to check" into a pass and
+                // hand every hidden resource handle a way across the boundary.
+                if decl.ctors.is_empty() {
+                    return false;
+                }
+                if !open.insert(key) {
+                    return true;
+                }
+                let subst: BTreeMap<&str, &Ty> = decl
+                    .params
+                    .iter()
+                    .map(String::as_str)
+                    .zip(args.iter())
+                    .collect();
+                let ok = decl.ctors.iter().all(|c| {
+                    let fields = c.fields.as_ref().map_or_else(
+                        || c.args.iter().collect::<Vec<_>>(),
+                        |fs| fs.iter().map(|(_, t)| t).collect(),
+                    );
+                    fields
+                        .into_iter()
+                        .all(|f| self.walk(&subst_ty(f, &subst), open))
+                });
+                open.remove(key);
+                ok
+            }
+            _ => false,
+        }
+    }
+}
+
+// `t` with each type parameter replaced by the argument it was applied to. Only
+// the shapes [`Portable::walk`] can see through are rebuilt; anything else is
+// returned unchanged, because the walk refuses those shapes whatever is inside
+// them.
+fn subst_ty(t: &Ty, subst: &BTreeMap<&str, &Ty>) -> Ty {
     match t {
-        Ty::Int | Ty::I64 | Ty::U64 | Ty::Bool | Ty::Unit | Ty::Float | Ty::Char | Ty::Str => true,
-        Ty::Tuple(ts) | Ty::Con(_, ts) => ts.iter().all(is_portable_annotation),
-        _ => false,
+        Ty::Var(n) => subst
+            .get(n.as_str())
+            .map_or_else(|| t.clone(), |a| (*a).clone()),
+        Ty::Con(n, args) => Ty::Con(n.clone(), args.iter().map(|a| subst_ty(a, subst)).collect()),
+        Ty::Tuple(ts) => Ty::Tuple(ts.iter().map(|a| subst_ty(a, subst)).collect()),
+        Ty::UnboxedTuple(ts) => Ty::UnboxedTuple(ts.iter().map(|a| subst_ty(a, subst)).collect()),
+        Ty::UnboxedRecord(fs) => Ty::UnboxedRecord(
+            fs.iter()
+                .map(|(n, a)| (n.clone(), subst_ty(a, subst)))
+                .collect(),
+        ),
+        _ => t.clone(),
     }
 }
 
@@ -759,6 +873,7 @@ fn check_portable_captures(prog: &Program) -> Result<(), TypeError> {
     if portable_params.is_empty() {
         return Ok(());
     }
+    let portable = Portable::new(prog);
     let mut code_names: BTreeSet<&str> = prog.fns.iter().map(|d| d.name.as_str()).collect();
     for t in &prog.types {
         for c in &t.ctors {
@@ -769,7 +884,7 @@ fn check_portable_captures(prog: &Program) -> Result<(), TypeError> {
         let ok: BTreeSet<String> = d
             .params
             .iter()
-            .filter(|p| is_portable_param(p) || p.ty.as_ref().is_some_and(is_portable_annotation))
+            .filter(|p| is_portable_param(p) || p.ty.as_ref().is_some_and(|t| portable.judge(t)))
             .map(|p| p.name.clone())
             .collect();
         check_portable_calls(&d.body, &portable_params, &code_names, &ok)?;
@@ -1279,6 +1394,8 @@ fn core_decl(d: Decl, cx: &mut Cx) -> Result<Decl<Core>, TypeError> {
         fip: d.fip,
         replayable: d.replayable,
         no_alloc: d.no_alloc,
+        bounded_stack: d.bounded_stack,
+        linear: d.linear,
         span: d.span,
     })
 }

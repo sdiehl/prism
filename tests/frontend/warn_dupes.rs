@@ -14,10 +14,15 @@ use prism::{check_validated_on_in, default_roots, with_prelude, Config, Error, W
 // messages (or the error).
 fn check(src: &str, clone: WarnDupes, stdlib: WarnDupes) -> Result<Vec<String>, Error> {
     let mut cfg = Config::default();
-    cfg.flags.warn_dupes = clone;
-    cfg.flags.warn_stdlib_dupes = stdlib;
+    cfg.update_flags(|flags| flags.warn_dupes = clone);
+    cfg.update_flags(|flags| flags.warn_stdlib_dupes = stdlib);
     let checked = check_validated_on_in(&with_prelude(src), &default_roots(Path::new(".")), &cfg)?;
-    Ok(checked.warnings.iter().map(|w| w.msg.clone()).collect())
+    Ok(checked
+        .reports
+        .warnings
+        .iter()
+        .map(|w| w.msg.clone())
+        .collect())
 }
 
 // Type-check `src` under the shipped defaults (own clones off, stdlib on).
@@ -27,7 +32,12 @@ fn check_default(src: &str) -> Result<Vec<String>, Error> {
         &default_roots(Path::new(".")),
         &Config::default(),
     )?;
-    Ok(checked.warnings.iter().map(|w| w.msg.clone()).collect())
+    Ok(checked
+        .reports
+        .warnings
+        .iter()
+        .map(|w| w.msg.clone())
+        .collect())
 }
 
 // Two structurally identical user functions share one behavior hash.

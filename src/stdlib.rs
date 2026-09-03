@@ -49,6 +49,7 @@ pub const STDLIB: &[(&str, &str)] = &[
     ("Quickcheck", include_str!("../lib/std/Quickcheck.pr")),
     ("Wire", include_str!("../lib/std/Wire.pr")),
     ("Data.Bytes", include_str!("../lib/std/Data/Bytes.pr")),
+    ("Net", include_str!("../lib/std/Net.pr")),
     ("Incr", include_str!("../lib/std/Incr.pr")),
     ("Test", include_str!("../lib/std/Test.pr")),
     ("Blit", include_str!("../lib/std/Blit.pr")),
@@ -72,6 +73,10 @@ pub const STDLIB: &[(&str, &str)] = &[
     ),
     ("Control.Fresh", include_str!("../lib/std/Control/Fresh.pr")),
     ("Control.Layer", include_str!("../lib/std/Control/Layer.pr")),
+    (
+        "Control.Recursion",
+        include_str!("../lib/std/Control/Recursion.pr"),
+    ),
     (
         "Control.Rewrite",
         include_str!("../lib/std/Control/Rewrite.pr"),

@@ -2,10 +2,12 @@ use prism_common::sym::Sym;
 use prism_syntax::kw;
 use prism_syntax::names::reuse_token;
 
-use super::super::cbpv::{Comp, Core, CoreFn, CorePat, HandleOp, Value};
+use crate::core::cbpv::{Comp, Core, CoreFn, CorePat, Value};
+use crate::core::traverse::{Rewrite, RewriteControl};
 
 #[must_use]
 pub fn reuse(core: &Core) -> Core {
+    let mut rewrite = ReuseRewrite;
     Core {
         fns: core
             .fns
@@ -14,185 +16,555 @@ pub fn reuse(core: &Core) -> Core {
                 name: f.name,
                 params: f.params.clone(),
                 dict_arity: f.dict_arity,
-                body: reuse_comp(&f.body),
+                body: rewrite.rewrite_comp(&f.body, &()),
             })
             .collect(),
     }
 }
 
-fn reuse_comp(c: &Comp) -> Comp {
-    match c {
-        Comp::Bind(m, x, n) => Comp::Bind(Box::new(reuse_comp(m)), *x, Box::new(reuse_comp(n))),
-        Comp::If(v, t, e) => Comp::If(v.clone(), Box::new(reuse_comp(t)), Box::new(reuse_comp(e))),
-        Comp::Lam(ps, b) => Comp::Lam(ps.clone(), Box::new(reuse_comp(b))),
-        Comp::Case(scrut, arms) => Comp::Case(
-            scrut.clone(),
-            arms.iter()
-                .map(|(p, body)| (p.clone(), reuse_arm(scrut, p, &reuse_comp(body))))
+struct ReuseRewrite;
+
+impl Rewrite for ReuseRewrite {
+    type Ctx = ();
+
+    fn enter_comp(&mut self, comp: &Comp, _cx: &Self::Ctx) -> RewriteControl<Comp> {
+        match comp {
+            Comp::Bind(..)
+            | Comp::If(..)
+            | Comp::Lam(..)
+            | Comp::Case(..)
+            | Comp::Handle { .. } => RewriteControl::Descend,
+            _ => RewriteControl::Replace(clone_comp(comp)),
+        }
+    }
+
+    fn enter_value(&mut self, value: &Value, _cx: &Self::Ctx) -> RewriteControl<Value> {
+        RewriteControl::Replace(clone_value(value))
+    }
+
+    fn leave_comp(&mut self, source: &Comp, rewritten: Comp, _cx: &Self::Ctx) -> Comp {
+        let Comp::Case(source_scrutinee, _) = source else {
+            return rewritten;
+        };
+        let Comp::Case(scrutinee, arms) = rewritten else {
+            unreachable!("a case rebuild remains a case");
+        };
+        Comp::Case(
+            scrutinee,
+            arms.into_iter()
+                .map(|(pattern, body)| {
+                    let body = reuse_arm(source_scrutinee, &pattern, body);
+                    (pattern, body)
+                })
                 .collect(),
-        ),
-        Comp::Handle {
-            body,
-            return_var,
-            return_body,
-            ops,
-        } => Comp::Handle {
-            body: Box::new(reuse_comp(body)),
-            return_var: *return_var,
-            return_body: return_body.as_deref().map(|rb| Box::new(reuse_comp(rb))),
-            ops: ops.rebuild(|op| HandleOp {
-                body: reuse_comp(&op.body),
-                ..op.clone()
-            }),
-        },
-        other => other.clone(),
+        )
     }
 }
 
-fn reuse_arm(scrut: &Value, p: &CorePat, body: &Comp) -> Comp {
+struct CoreClone;
+
+impl Rewrite for CoreClone {
+    type Ctx = ();
+}
+
+fn clone_comp(comp: &Comp) -> Comp {
+    CoreClone.rewrite_comp(comp, &())
+}
+
+fn clone_value(value: &Value) -> Value {
+    CoreClone.rewrite_value(value, &())
+}
+
+fn reuse_arm(scrut: &Value, p: &CorePat, body: Comp) -> Comp {
     let Value::Var(s) = scrut else {
-        return body.clone();
+        return body;
     };
     let arity = match p {
         // The wired nullable frees no cell when matched (its native form is
         // the null word or the element itself), so it can never seed a token.
-        CorePat::Ctor(name, _) if kw::is_or_null_ctor(name.as_str()) => return body.clone(),
+        CorePat::Ctor(name, _) if kw::is_or_null_ctor(name.as_str()) => return body,
         CorePat::Ctor(_, fields) | CorePat::Tuple(fields) => fields.len(),
-        _ => return body.clone(),
+        _ => return body,
     };
     let tok: Sym = reuse_token(s.as_str()).into();
-    // Reuse is a pure optimization, so a scrutinee `try_reuse` cannot place into a
-    // scoped `WithReuse` is left as the safe no-reuse body. When it does succeed,
-    // the result is balanced by construction: `WithReuse` frees the cell at one
-    // point and `consume_alloc` spends the token on every control path (it returns
-    // `None`, declining the whole rewrite, if any path fails to allocate), so no
-    // post-hoc balance check is needed.
-    try_reuse(body, *s, tok, arity).unwrap_or_else(|| body.clone())
+    // Decline unless the freed cell can be spent exactly once on every path.
+    // Success is balanced by construction: `WithReuse` frees the cell and each
+    // selected allocation consumes its scoped token.
+    try_reuse(body, *s, tok, arity).unwrap_or_else(|body| body)
 }
 
-// Pair the `drop s` (the cell freed when the scrutinee is consumed) with a later
-// constructor allocation. The drop may sit on the bind chain or, when the
-// scrutinee survives down some arms, inside a branch; either way the freed cell
-// becomes a token that the rest of THAT path must spend exactly once. Find the
-// drop, then hand the continuation to `consume_alloc`, which fails (aborting the
-// whole rewrite) unless every path from the drop allocates a fitting cell. Arms
-// where the drop never appears are left untouched.
-fn try_reuse(c: &Comp, s: Sym, tok: Sym, cap: usize) -> Option<Comp> {
-    match c {
-        Comp::Bind(m, x, n) => {
-            if let Comp::Drop(Value::Var(d)) = m.as_ref() {
-                if *d == s {
-                    let n2 = consume_alloc(n, tok, cap)?;
-                    return Some(Comp::WithReuse {
-                        token: tok,
-                        freed: Value::Var(s),
-                        body: Box::new(n2),
+// Pair `drop s` with a later fitting allocation. After the drop, every control
+// path must spend the token exactly once; arms without the drop stay untouched.
+fn try_reuse(c: Comp, s: Sym, tok: Sym, cap: usize) -> Result<Comp, Comp> {
+    let mut plans = Vec::new();
+    let Some(root) = plan_try_reuse(&c, s, cap, &mut plans) else {
+        return Err(c);
+    };
+    Ok(apply_plan(c, root, &plans, s, tok))
+}
+
+fn plan_try_reuse(c: &Comp, s: Sym, cap: usize, plans: &mut Vec<Plan>) -> Option<PlanId> {
+    let mut work = vec![TryFrame::Comp(c)];
+    let mut results = Vec::new();
+
+    while let Some(frame) = work.pop() {
+        match frame {
+            TryFrame::Comp(comp) => match comp {
+                Comp::Bind(first, _, rest) => {
+                    if matches!(first.as_ref(), Comp::Drop(Value::Var(d)) if *d == s) {
+                        let plan = plan_consume_alloc(rest, cap, plans)
+                            .map(|consume| push_plan(plans, Plan::TryDrop { consume }));
+                        results.push(plan);
+                    } else {
+                        work.push(TryFrame::BindFirst { rest });
+                        work.push(TryFrame::Comp(first));
+                    }
+                }
+                Comp::If(_, yes, no) => {
+                    work.push(TryFrame::FinishIf);
+                    work.push(TryFrame::Comp(no));
+                    work.push(TryFrame::Comp(yes));
+                }
+                Comp::Case(_, arms) => {
+                    work.push(TryFrame::FinishCase {
+                        arm_count: arms.len(),
                     });
+                    work.extend(arms.iter().rev().map(|(_, body)| TryFrame::Comp(body)));
+                }
+                Comp::WithReuse { body, .. } => {
+                    work.push(TryFrame::FinishWithReuse);
+                    work.push(TryFrame::Comp(body));
+                }
+                _ => results.push(None),
+            },
+            TryFrame::BindFirst { rest } => {
+                if let Some(child) = pop_plan(&mut results) {
+                    results.push(Some(push_plan(plans, Plan::TryBindFirst { child })));
+                } else {
+                    work.push(TryFrame::BindRest);
+                    work.push(TryFrame::Comp(rest));
                 }
             }
-            if let Some(m2) = try_reuse(m, s, tok, cap) {
-                return Some(Comp::Bind(Box::new(m2), *x, n.clone()));
+            TryFrame::BindRest => {
+                let plan = pop_plan(&mut results)
+                    .map(|child| push_plan(plans, Plan::TryBindRest { child }));
+                results.push(plan);
             }
-            Some(Comp::Bind(
-                m.clone(),
-                *x,
-                Box::new(try_reuse(n, s, tok, cap)?),
-            ))
-        }
-        Comp::If(cond, t, e) => {
-            let (t2, e2) = (try_reuse(t, s, tok, cap), try_reuse(e, s, tok, cap));
-            // The drop must live in exactly one branch (the scrutinee cannot be
-            // both freed and passed through on the same conditional).
-            match (t2, e2) {
-                (Some(t2), None) => Some(Comp::If(cond.clone(), Box::new(t2), e.clone())),
-                (None, Some(e2)) => Some(Comp::If(cond.clone(), t.clone(), Box::new(e2))),
-                _ => None,
+            TryFrame::FinishIf => {
+                let no = pop_plan(&mut results);
+                let yes = pop_plan(&mut results);
+                let plan = match (yes, no) {
+                    (Some(child), None) => Some(push_plan(plans, Plan::TryIfYes { child })),
+                    (None, Some(child)) => Some(push_plan(plans, Plan::TryIfNo { child })),
+                    _ => None,
+                };
+                results.push(plan);
+            }
+            TryFrame::FinishCase { arm_count } => {
+                let start = results
+                    .len()
+                    .checked_sub(arm_count)
+                    .expect("each case arm has a reuse result");
+                let arms: Vec<_> = results.drain(start..).collect();
+                let hit = arms.iter().any(Option::is_some);
+                results.push(hit.then(|| push_plan(plans, Plan::TryCase { arms })));
+            }
+            TryFrame::FinishWithReuse => {
+                let plan = pop_plan(&mut results)
+                    .map(|child| push_plan(plans, Plan::TryWithReuse { child }));
+                results.push(plan);
             }
         }
-        Comp::Case(scrut, arms) => {
-            let mut hit = false;
-            let arms = arms
-                .iter()
-                .map(|(p, b)| {
-                    try_reuse(b, s, tok, cap).map_or_else(
-                        || (p.clone(), b.clone()),
-                        |b2| {
-                            hit = true;
-                            (p.clone(), b2)
-                        },
-                    )
-                })
-                .collect();
-            hit.then(|| Comp::Case(scrut.clone(), arms))
-        }
-        // A nested pattern's inner arm reuses first, wrapping its body in a
-        // `WithReuse` that the outer scrutinee's `drop` now sits inside. Keep
-        // searching through it, then rewrap with the inner token untouched.
-        Comp::WithReuse { token, freed, body } => {
-            let body2 = try_reuse(body, s, tok, cap)?;
-            Some(Comp::WithReuse {
-                token: *token,
-                freed: freed.clone(),
-                body: Box::new(body2),
-            })
-        }
-        _ => None,
     }
+
+    let result = pop_plan(&mut results);
+    debug_assert!(results.is_empty());
+    result
 }
 
-// Reuse credit (FP^2): a freed token feeds the first constructor allocation that
-// follows the drop on every control path. Walk the
-// bind chain forward and rewrite the first `return Ctor` (whose arity fits the
-// freed cell, so prism_reuse_alloc never writes past the old shell) into an
-// in-place `Reuse`; the token is then spent and the continuation left alone. At a
-// branch every arm must spend the credit exactly once, so both sides must
-// succeed. Any path reaching a non-allocating tail returns None, aborting the
-// whole rewrite and falling back to the safe body.
-fn consume_alloc(c: &Comp, tok: Sym, cap: usize) -> Option<Comp> {
-    match c {
-        Comp::Bind(m, x, n) => {
-            // The bound computation `m` may itself tail-produce the allocation
-            // (CBPV nests `return Ctor to x; ...` as a bind chain under one `m`),
-            // so try to spend the credit there first; only if no path of `m`
-            // allocates does the credit flow on into the continuation `n`.
-            if let Some(m2) = consume_alloc(m, tok, cap) {
-                return Some(Comp::Bind(Box::new(m2), *x, n.clone()));
+enum TryFrame<'a> {
+    Comp(&'a Comp),
+    BindFirst { rest: &'a Comp },
+    BindRest,
+    FinishIf,
+    FinishCase { arm_count: usize },
+    FinishWithReuse,
+}
+
+// Spend the credit on the first fitting allocation. Every branch must spend it;
+// a non-allocating path declines the whole rewrite.
+fn plan_consume_alloc(c: &Comp, cap: usize, plans: &mut Vec<Plan>) -> Option<PlanId> {
+    let mut work = vec![ConsumeFrame::Comp(c)];
+    let mut results = Vec::new();
+
+    while let Some(frame) = work.pop() {
+        match frame {
+            ConsumeFrame::Comp(comp) => match comp {
+                Comp::Bind(first, _, rest) => {
+                    work.push(ConsumeFrame::BindFirst { rest });
+                    work.push(ConsumeFrame::Comp(first));
+                }
+                Comp::Return(value @ (Value::Ctor(..) | Value::Tuple(..)))
+                    if ctor_arity(value) <= cap && !is_or_null_alloc(value) =>
+                {
+                    results.push(Some(push_plan(plans, Plan::ConsumeReturn)));
+                }
+                Comp::If(_, yes, no) => {
+                    work.push(ConsumeFrame::IfYes { no });
+                    work.push(ConsumeFrame::Comp(yes));
+                }
+                Comp::Case(_, arms) if arms.is_empty() => {
+                    results.push(Some(push_plan(
+                        plans,
+                        Plan::ConsumeCase { arms: Vec::new() },
+                    )));
+                }
+                Comp::Case(_, arms) => {
+                    work.push(ConsumeFrame::CaseArm {
+                        arms,
+                        index: 0,
+                        rebuilt: Vec::with_capacity(arms.len()),
+                    });
+                    work.push(ConsumeFrame::Comp(&arms[0].1));
+                }
+                Comp::WithReuse { body, .. } => {
+                    work.push(ConsumeFrame::FinishWithReuse);
+                    work.push(ConsumeFrame::Comp(body));
+                }
+                _ => results.push(None),
+            },
+            ConsumeFrame::BindFirst { rest } => {
+                if let Some(child) = pop_plan(&mut results) {
+                    results.push(Some(push_plan(plans, Plan::ConsumeBindFirst { child })));
+                } else {
+                    work.push(ConsumeFrame::BindRest);
+                    work.push(ConsumeFrame::Comp(rest));
+                }
             }
-            Some(Comp::Bind(
-                m.clone(),
-                *x,
-                Box::new(consume_alloc(n, tok, cap)?),
-            ))
+            ConsumeFrame::BindRest => {
+                let plan = pop_plan(&mut results)
+                    .map(|child| push_plan(plans, Plan::ConsumeBindRest { child }));
+                results.push(plan);
+            }
+            ConsumeFrame::IfYes { no, .. } => {
+                if let Some(yes) = pop_plan(&mut results) {
+                    work.push(ConsumeFrame::IfNo { yes });
+                    work.push(ConsumeFrame::Comp(no));
+                } else {
+                    // The recursive implementation stopped before visiting the
+                    // second branch when the first failed.
+                    results.push(None);
+                }
+            }
+            ConsumeFrame::IfNo { yes } => {
+                let plan =
+                    pop_plan(&mut results).map(|no| push_plan(plans, Plan::ConsumeIf { yes, no }));
+                results.push(plan);
+            }
+            ConsumeFrame::CaseArm {
+                arms,
+                index,
+                mut rebuilt,
+            } => {
+                if let Some(body) = pop_plan(&mut results) {
+                    rebuilt.push(body);
+                    let next = index + 1;
+                    if next == arms.len() {
+                        results.push(Some(push_plan(plans, Plan::ConsumeCase { arms: rebuilt })));
+                    } else {
+                        work.push(ConsumeFrame::CaseArm {
+                            arms,
+                            index: next,
+                            rebuilt,
+                        });
+                        work.push(ConsumeFrame::Comp(&arms[next].1));
+                    }
+                } else {
+                    results.push(None);
+                }
+            }
+            ConsumeFrame::FinishWithReuse => {
+                let plan = pop_plan(&mut results)
+                    .map(|child| push_plan(plans, Plan::ConsumeWithReuse { child }));
+                results.push(plan);
+            }
         }
-        Comp::Return(v @ (Value::Ctor(..) | Value::Tuple(..)))
-            if ctor_arity(v) <= cap && !is_or_null_alloc(v) =>
-        {
-            Some(Comp::Reuse(tok, v.clone()))
-        }
-        Comp::If(cond, t, e) => Some(Comp::If(
-            cond.clone(),
-            Box::new(consume_alloc(t, tok, cap)?),
-            Box::new(consume_alloc(e, tok, cap)?),
-        )),
-        Comp::Case(scrut, arms) => {
-            let arms = arms
-                .iter()
-                .map(|(p, b)| Some((p.clone(), consume_alloc(b, tok, cap)?)))
-                .collect::<Option<Vec<_>>>()?;
-            Some(Comp::Case(scrut.clone(), arms))
-        }
-        // The fitting allocation may live past an inner reuse's `WithReuse` (a
-        // deeper-nested pattern); walk into it so the credit can reach the tail.
-        Comp::WithReuse { token, freed, body } => {
-            let body2 = consume_alloc(body, tok, cap)?;
-            Some(Comp::WithReuse {
-                token: *token,
-                freed: freed.clone(),
-                body: Box::new(body2),
-            })
-        }
-        _ => None,
     }
+
+    let result = pop_plan(&mut results);
+    debug_assert!(results.is_empty());
+    result
+}
+
+enum ConsumeFrame<'a> {
+    Comp(&'a Comp),
+    BindFirst {
+        rest: &'a Comp,
+    },
+    BindRest,
+    IfYes {
+        no: &'a Comp,
+    },
+    IfNo {
+        yes: PlanId,
+    },
+    CaseArm {
+        arms: &'a [(CorePat, Comp)],
+        index: usize,
+        rebuilt: Vec<PlanId>,
+    },
+    FinishWithReuse,
+}
+
+type PlanId = usize;
+
+enum Plan {
+    TryDrop { consume: PlanId },
+    TryBindFirst { child: PlanId },
+    TryBindRest { child: PlanId },
+    TryIfYes { child: PlanId },
+    TryIfNo { child: PlanId },
+    TryCase { arms: Vec<Option<PlanId>> },
+    TryWithReuse { child: PlanId },
+    ConsumeReturn,
+    ConsumeBindFirst { child: PlanId },
+    ConsumeBindRest { child: PlanId },
+    ConsumeIf { yes: PlanId, no: PlanId },
+    ConsumeCase { arms: Vec<PlanId> },
+    ConsumeWithReuse { child: PlanId },
+}
+
+fn push_plan(plans: &mut Vec<Plan>, plan: Plan) -> PlanId {
+    let id = plans.len();
+    plans.push(plan);
+    id
+}
+
+fn pop_plan(results: &mut Vec<Option<PlanId>>) -> Option<PlanId> {
+    results.pop().expect("a child reuse plan exists")
+}
+
+fn apply_plan(c: Comp, root: PlanId, plans: &[Plan], freed: Sym, token: Sym) -> Comp {
+    let mut work = vec![ApplyFrame::Comp(c, root)];
+    let mut results = Vec::new();
+
+    while let Some(frame) = work.pop() {
+        match frame {
+            ApplyFrame::Comp(comp, id) => match &plans[id] {
+                Plan::TryDrop { consume } => {
+                    let Comp::Bind(drop, _, rest) = comp else {
+                        unreachable!("a drop plan applies to a bind");
+                    };
+                    debug_assert!(matches!(drop.as_ref(), Comp::Drop(Value::Var(_))));
+                    work.push(ApplyFrame::FinishDrop);
+                    work.push(ApplyFrame::Comp(*rest, *consume));
+                }
+                Plan::TryBindFirst { child } | Plan::ConsumeBindFirst { child } => {
+                    let Comp::Bind(first, binder, rest) = comp else {
+                        unreachable!("a first-child plan applies to a bind");
+                    };
+                    work.push(ApplyFrame::FinishBindFirst { binder, rest });
+                    work.push(ApplyFrame::Comp(*first, *child));
+                }
+                Plan::TryBindRest { child } | Plan::ConsumeBindRest { child } => {
+                    let Comp::Bind(first, binder, rest) = comp else {
+                        unreachable!("a continuation plan applies to a bind");
+                    };
+                    work.push(ApplyFrame::FinishBindRest { first, binder });
+                    work.push(ApplyFrame::Comp(*rest, *child));
+                }
+                Plan::TryIfYes { child } => {
+                    let Comp::If(condition, yes, no) = comp else {
+                        unreachable!("a then-branch plan applies to an if");
+                    };
+                    work.push(ApplyFrame::FinishIfYes { condition, no });
+                    work.push(ApplyFrame::Comp(*yes, *child));
+                }
+                Plan::TryIfNo { child } => {
+                    let Comp::If(condition, yes, no) = comp else {
+                        unreachable!("an else-branch plan applies to an if");
+                    };
+                    work.push(ApplyFrame::FinishIfNo { condition, yes });
+                    work.push(ApplyFrame::Comp(*no, *child));
+                }
+                Plan::TryCase { arms: arm_plans } => {
+                    let Comp::Case(scrutinee, arms) = comp else {
+                        unreachable!("an arm plan applies to a case");
+                    };
+                    push_case_apply(&mut work, scrutinee, arms, arm_plans);
+                }
+                Plan::TryWithReuse { child } | Plan::ConsumeWithReuse { child } => {
+                    let Comp::WithReuse { token, freed, body } = comp else {
+                        unreachable!("a nested reuse plan applies to WithReuse");
+                    };
+                    work.push(ApplyFrame::FinishWithReuse { token, freed });
+                    work.push(ApplyFrame::Comp(*body, *child));
+                }
+                Plan::ConsumeReturn => {
+                    let Comp::Return(value) = comp else {
+                        unreachable!("an allocation plan applies to a return");
+                    };
+                    results.push(Comp::Reuse(token, value));
+                }
+                Plan::ConsumeIf { yes, no } => {
+                    let Comp::If(condition, yes_comp, no_comp) = comp else {
+                        unreachable!("a branch allocation plan applies to an if");
+                    };
+                    work.push(ApplyFrame::FinishIfBoth { condition });
+                    work.push(ApplyFrame::Comp(*no_comp, *no));
+                    work.push(ApplyFrame::Comp(*yes_comp, *yes));
+                }
+                Plan::ConsumeCase { arms: arm_plans } => {
+                    let Comp::Case(scrutinee, arms) = comp else {
+                        unreachable!("an allocation arm plan applies to a case");
+                    };
+                    let arm_plans: Vec<_> = arm_plans.iter().copied().map(Some).collect();
+                    push_case_apply(&mut work, scrutinee, arms, &arm_plans);
+                }
+            },
+            ApplyFrame::FinishDrop => {
+                let body = results.pop().expect("a reused continuation exists");
+                results.push(Comp::WithReuse {
+                    token,
+                    freed: Value::Var(freed),
+                    body: Box::new(body),
+                });
+            }
+            ApplyFrame::FinishBindFirst { binder, rest } => {
+                let first = results.pop().expect("a rewritten bound computation exists");
+                results.push(Comp::Bind(Box::new(first), binder, rest));
+            }
+            ApplyFrame::FinishBindRest { first, binder } => {
+                let rest = results.pop().expect("a rewritten continuation exists");
+                results.push(Comp::Bind(first, binder, Box::new(rest)));
+            }
+            ApplyFrame::FinishIfYes { condition, no } => {
+                let yes = results.pop().expect("a rewritten then branch exists");
+                results.push(Comp::If(condition, Box::new(yes), no));
+            }
+            ApplyFrame::FinishIfNo { condition, yes } => {
+                let no = results.pop().expect("a rewritten else branch exists");
+                results.push(Comp::If(condition, yes, Box::new(no)));
+            }
+            ApplyFrame::FinishIfBoth { condition } => {
+                let no = results.pop().expect("a rewritten else branch exists");
+                let yes = results.pop().expect("a rewritten then branch exists");
+                results.push(Comp::If(condition, Box::new(yes), Box::new(no)));
+            }
+            ApplyFrame::FinishCase {
+                scrutinee,
+                arms,
+                rewritten,
+            } => {
+                let start = results
+                    .len()
+                    .checked_sub(rewritten)
+                    .expect("each selected arm has a rewritten body");
+                let arms = {
+                    let mut bodies = results.drain(start..);
+                    let arms = arms
+                        .into_iter()
+                        .map(|arm| {
+                            let body = arm
+                                .body
+                                .unwrap_or_else(|| bodies.next().expect("a rewritten arm exists"));
+                            (arm.pattern, body)
+                        })
+                        .collect();
+                    let extra_body = bodies.next();
+                    debug_assert!(extra_body.is_none());
+                    arms
+                };
+                results.push(Comp::Case(scrutinee, arms));
+            }
+            ApplyFrame::FinishWithReuse { token, freed } => {
+                let body = results.pop().expect("a rewritten reuse body exists");
+                results.push(Comp::WithReuse {
+                    token,
+                    freed,
+                    body: Box::new(body),
+                });
+            }
+        }
+    }
+
+    let result = results.pop().expect("the root has a rewritten computation");
+    debug_assert!(results.is_empty());
+    result
+}
+
+fn push_case_apply(
+    work: &mut Vec<ApplyFrame>,
+    scrutinee: Value,
+    arms: Vec<(CorePat, Comp)>,
+    plans: &[Option<PlanId>],
+) {
+    debug_assert_eq!(arms.len(), plans.len());
+    let mut selected = Vec::new();
+    let mut slots = Vec::with_capacity(arms.len());
+    for ((pattern, body), plan) in arms.into_iter().zip(plans.iter().copied()) {
+        if let Some(plan) = plan {
+            slots.push(ArmSlot {
+                pattern,
+                body: None,
+            });
+            selected.push((body, plan));
+        } else {
+            slots.push(ArmSlot {
+                pattern,
+                body: Some(body),
+            });
+        }
+    }
+    work.push(ApplyFrame::FinishCase {
+        scrutinee,
+        arms: slots,
+        rewritten: selected.len(),
+    });
+    work.extend(
+        selected
+            .into_iter()
+            .rev()
+            .map(|(body, plan)| ApplyFrame::Comp(body, plan)),
+    );
+}
+
+struct ArmSlot {
+    pattern: CorePat,
+    body: Option<Comp>,
+}
+
+enum ApplyFrame {
+    Comp(Comp, PlanId),
+    FinishDrop,
+    FinishBindFirst {
+        binder: Sym,
+        rest: Box<Comp>,
+    },
+    FinishBindRest {
+        first: Box<Comp>,
+        binder: Sym,
+    },
+    FinishIfYes {
+        condition: Value,
+        no: Box<Comp>,
+    },
+    FinishIfNo {
+        condition: Value,
+        yes: Box<Comp>,
+    },
+    FinishIfBoth {
+        condition: Value,
+    },
+    FinishCase {
+        scrutinee: Value,
+        arms: Vec<ArmSlot>,
+        rewritten: usize,
+    },
+    FinishWithReuse {
+        token: Sym,
+        freed: Value,
+    },
 }
 
 const fn ctor_arity(v: &Value) -> usize {
@@ -205,4 +577,173 @@ const fn ctor_arity(v: &Value) -> usize {
 // The wired nullable allocates no cell, so it can never spend a reuse credit.
 fn is_or_null_alloc(v: &Value) -> bool {
     matches!(v, Value::Ctor(name, ..) if kw::is_or_null_ctor(name.as_str()))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{mem, thread};
+
+    use super::*;
+
+    const DEEP_REUSE_DEPTH: usize = 20_000;
+    const ORDINARY_TEST_STACK: usize = 2 * 1024 * 1024;
+    const TEST_CTOR_TAG: usize = 0;
+
+    fn allocation(name: &str, fields: usize) -> Comp {
+        Comp::Return(Value::Ctor(
+            Sym::new(name),
+            TEST_CTOR_TAG,
+            vec![Value::Unit; fields],
+        ))
+    }
+
+    fn drop_then(cell: Sym, body: Comp) -> Comp {
+        Comp::Bind(
+            Box::new(Comp::Drop(Value::Var(cell))),
+            Sym::new("_drop"),
+            Box::new(body),
+        )
+    }
+
+    fn one_arm_core(cell: Sym, fields: usize, body: Comp) -> Core {
+        Core {
+            fns: vec![CoreFn {
+                name: Sym::new("reuse_test"),
+                params: Vec::new(),
+                body: Comp::Case(
+                    Value::Var(cell),
+                    vec![(CorePat::Ctor(Sym::new("Shell"), vec![None; fields]), body)],
+                ),
+                dict_arity: 0,
+            }],
+        }
+    }
+
+    #[test]
+    fn reuse_spends_the_token_on_the_first_fitting_allocation() {
+        let cell = Sym::new("cell");
+        let body = drop_then(
+            cell,
+            Comp::Bind(
+                Box::new(allocation("TooWide", 2)),
+                Sym::new("wide"),
+                Box::new(allocation("Fits", 1)),
+            ),
+        );
+
+        let output = reuse(&one_arm_core(cell, 1, body));
+        let Comp::Case(_, arms) = &output.fns[0].body else {
+            panic!("reuse changed the enclosing case");
+        };
+        let Comp::WithReuse { token, body, .. } = &arms[0].1 else {
+            panic!("the freed shell did not seed a reuse token");
+        };
+        let Comp::Bind(first, binder, rest) = body.as_ref() else {
+            panic!("reuse changed the allocation bind");
+        };
+        assert!(matches!(
+            first.as_ref(),
+            Comp::Return(Value::Ctor(name, _, fields))
+                if name.as_str() == "TooWide" && fields.len() == 2
+        ));
+        assert_eq!(binder.as_str(), "wide");
+        assert!(matches!(
+            rest.as_ref(),
+            Comp::Reuse(spent, Value::Ctor(name, _, fields))
+                if spent == token && name.as_str() == "Fits" && fields.len() == 1
+        ));
+    }
+
+    #[test]
+    fn reuse_requires_every_path_after_the_drop_to_allocate() {
+        let cell = Sym::new("cell");
+        let branch = Comp::If(
+            Value::Bool(true),
+            Box::new(allocation("Fits", 1)),
+            Box::new(Comp::Return(Value::Int(0))),
+        );
+        let output = reuse(&one_arm_core(cell, 1, drop_then(cell, branch)));
+        let Comp::Case(_, arms) = &output.fns[0].body else {
+            panic!("reuse changed the enclosing case");
+        };
+        assert!(matches!(arms[0].1, Comp::Bind(..)));
+    }
+
+    #[test]
+    fn reuse_rewrites_exactly_one_pre_drop_branch() {
+        let cell = Sym::new("cell");
+        let body = Comp::If(
+            Value::Bool(true),
+            Box::new(drop_then(cell, allocation("Fits", 1))),
+            Box::new(Comp::Return(Value::Int(0))),
+        );
+        let output = reuse(&one_arm_core(cell, 1, body));
+        let Comp::Case(_, arms) = &output.fns[0].body else {
+            panic!("reuse changed the enclosing case");
+        };
+        let Comp::If(_, yes, no) = &arms[0].1 else {
+            panic!("reuse changed the conditional");
+        };
+        assert!(matches!(yes.as_ref(), Comp::WithReuse { .. }));
+        assert!(matches!(no.as_ref(), Comp::Return(Value::Int(0))));
+    }
+
+    #[test]
+    fn reuse_handles_deep_control_and_reconstruction_on_an_ordinary_stack() {
+        thread::Builder::new()
+            .name("deep-reuse".into())
+            .stack_size(ORDINARY_TEST_STACK)
+            .spawn(|| {
+                let cell = Sym::new("cell");
+                let mut body = allocation("Fits", 1);
+                for depth in 0..DEEP_REUSE_DEPTH {
+                    body = if depth % 2 == 0 {
+                        Comp::Bind(
+                            Box::new(Comp::Return(Value::Int(0))),
+                            Sym::new("_"),
+                            Box::new(body),
+                        )
+                    } else {
+                        Comp::If(
+                            Value::Bool(true),
+                            Box::new(body),
+                            Box::new(allocation("Fits", 1)),
+                        )
+                    };
+                }
+                let input = one_arm_core(cell, 1, drop_then(cell, body));
+                let output = reuse(&input);
+
+                let Comp::Case(_, arms) = &output.fns[0].body else {
+                    panic!("reuse changed the enclosing case");
+                };
+                let Comp::WithReuse { token, body, .. } = &arms[0].1 else {
+                    panic!("the deep path did not reuse its freed shell");
+                };
+                let mut cursor = body.as_ref();
+                for depth in (0..DEEP_REUSE_DEPTH).rev() {
+                    if depth % 2 == 0 {
+                        let Comp::Bind(first, binder, rest) = cursor else {
+                            panic!("reuse changed the deep bind spine");
+                        };
+                        assert!(matches!(first.as_ref(), Comp::Return(Value::Int(0))));
+                        assert_eq!(binder.as_str(), "_");
+                        cursor = rest;
+                    } else {
+                        let Comp::If(Value::Bool(true), yes, no) = cursor else {
+                            panic!("reuse changed the deep control spine");
+                        };
+                        assert!(matches!(no.as_ref(), Comp::Reuse(spent, _) if spent == token));
+                        cursor = yes;
+                    }
+                }
+                assert!(matches!(cursor, Comp::Reuse(spent, _) if spent == token));
+
+                mem::forget(output);
+                mem::forget(input);
+            })
+            .expect("spawn deep reuse test")
+            .join()
+            .expect("deep reuse test panicked");
+    }
 }

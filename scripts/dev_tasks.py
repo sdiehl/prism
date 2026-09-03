@@ -52,16 +52,9 @@ def run_filtered(
     return result.returncode
 
 
-# Deep pipeline tests (cursor binding powers, fixpoint flow) overflow the
-# default libtest thread stack; CI and the aggregate test recipe run with a
-# 32 MiB stack, so the filtered test and snapshot tasks must match.
-TEST_MIN_STACK = str(32 * 1024 * 1024)
-
-
 def cache_disabled() -> dict[str, str]:
     env = os.environ.copy()
     env["PRISM_COMPILER_CACHE"] = "0"
-    env["RUST_MIN_STACK"] = TEST_MIN_STACK
     return env
 
 

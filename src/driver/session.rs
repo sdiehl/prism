@@ -1,22 +1,26 @@
 use std::collections::BTreeMap;
+use std::io::{self, ErrorKind};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 #[cfg(feature = "native")]
 use crate::error::Error;
+use crate::lineage::{FactInput, FactOutcome, FactRecorder, QueryKind};
 #[cfg(feature = "native")]
-use crate::lineage::FactScope;
-use crate::lineage::{FactInput, FactOutcome, FactRecorder, QueryFact, QueryKind};
+use crate::lineage::{FactScope, QueryFact};
 #[cfg(feature = "native")]
 use crate::resolve::Root;
 #[cfg(feature = "native")]
-use crate::store::disk::{resolve_store_path, Store};
+use crate::store::disk::resolve_store_path;
+use crate::store::disk::{Store, StoreTransaction};
 
 use super::front::Front;
 use super::modules::CheckedModule;
 #[cfg(feature = "native")]
 use super::Config;
 
+#[cfg(feature = "native")]
 const QUERY_KEY_INPUT: &str = "query-key";
 
 // Lock a session memo, recovering (rather than propagating) a poisoned lock.
@@ -61,7 +65,7 @@ struct Inner {
 /// current source has been reparsed to refresh spans and diagnostics. Both key
 /// forms commit to the relevant compiler configuration.
 #[derive(Clone, Debug, Default)]
-pub struct CompilerSession(Arc<Inner>);
+pub struct CompilerSession(Arc<Inner>, Option<Arc<StoreTransaction>>);
 
 /// One query-boundary decision captured for lineage explanation.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -83,6 +87,7 @@ pub struct QueryDecision {
 }
 
 impl QueryDecision {
+    #[cfg(feature = "native")]
     pub(super) fn new(
         kind: QueryKind,
         identity: String,
@@ -105,6 +110,7 @@ impl QueryDecision {
         }
     }
 
+    #[cfg(feature = "native")]
     fn fact(&self) -> QueryFact {
         QueryFact {
             kind: self.kind,
@@ -132,6 +138,41 @@ impl CompilerSession {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    #[cfg(feature = "native")]
+    pub(super) fn with_store_transaction(&self, root: &Path) -> io::Result<Self> {
+        if self
+            .1
+            .as_ref()
+            .is_some_and(|transaction| transaction.store().root() == root)
+        {
+            return Ok(self.clone());
+        }
+        let transaction = Store::open_or_create(root)?.transaction();
+        Ok(Self(Arc::clone(&self.0), Some(Arc::new(transaction))))
+    }
+
+    pub(super) fn open_store(&self, root: &Path) -> io::Result<Store> {
+        self.1.as_ref().map_or_else(
+            || Store::open_or_create(root),
+            |transaction| {
+                if transaction.store().root() != root {
+                    return Err(io::Error::new(
+                        ErrorKind::InvalidInput,
+                        "compiler session transaction belongs to a different store root",
+                    ));
+                }
+                Ok(transaction.store().clone())
+            },
+        )
+    }
+
+    #[cfg(feature = "native")]
+    pub(super) fn commit_store_transaction(&self) -> io::Result<()> {
+        self.1
+            .as_ref()
+            .map_or(Ok(()), |transaction| transaction.commit())
     }
 
     #[must_use]
@@ -162,11 +203,11 @@ impl CompilerSession {
 
     #[cfg(feature = "native")]
     pub(super) fn commit_decisions(&self, roots: &[Root], cfg: &Config) -> Result<(), Error> {
-        if !cfg.flags.compiler_cache || cfg.flags.store {
+        if !cfg.flags().compiler_cache || cfg.flags().store {
             self.0.facts.clear();
             return Ok(());
         }
-        let store = Store::open_or_create(resolve_store_path(cfg.flags.store_path.as_deref()))?;
+        let store = self.open_store(&resolve_store_path(cfg.flags().store_path.as_deref()))?;
         self.0
             .facts
             .commit_retiring(&store, &FactScope::of_roots(roots), &[QueryKind::Effect])
@@ -184,6 +225,7 @@ impl CompilerSession {
         self.0.writes.fetch_add(1, Ordering::Relaxed);
     }
 
+    #[cfg(feature = "native")]
     pub(super) fn record_decision(&self, decision: QueryDecision) {
         self.0.facts.record(decision.fact());
         lock_recovering(&self.0.decisions)

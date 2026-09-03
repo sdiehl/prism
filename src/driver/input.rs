@@ -29,7 +29,7 @@ pub(super) fn load_front_inputs(
         field(&mut hasher, module.path.join(".").as_bytes());
         field(&mut hasher, module.source.as_bytes());
         hasher.finalize()
-    });
+    })?;
     for digest in module_digests {
         field(&mut raw, digest.as_bytes());
     }
@@ -75,7 +75,7 @@ pub(super) fn semantic_loaded_inputs_digest(
         let mut hasher = blake3::Hasher::new();
         field(&mut hasher, module.path.join(".").as_bytes());
         hash_tokens(&mut hasher, &module.source).map(|()| hasher.finalize())
-    });
+    })?;
     for digest in module_digests {
         field(&mut semantic, digest?.as_bytes());
     }

@@ -23,9 +23,9 @@ use crate::support::{
 
 fn fused() -> Config {
     let mut cfg = Config::from_env();
-    cfg.flags.fuse = true;
-    cfg.flags.compiler_cache = false;
-    cfg.flags.quiet = true;
+    cfg.update_flags(|flags| flags.fuse = true);
+    cfg.update_flags(|flags| flags.compiler_cache = false);
+    cfg.update_flags(|flags| flags.quiet = true);
     cfg
 }
 
@@ -50,28 +50,11 @@ fn fuse_cases() -> Vec<PathBuf> {
 // program the pass leaves byte-identical builds the same native binary either way,
 // so parity.rs already covers it and it is skipped here.
 fn touched_cases() -> Vec<PathBuf> {
-    // Discovery compiles this shard's corpus twice. Debug builds exceed libtest's
-    // smaller worker stack even though the same scan passes on the public
-    // compiler's 8 MiB main-thread stack. The selected cases still run through
-    // `parallel_check`, whose workers retain their separate interpreter budget.
-    let result = std::thread::Builder::new()
-        .name("fusion-case-discovery".into())
-        .stack_size(8 * 1024 * 1024)
-        .spawn(touched_cases_on_compiler_stack)
-        .expect("spawning fusion case discovery")
-        .join();
-    match result {
-        Ok(cases) => cases,
-        Err(payload) => std::panic::resume_unwind(payload),
-    }
-}
-
-fn touched_cases_on_compiler_stack() -> Vec<PathBuf> {
     let base = Path::new(".");
     let roots = default_roots(base);
     let mut off = Config::from_env();
-    off.flags.compiler_cache = false;
-    off.flags.quiet = true;
+    off.update_flags(|flags| flags.compiler_cache = false);
+    off.update_flags(|flags| flags.quiet = true);
     let on = fused();
     let candidates = sharded_corpus();
     let selected = Mutex::new(Vec::new());

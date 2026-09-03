@@ -29,11 +29,10 @@ check FILE:
 tc +FILES: build-release
     PRISM_TOOL_PACKAGES_ROOT=packages ./target/release/prism bootstrap check {{ FILES }} --json
 
-# Run the full test suite with compact output; deep-recursion tests need the
-# same enlarged libtest stack the ci test recipe sets.
+# Run the full test suite with compact output.
 [group('development')]
 t:
-    RUST_MIN_STACK=33554432 PRISM_COMPILER_CACHE=0 cargo nextest run --all
+    PRISM_COMPILER_CACHE=0 cargo nextest run --all
     PRISM_COMPILER_CACHE=0 cargo test --workspace --doc
 
 # Run one test target or filter with compact output.

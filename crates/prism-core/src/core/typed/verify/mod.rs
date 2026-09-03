@@ -29,6 +29,12 @@ pub use instantiate::{
     instantiate_constructor, instantiate_fn, instantiate_operation, instantiate_value_scheme,
     scheme_to_fn_sig,
 };
+pub(crate) use subst::{
+    clone_comp_sig, clone_core_instantiation, clone_core_type, clone_type, discard_comp_sig,
+    discard_core_fn_sig, discard_core_instantiation, discard_core_type, discard_type,
+    rename_row_variable_in_row, rename_row_variable_in_type, rename_type_variable,
+    rename_type_variable_in_row,
+};
 pub use subst::{
     rename_bound_core, substitute_core_type, substitute_fn_sig, substitute_label, substitute_row,
     substitute_sig, substitute_type,

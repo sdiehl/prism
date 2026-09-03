@@ -1,5 +1,6 @@
 ---
 source: tests/snapshots.rs
+assertion_line: 78
 expression: "lines.join(\"\\n\")"
 ---
 class 2078cb7c87ae644d  Traversable
@@ -105,6 +106,7 @@ inst  43324d7381116f3e  eqSyntax.TcInput.TcEffect
 inst  4350b4a8678f83ed  showSyntax.Cursor.Assoc
 inst  4387745f00fecb1f  showSyntax.TcInput.TcConstraint
 inst  441f7472f2cffc7e  showSyntax.Analysis.ExprCensus
+inst  44f6644d711bb93a  eqNet.NetError
 inst  451b31f7a22794fc  monoidAny
 inst  4560e9377e48dd9f  toJsonList
 inst  456e8ac670885c5c  eqSyntax.TcInput.TcFunction
@@ -121,6 +123,7 @@ inst  4b44a6ec7a580011  showSyntax.TcInput.TcParam
 inst  4ba30f43551c49c0  eqSyntax.Resolved.RParam
 inst  4c3cb335a141aec5  arbitraryInt
 inst  4c4cb986e3324432  showSyntax.TcInput.TcOp
+inst  4d4555c3f3a97019  showNet.NetError
 inst  4da38a4d8d977ede  ordFloat
 inst  50f0a8ec4ba07a2c  semigroupMin
 inst  516ef485f41c0348  eqTime.Duration
@@ -155,11 +158,13 @@ inst  658ca0080398f99a  serializeBytes
 inst  65c8144901dbb384  showU64
 inst  65f0d8491a302210  fromJsonOption
 inst  68897a0bd1df1704  blitBytes
+inst  68b1ec92e6d4fa62  showTeleport.MoveError
 inst  6955d71f87691cb7  eqCli.OptSpec
 inst  69bcebf96630c05f  eqSyntax.Diagnostic.Diagnostic
 inst  6bf77963d2835d11  hashBool
 inst  6d5e31da94f4778b  eqCli.CliError
 inst  6fcbf2461615a5f1  eqBinder
+inst  70ff41f2b903d3ad  eqTeleport.MoveError
 inst  73385fccffce175c  hashI64
 inst  73dbcb4eb02f74d9  ordInt
 inst  74fd5c789c54f243  showSyntax.TcInput.TcImport
@@ -318,6 +323,7 @@ shape 0b85862efc43db44  Return
 shape 0bea40f3e3fc5466  Syntax.Parse.DeclStable@StableEntry
 shape 0d1f94481e39064a  Syntax.TcInput.TcData
 shape 0d7b377400f29cee  Time.Instant
+shape 0dcb399e6f72f917  Net.Listener
 shape 0ea202f40c78ad00  Syntax.Ast.RungField
 shape 0ecf6d3704b480a4  Var@n@5
 shape 0fbb371977b8d30b  Syntax.Cursor.Reply
@@ -352,6 +358,7 @@ shape 2bd557307189be3e  Var@start@22
 shape 2d69fdcb88366d8f  Syntax.Edit.EditError
 shape 2e2c895e7a9c6000  Syntax.Parse.ParseFailure
 shape 306ed51ad6130672  Data.Ordered.OrdWitness
+shape 30aa6cac1686ff56  Net.Stream
 shape 340e6c214f8e3e3e  Data.FlatArray.FlatArray
 shape 34d62da3b5f5e8f5  Fail
 shape 368d4ac32ea13b56  Var@i@20
@@ -420,6 +427,7 @@ shape 757266f1d3f6a31d  Syntax.Codec.CodecError
 shape 7580872f19f08831  Var@i@31
 shape 75813e248aa381fb  Syntax.Rename.RenameRefusal
 shape 7979d5418f9ff395  Var@forest@48
+shape 7bb9bf199e8ea243  Net.Net
 shape 7db470a4f0f7b24a  Map
 shape 7e6a1ea832afe769  Syntax.Diagnostic.Diagnostic
 shape 7eec195c26629563  Syntax.Layout@Ph2R
@@ -468,6 +476,7 @@ shape a36bf80ff796109b  Incr@TSnap
 shape a3bad7ae82d55f81  Incr@TSt
 shape a40d2b4741765d6b  Syntax.Parse.Decl@FnSpec
 shape a462cecccfb3fb86  Syntax.Token.Trivia
+shape a51f8fe941e84d4c  Net.NetError
 shape a64ee52a28f150b4  Control.Solve.Solve
 shape a6e3a080ccaadc14  Syntax.Ast.CtorShape
 shape a8b27fd51352a31d  Syntax.Parse.Expr@Binding
@@ -486,6 +495,7 @@ shape bc9820775b8b8f5c  Syntax.Parse.Expr@LPath
 shape bcea85bb694bd0ef  Incr@SnapEntry
 shape bd01635639876663  Var@cell@3
 shape be31d77fbf1ef21e  Wire.Loss
+shape be882da5eedcc6fc  Net.Received
 shape be8b92fc3789d24c  Var@e@34
 shape bf845a5492bd2eaf  HashMap
 shape c077aa62814bad6e  Syntax.Parse.Decl@PVis
@@ -501,6 +511,7 @@ shape c6db779f33e21aa6  Syntax.Analysis.ExprCensus
 shape c8037a7d23e8d11f  Data.Tensor.Tensor
 shape c814f7500cb0713d  Syntax.Ast.Constraint
 shape ca8831d021bc5a35  Console
+shape cabc667a276d6d44  Teleport.MoveError
 shape cbdfe1cab7de5cac  Var@j@12
 shape cc15463d9136bcac  Syntax.Ast.Migration
 shape d062629a71942a58  Data.Name.Binder
@@ -530,6 +541,7 @@ shape e73c96cbcc016163  Var@j@10
 shape e85639d71741903d  Incr.Incr
 shape e93ea0631e3da76b  Var@out@39
 shape e944aad617d34df6  Data.Ordered.OrderedMap
+shape e9ed615f57d89edf  Teleport.Placement
 shape eae20352bc9ae43c  Emit
 shape eb4df79e3fb53a6b  Data.Validation.Validation
 shape ec6bbac60133f01a  Concurrent@Signal

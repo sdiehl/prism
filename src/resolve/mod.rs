@@ -889,9 +889,20 @@ impl<'a> Rw<'a> {
             .iter()
             .map(|sd| (sd.name.clone(), routes_to_current(sd)))
             .collect();
+        // Opacity is a property of a declaration, so the set naming the opaque
+        // ones has to be rewritten with them. Modules merge into one flat
+        // program, and a set still holding the module-local `Stream` says
+        // nothing about the `Net.Stream` that program declares: every later
+        // question about opacity would then answer "transparent" for every
+        // imported opaque type.
+        let mut opaques = BTreeSet::new();
         for d in &mut p.types {
             self.at(d.span);
+            let opaque = p.opaques.contains(&d.name);
             d.name = self.canon(&d.name);
+            if opaque {
+                opaques.insert(d.name.clone());
+            }
             for c in &mut d.ctors {
                 c.name = self.canon(&c.name);
                 for a in &mut c.args {
@@ -904,6 +915,7 @@ impl<'a> Rw<'a> {
                 }
             }
         }
+        p.opaques = opaques;
         for e in &mut p.effects {
             self.at(e.span);
             e.name = self.canon(&e.name);
@@ -1094,45 +1106,27 @@ impl<'a> Rw<'a> {
     }
 
     fn ty(&mut self, t: &mut Ty) {
+        // Only two shapes carry a name of their own: a constructor head, and the
+        // effect labels of a function type or row literal. A higher-kinded
+        // application `f(a, ..)` has a bound type variable at its head, never a
+        // top-level name, so its head is left alone.
         match t {
-            Ty::Con(name, args) => {
-                *name = self.value(name, Span::empty(0));
-                for a in args {
-                    self.ty(a);
-                }
-            }
-            Ty::Fun(params, row, ret) => {
-                for p in params {
-                    self.ty(p);
-                }
-                if let Row::Cons(labels, _) = row {
-                    for l in labels {
-                        self.efflabel(l);
-                    }
-                }
-                self.ty(ret);
-            }
-            Ty::Forall(_, inner) => self.ty(inner),
-            Ty::Tuple(items) => {
-                for i in items {
-                    self.ty(i);
-                }
-            }
-            Ty::RowLit(Row::Cons(labels, _)) => {
+            Ty::Con(name, _) => *name = self.value(name, Span::empty(0)),
+            Ty::Fun(_, Row::Cons(labels, _), _) | Ty::RowLit(Row::Cons(labels, _)) => {
+                // The label carries the span of its own name, so this is one of
+                // the sites whose position is exact enough to record as an
+                // occurrence.
                 for l in labels {
-                    self.efflabel(l);
-                }
-            }
-            // Higher-kinded application `f(a, ..)`: the head is a bound type
-            // variable (never a top-level name), but the arguments carry
-            // references that still need canonicalizing.
-            Ty::App(_, args) => {
-                for a in args {
-                    self.ty(a);
+                    l.name = self.value_ref(&l.name, l.span);
                 }
             }
             _ => {}
         }
+        // Structural recursion goes through the one exhaustive statement of
+        // `Ty`'s children, so a type nested under a variant this match does not
+        // mention (a coeffect-annotated domain, an unboxed field) still gets its
+        // constructor names canonicalized.
+        t.each_child_mut(&mut |c| self.ty(c));
     }
 
     fn expr(&mut self, e: &mut S<Expr>) {

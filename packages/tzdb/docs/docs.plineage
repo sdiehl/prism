@@ -25,19 +25,7 @@
       }
     },
     {
-      "id": "prism-core-hash-v2:276493f4895ed66f47aa825c9066a71d521e7a737b257acfb002572d6cbe6cca",
-      "kind": "source-root",
-      "payload": {
-        "role": "source",
-        "name": null,
-        "origin": null,
-        "artifact_kind": "namespace",
-        "scheme": "prism-core-hash-v2",
-        "root": "276493f4895ed66f47aa825c9066a71d521e7a737b257acfb002572d6cbe6cca"
-      }
-    },
-    {
-      "id": "prism-core-hash-v2:a684f8cd89f4370b57fbcdfe0e682a064e82d61bc6a1dc5faee19647cf0f2851",
+      "id": "prism-core-hash-v2:03d40d70fcd66dc8d8487a77ad63de56379fb23f22f87198f2edcf674eb93c43",
       "kind": "stdlib-root",
       "payload": {
         "role": "stdlib",
@@ -45,7 +33,19 @@
         "origin": null,
         "artifact_kind": "embedded-stdlib",
         "scheme": "prism-core-hash-v2",
-        "root": "a684f8cd89f4370b57fbcdfe0e682a064e82d61bc6a1dc5faee19647cf0f2851"
+        "root": "03d40d70fcd66dc8d8487a77ad63de56379fb23f22f87198f2edcf674eb93c43"
+      }
+    },
+    {
+      "id": "prism-core-hash-v2:cb0582c5b9b7ded23f59e0c14e6fdffb59b644b9670928ba1e5456ca3ab4e741",
+      "kind": "source-root",
+      "payload": {
+        "role": "source",
+        "name": null,
+        "origin": null,
+        "artifact_kind": "namespace",
+        "scheme": "prism-core-hash-v2",
+        "root": "cb0582c5b9b7ded23f59e0c14e6fdffb59b644b9670928ba1e5456ca3ab4e741"
       }
     },
     {
@@ -55,6 +55,91 @@
         "location": "Tzdb::offset_minutes_at",
         "output_scheme": "sha256",
         "output_digest": "6ed5cadf4614cc8680b6a413a231c35873b57300fb6c35d0f1f98aa18ade71cd"
+      }
+    },
+    {
+      "id": "sha256:0edb877bf0ce67907bc66c687d963d02a1f6d8a789bc5d046db39e0806d20cb8",
+      "kind": "compiler-identity",
+      "payload": {
+        "fingerprint": "compiler=0.21.0;hash-scheme=prism-core-hash-v2;target=aarch64-apple-darwin;backend=docs;source-root=prism-core-hash-v2:cb0582c5b9b7ded23f59e0c14e6fdffb59b644b9670928ba1e5456ca3ab4e741;stdlib-root=prism-core-hash-v2:03d40d70fcd66dc8d8487a77ad63de56379fb23f22f87198f2edcf674eb93c43;opt=O1;passes=level-default;disabled=none;backend-opt=2;scheduler=cooperative;effect-tier=auto;erasures=true;native-effects=true;trampoline=true;fuse=false;borrow-infer=true;rt-checks=false;native-kont-frames=false;",
+        "rows": [
+          {
+            "key": "compiler",
+            "value": "0.21.0"
+          },
+          {
+            "key": "hash-scheme",
+            "value": "prism-core-hash-v2"
+          },
+          {
+            "key": "target",
+            "value": "aarch64-apple-darwin"
+          },
+          {
+            "key": "backend",
+            "value": "docs"
+          },
+          {
+            "key": "source-root",
+            "value": "prism-core-hash-v2:cb0582c5b9b7ded23f59e0c14e6fdffb59b644b9670928ba1e5456ca3ab4e741"
+          },
+          {
+            "key": "stdlib-root",
+            "value": "prism-core-hash-v2:03d40d70fcd66dc8d8487a77ad63de56379fb23f22f87198f2edcf674eb93c43"
+          },
+          {
+            "key": "opt",
+            "value": "O1"
+          },
+          {
+            "key": "passes",
+            "value": "level-default"
+          },
+          {
+            "key": "disabled",
+            "value": "none"
+          },
+          {
+            "key": "backend-opt",
+            "value": "2"
+          },
+          {
+            "key": "scheduler",
+            "value": "cooperative"
+          },
+          {
+            "key": "effect-tier",
+            "value": "auto"
+          },
+          {
+            "key": "erasures",
+            "value": "true"
+          },
+          {
+            "key": "native-effects",
+            "value": "true"
+          },
+          {
+            "key": "trampoline",
+            "value": "true"
+          },
+          {
+            "key": "fuse",
+            "value": "false"
+          },
+          {
+            "key": "borrow-infer",
+            "value": "true"
+          },
+          {
+            "key": "rt-checks",
+            "value": "false"
+          },
+          {
+            "key": "native-kont-frames",
+            "value": "false"
+          }
+        ]
       }
     },
     {
@@ -100,87 +185,6 @@
         "location": "Tzdb::abbrev_at",
         "output_scheme": "sha256",
         "output_digest": "f9f30a03dbf6d13fadebc24c5de77d2bec1e709761de0f5ad5b40386f9b6b444"
-      }
-    },
-    {
-      "id": "sha256:74732925f33ae72fa177250bed56a1899a71d2bc3e723eced19715fad5f751b8",
-      "kind": "compiler-identity",
-      "payload": {
-        "fingerprint": "compiler=0.19.0;hash-scheme=prism-core-hash-v2;target=aarch64-apple-darwin;backend=docs;source-root=prism-core-hash-v2:276493f4895ed66f47aa825c9066a71d521e7a737b257acfb002572d6cbe6cca;stdlib-root=prism-core-hash-v2:a684f8cd89f4370b57fbcdfe0e682a064e82d61bc6a1dc5faee19647cf0f2851;opt=O1;passes=level-default;disabled=none;backend-opt=2;scheduler=cooperative;effect-tier=auto;erasures=true;native-effects=true;trampoline=true;fuse=false;rt-checks=false;native-kont-frames=false;",
-        "rows": [
-          {
-            "key": "compiler",
-            "value": "0.19.0"
-          },
-          {
-            "key": "hash-scheme",
-            "value": "prism-core-hash-v2"
-          },
-          {
-            "key": "target",
-            "value": "aarch64-apple-darwin"
-          },
-          {
-            "key": "backend",
-            "value": "docs"
-          },
-          {
-            "key": "source-root",
-            "value": "prism-core-hash-v2:276493f4895ed66f47aa825c9066a71d521e7a737b257acfb002572d6cbe6cca"
-          },
-          {
-            "key": "stdlib-root",
-            "value": "prism-core-hash-v2:a684f8cd89f4370b57fbcdfe0e682a064e82d61bc6a1dc5faee19647cf0f2851"
-          },
-          {
-            "key": "opt",
-            "value": "O1"
-          },
-          {
-            "key": "passes",
-            "value": "level-default"
-          },
-          {
-            "key": "disabled",
-            "value": "none"
-          },
-          {
-            "key": "backend-opt",
-            "value": "2"
-          },
-          {
-            "key": "scheduler",
-            "value": "cooperative"
-          },
-          {
-            "key": "effect-tier",
-            "value": "auto"
-          },
-          {
-            "key": "erasures",
-            "value": "true"
-          },
-          {
-            "key": "native-effects",
-            "value": "true"
-          },
-          {
-            "key": "trampoline",
-            "value": "true"
-          },
-          {
-            "key": "fuse",
-            "value": "false"
-          },
-          {
-            "key": "rt-checks",
-            "value": "false"
-          },
-          {
-            "key": "native-kont-frames",
-            "value": "false"
-          }
-        ]
       }
     },
     {
@@ -258,18 +262,23 @@
     },
     {
       "from": "sha256:a2ac8ab18e5ee4384983c3c087761be6c770a03d128318b41b49aa4db5978bef",
-      "to": "prism-core-hash-v2:276493f4895ed66f47aa825c9066a71d521e7a737b257acfb002572d6cbe6cca",
+      "to": "prism-core-hash-v2:03d40d70fcd66dc8d8487a77ad63de56379fb23f22f87198f2edcf674eb93c43",
       "kind": "input"
     },
     {
       "from": "sha256:a2ac8ab18e5ee4384983c3c087761be6c770a03d128318b41b49aa4db5978bef",
-      "to": "prism-core-hash-v2:a684f8cd89f4370b57fbcdfe0e682a064e82d61bc6a1dc5faee19647cf0f2851",
+      "to": "prism-core-hash-v2:cb0582c5b9b7ded23f59e0c14e6fdffb59b644b9670928ba1e5456ca3ab4e741",
       "kind": "input"
     },
     {
       "from": "sha256:a2ac8ab18e5ee4384983c3c087761be6c770a03d128318b41b49aa4db5978bef",
       "to": "sha256:0570239e84d6f772113f5d24d02e57b9f342cde37937b67335927f08148aa74d",
       "kind": "produced"
+    },
+    {
+      "from": "sha256:a2ac8ab18e5ee4384983c3c087761be6c770a03d128318b41b49aa4db5978bef",
+      "to": "sha256:0edb877bf0ce67907bc66c687d963d02a1f6d8a789bc5d046db39e0806d20cb8",
+      "kind": "identified-by"
     },
     {
       "from": "sha256:a2ac8ab18e5ee4384983c3c087761be6c770a03d128318b41b49aa4db5978bef",
@@ -295,11 +304,6 @@
       "from": "sha256:a2ac8ab18e5ee4384983c3c087761be6c770a03d128318b41b49aa4db5978bef",
       "to": "sha256:5df22d78e4780cdfc4a9bb72bccf746ee52befd78048e2b8b7d71098c3e3b5b4",
       "kind": "produced"
-    },
-    {
-      "from": "sha256:a2ac8ab18e5ee4384983c3c087761be6c770a03d128318b41b49aa4db5978bef",
-      "to": "sha256:74732925f33ae72fa177250bed56a1899a71d2bc3e723eced19715fad5f751b8",
-      "kind": "identified-by"
     },
     {
       "from": "sha256:a2ac8ab18e5ee4384983c3c087761be6c770a03d128318b41b49aa4db5978bef",

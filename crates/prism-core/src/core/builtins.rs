@@ -274,6 +274,9 @@ const IMM0: AbiSpec = AbiSpec::new(&[0], &[], AbiResult::Raw);
 // Two immediate args (length and init byte); cell result.
 #[cfg(feature = "native")]
 const IMM01: AbiSpec = AbiSpec::new(&[0, 1], &[], AbiResult::Raw);
+// Immediate handle arg 0, buffer arg 1 raw, immediate offset arg 2; cell result.
+#[cfg(feature = "native")]
+const IMM02: AbiSpec = AbiSpec::new(&[0, 2], &[], AbiResult::Raw);
 // One boxed-float arg; raw result.
 #[cfg(feature = "native")]
 const F0: AbiSpec = AbiSpec::new(&[], &[0], AbiResult::Raw);
@@ -479,6 +482,30 @@ builtins! {
     WallNow "prim_wall_now" "WallNow" 92 RETAG surface 0 Str "() -> Int ! {IO}";
     MonoNow "prim_mono_now" "MonoNow" 93 RETAG surface 0 Str "() -> Int ! {IO}";
     Entropy "prim_entropy" "Entropy" 122 RETAG surface 0 Str "() -> Int ! {IO}";
+    // The stream-socket boundary, behind `Std.Net`. A handle is a logical
+    // identity allocated from a per-process counter, never a file descriptor:
+    // both tiers number their sockets the same way, so a recorded observation
+    // names the same socket in the interpreter and in a native binary. The error
+    // side is a small classification code, not `errno`, because errno numbers
+    // differ across platforms and would make the same failure a different value
+    // on Linux and macOS; `Net.pr` maps a code to the `NetError` it names.
+    NetListen "prim_net_listen" "NetListen" 139 IDX12 surface 3 Str "(String, Int, Int) -> Result(Int, Int) ! {IO}" flags [OffPlatform];
+    NetAccept "prim_net_accept" "NetAccept" 140 IMM0 surface 1 Str "(Int) -> Result(Int, Int) ! {IO}" flags [OffPlatform];
+    NetConnect "prim_net_connect" "NetConnect" 141 IDX1 surface 2 Str "(String, Int) -> Result(Int, Int) ! {IO}" flags [OffPlatform];
+    NetRecv "prim_net_recv" "NetRecv" 142 IMM01 surface 2 Str "(Int, Int) -> Result(Buf, Int) ! {IO}" flags [OffPlatform];
+    NetSend "prim_net_send" "NetSend" 143 IMM02 surface 3 Str "(Int, Buf, Int) -> Result(Int, Int) ! {IO}" flags [OffPlatform];
+    NetClose "prim_net_close" "NetClose" 144 IMM0 surface 1 Str "(Int) -> Result(Unit, Int) ! {IO}" flags [OffPlatform];
+    NetLocalAddr "prim_net_local_addr" "NetLocalAddr" 145 IMM0 surface 1 Str "(Int) -> Result(String, Int) ! {IO}" flags [OffPlatform];
+    NetPeerAddr "prim_net_peer_addr" "NetPeerAddr" 146 IMM0 surface 1 Str "(Int) -> Result(String, Int) ! {IO}" flags [OffPlatform];
+    // The mobility envelope behind `Std.Teleport`. `prim_kont_encode` freezes a
+    // portable nullary closure into a `kont`-kind frame carrying its code, its
+    // captured values, and the code-identity digest of the bundle it belongs to.
+    // `prim_kont_resume` is the inverse in a second process: it refuses a frame
+    // whose digest is not this program's, then runs the closure here, exactly
+    // once. The error side is a classification code for the same reason the
+    // socket boundary's is; `Teleport.pr` maps a code to the failure it names.
+    KontEncode "prim_kont_encode" "KontEncode" 147 RAW surface 1 Str "forall a. ((() -> a ! {IO}) @ {once, portable}) -> Result(Buf, Int) ! {IO}" flags [OffPlatform];
+    KontResume "prim_kont_resume" "KontResume" 148 RAW surface 1 Str "(Buf) -> Result(Unit, Int) ! {IO}" flags [OffPlatform];
     ShowInt "show_int" "ShowInt" 24 RAW surface 1 Str "(Int) -> String";
     ShowI64 "show_i64" "ShowI64" 25 RAW surface 1 Str "(I64) -> String";
     ShowU64 "show_u64" "ShowU64" 26 RAW surface 1 Str "(U64) -> String";
@@ -791,6 +818,16 @@ mod tag_tests {
                 (Builtin::WallNow, "WallNow"),
                 (Builtin::MonoNow, "MonoNow"),
                 (Builtin::Entropy, "Entropy"),
+                (Builtin::NetListen, "NetListen"),
+                (Builtin::NetAccept, "NetAccept"),
+                (Builtin::NetConnect, "NetConnect"),
+                (Builtin::NetRecv, "NetRecv"),
+                (Builtin::NetSend, "NetSend"),
+                (Builtin::NetClose, "NetClose"),
+                (Builtin::NetLocalAddr, "NetLocalAddr"),
+                (Builtin::NetPeerAddr, "NetPeerAddr"),
+                (Builtin::KontEncode, "KontEncode"),
+                (Builtin::KontResume, "KontResume"),
                 (Builtin::ShowInt, "ShowInt"),
                 (Builtin::ShowI64, "ShowI64"),
                 (Builtin::ShowU64, "ShowU64"),

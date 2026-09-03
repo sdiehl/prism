@@ -1,0 +1,21 @@
+-- Compiler fixture for callback allocation summaries across an iterator.
+-- `sum_with` folds its callback over a list; the first caller passes an
+-- allocation-free arithmetic closure, the second passes one that allocates a
+-- cell per element. Today the wrapper's interface carries no allocation
+-- requirement, so both calls pay the same conservative treatment. A checked
+-- callable summary lets the first call prove the whole fold allocation-free
+-- while the second must remain conservative; both sums print identically
+-- regardless.
+
+import Data.List (..)
+
+fn sum_with(f : (Int) -> Int, xs : List(Int)) : Int =
+  match xs of
+    Nil => 0
+    Cons(h, t) => f(h) + sum_with(f, t)
+
+fn main() : Unit ! {IO} =
+  let xs = range(1, 10)
+  let lean = sum_with(\(n : Int) -> n * 2, xs)
+  let boxy = sum_with(\(n : Int) -> length(Cons(n, Nil)), xs)
+  println(lean + boxy)

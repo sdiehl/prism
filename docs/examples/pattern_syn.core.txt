@@ -15,10 +15,6 @@ fn view@OnXAxis(v) =
     return Some(t@737)
   else
     return None
-fn make@OnXAxis(x) =
-  return x to t@739
-  return 0 to t@740
-  return Vec2(t@739, t@740)
 fn describe(v) =
   return v to t@741
   case t@741 of

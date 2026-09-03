@@ -606,9 +606,9 @@ pub fn why_recompiled_cmd(file: Option<&Path>, cfg: &Config) -> CmdResult {
             return Ok(());
         }
     };
-    let session = cfg.session.clone().unwrap_or_default();
+    let session = cfg.session().cloned().unwrap_or_default();
     let mut explain_cfg = cfg.clone();
-    explain_cfg.session = Some(session.clone());
+    explain_cfg.set_session(Some(session.clone()));
     let report = check_modules_on(&full, &roots, &explain_cfg)
         .map_err(|error| (error, full.clone(), name.clone()))?;
     let fact_lines = module_fact_lines(&roots, &report, cfg)
@@ -664,10 +664,10 @@ pub fn why_recompiled_cmd(file: Option<&Path>, cfg: &Config) -> CmdResult {
 
 // The durable store the fact ledger lives in, when the compiler cache is on.
 fn fact_store(cfg: &Config) -> Result<Option<Store>, Error> {
-    if !cfg.flags.compiler_cache || cfg.flags.store {
+    if !cfg.flags().compiler_cache || cfg.flags().store {
         return Ok(None);
     }
-    Store::open_or_create(resolve_store_path(cfg.flags.store_path.as_deref()))
+    Store::open_or_create(resolve_store_path(cfg.flags().store_path.as_deref()))
         .map(Some)
         .map_err(Error::Io)
 }

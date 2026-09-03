@@ -113,7 +113,7 @@ pub fn at_hole_cmd(arg: Option<&Path>, fill: bool, json: bool, cfg: &Config) -> 
     let checked = check_allow_holes_on_in(&program, &roots, cfg)
         .map_err(|e| (e, program.clone(), name.clone()))?;
     let map = SourceMap::new(&program);
-    let sites = sites(&checked.holes, &map);
+    let sites = sites(&checked.reports.holes, &map);
     if json {
         emit_json(&sites, &name);
     } else {

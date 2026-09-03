@@ -6,6 +6,7 @@ use std::process::{self, ExitCode};
 use clap::{Parser, Subcommand};
 use prism::cli::type_query::{default_search_limit, default_synth_depth, default_synth_limit};
 use prism::cli::{self, CmdResult, ExampleStdin};
+use prism::core::opt::OptimizationPlan;
 use prism::error::Error;
 
 const DEFAULT_EXAMPLES_DIR: &str = "examples";
@@ -277,7 +278,7 @@ enum Cmd {
     /// interface, module-graph, core, core-json, core-identity, core-hash, tc-input, tc-facts,
     /// elab-input, native-kont-table, native-kont-state-map, shape, dupes,
     /// namespace, stdlib-hash, fbip, lowered, tier, effect-plan, tier-explain, captures,
-    /// usage-summary,
+    /// optimizer-facts, usage-summary,
     /// usage-summary-md, usage-summary-json, llvm, mlir, verify, smt, totality.
     Dump { phase: String, file: PathBuf },
     /// Behavior or lineage diff by content hash
@@ -761,17 +762,19 @@ fn main() -> ExitCode {
     // threads through every compile call, replacing the old process-global knobs.
     let toml_base = prism::project::flag_overrides(Path::new("."), prism::DynFlags::default());
     let mut cfg = prism::Config::from_flags(prism::DynFlags::from_env_over(&toml_base));
-    cfg.session = Some(prism::CompilerSession::new());
+    cfg.set_session(Some(prism::CompilerSession::new()));
     if let Some(s) = &cli.opt {
         let Some(level) = prism::OptLevel::parse(s) else {
             eprintln!("invalid optimization level `-O{s}` (expected 0, 1, or 2)");
             return ExitCode::FAILURE;
         };
-        cfg.flags.opt_level = level;
+        cfg.update_flags(|flags| flags.opt_level = level);
     }
     if let Some(s) = &cli.passes {
         match prism::PassSpec::parse(s) {
-            Ok(spec) => cfg.passes = Some(spec),
+            Ok(spec) => {
+                cfg.set_optimization_plan(OptimizationPlan::explicit(spec));
+            }
             Err(e) => {
                 eprintln!("error: invalid pass specification: {e}");
                 return ExitCode::FAILURE;
@@ -786,97 +789,101 @@ fn main() -> ExitCode {
             );
             return ExitCode::FAILURE;
         };
-        cfg.flags.backend_opt = level;
+        cfg.update_flags(|flags| flags.backend_opt = level);
     }
     if cli.direct_object {
-        cfg.flags.direct_object = true;
+        cfg.update_flags(|flags| flags.direct_object = true);
     }
     if let Some(s) = &cli.scheduler {
         let Some(sched) = prism::Scheduler::parse(s) else {
             eprintln!("invalid scheduler `--scheduler {s}` (expected cooperative, fifo, or lifo)");
             return ExitCode::FAILURE;
         };
-        cfg.flags.scheduler = sched;
+        cfg.update_flags(|flags| flags.scheduler = sched);
     }
-    cfg.disabled.extend(
-        [
-            (cli.no_erase_newtypes, prism::CorePass::EraseNewtypes),
-            (cli.no_specialize, prism::CorePass::Specialize),
-            (cli.no_ho_spec, prism::CorePass::HoSpecialize),
-            (cli.no_simplify, prism::CorePass::Simplify),
-            (cli.no_inline, prism::CorePass::Inline),
-            (cli.no_cse, prism::CorePass::Cse),
-            (cli.no_fuse, prism::CorePass::Fuse),
-        ]
-        .into_iter()
-        .filter_map(|(off, pass)| off.then_some(pass)),
-    );
+    for pass in [
+        (cli.no_erase_newtypes, prism::CorePass::EraseNewtypes),
+        (cli.no_specialize, prism::CorePass::Specialize),
+        (cli.no_ho_spec, prism::CorePass::HoSpecialize),
+        (cli.no_simplify, prism::CorePass::Simplify),
+        (cli.no_inline, prism::CorePass::Inline),
+        (cli.no_cse, prism::CorePass::Cse),
+        (cli.no_fuse, prism::CorePass::Fuse),
+    ]
+    .into_iter()
+    .filter_map(|(off, pass)| off.then_some(pass))
+    {
+        if let Err(error) = cfg.disable_pass(pass) {
+            eprintln!("error: invalid optimizer policy: {error}");
+            return ExitCode::FAILURE;
+        }
+    }
     // Behavior toggles: the env baseline (via `from_env`) stands unless a flag
     // overrides it, the same "explicit flag wins" rule as `-O`/`--scheduler`.
     if cli.no_native_effects {
-        cfg.flags.native_effects = false;
+        cfg.update_flags(|flags| flags.native_effects = false);
     }
     if cli.no_trampoline {
-        cfg.flags.trampoline = false;
+        cfg.update_flags(|flags| flags.trampoline = false);
     }
     if cli.fuse {
-        cfg.flags.fuse = true;
+        cfg.update_flags(|flags| flags.fuse = true);
     }
     if cli.core_lint {
-        cfg.flags.core_lint = true;
+        cfg.update_flags(|flags| flags.core_lint = true);
     }
     if cli.opt_stats {
-        cfg.flags.opt_stats = true;
+        cfg.update_flags(|flags| flags.opt_stats = true);
     }
     if cli.compiler_stats {
-        cfg.flags.compiler_stats = true;
+        cfg.update_flags(|flags| flags.compiler_stats = true);
     }
     if cli.explain_cache {
-        cfg.flags.explain_cache = true;
+        cfg.update_flags(|flags| flags.explain_cache = true);
     }
     if let Some(threads) = cli.query_threads {
         if threads == 0 {
             eprintln!("invalid --query-threads 0 (expected a positive integer)");
             return ExitCode::FAILURE;
         }
-        cfg.flags.query_threads = threads;
+        cfg.update_flags(|flags| flags.query_threads = threads);
     }
     if cli.time_compile {
-        cfg.flags.time_compile = true;
+        cfg.update_flags(|flags| flags.time_compile = true);
     }
     if cli.verbose {
-        cfg.flags.verbose = true;
+        cfg.update_flags(|flags| flags.verbose = true);
     }
     if cli.no_compiler_cache {
-        cfg.flags.compiler_cache = false;
+        cfg.update_flags(|flags| flags.compiler_cache = false);
     }
     if let Some(sink) = cli.dump_core {
-        cfg.flags.dump_core = Some(sink.into());
+        cfg.update_flags(|flags| flags.dump_core = Some(sink.into()));
     }
     if let Some(s) = &cli.warn_dupes {
         let Some(mode) = parse_warn_mode("--warn-dupes", s) else {
             return ExitCode::FAILURE;
         };
-        cfg.flags.warn_dupes = mode;
+        cfg.update_flags(|flags| flags.warn_dupes = mode);
     }
     if let Some(s) = &cli.warn_stdlib_dupes {
         let Some(mode) = parse_warn_mode("--warn-stdlib-dupes", s) else {
             return ExitCode::FAILURE;
         };
-        cfg.flags.warn_stdlib_dupes = mode;
+        cfg.update_flags(|flags| flags.warn_stdlib_dupes = mode);
     }
     if let Some(s) = &cli.warn_prelude_capture {
         let Some(mode) = parse_warn_mode("--warn-prelude-capture", s) else {
             return ExitCode::FAILURE;
         };
-        cfg.flags.warn_prelude_capture = mode;
+        cfg.update_flags(|flags| flags.warn_prelude_capture = mode);
     }
     // Install the per-phase timing sink for this top-level compile when the flag
     // or `PRISM_TIME_COMPILE` asked for it. The sink lives only on this config, so
     // the compiler's internal re-elaborations (which build their own `from_env`
     // config) stay silent.
-    if cfg.flags.time_compile {
-        cfg.timing = Some(prism::TimingSink::new());
+    if cfg.flags().time_compile {
+        cfg.set_timing(Some(prism::TimingSink::new()));
         // The work counters ride the same flag rather than a second knob: they
         // answer "how much" where the row's wall time answers "how long", and a
         // reader who asked for one wants both. Counting is process-wide, so it is
@@ -893,8 +900,8 @@ fn main() -> ExitCode {
             return ExitCode::SUCCESS;
         }
     };
-    if cfg.flags.compiler_stats {
-        if let Some(session) = &cfg.session {
+    if cfg.flags().compiler_stats {
+        if let Some(session) = cfg.session() {
             let stats = session.stats();
             eprintln!(
                 "compiler queries: {} hit, {} miss, {} write",
@@ -1211,7 +1218,7 @@ fn dispatch(cmd: Cmd, cfg: &prism::Config) -> CmdResult {
                 cfg,
             ),
         },
-        Cmd::Mdbook { rest } => cli::docs::mdbook_cmd(&rest, cfg.flags.mdbook_strict),
+        Cmd::Mdbook { rest } => cli::docs::mdbook_cmd(&rest, cfg.flags().mdbook_strict),
     }
 }
 

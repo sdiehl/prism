@@ -27,7 +27,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-use prism::{build_on, default_roots, Config, EffectTier, ObservationTrace};
+use prism::{build_on, default_roots, Config, CorePass, DynFlags, EffectTier, ObservationTrace};
 
 use super::{effect_plan, forced};
 
@@ -44,6 +44,8 @@ const MIN_WHOLE_PROGRAM_CASES: usize = 60;
 const MIN_ERASURE_CASES: usize = 20;
 const MIN_SLOWEST_CASES: usize = 75;
 const MIN_NATIVE_SUB_LOWERING_CASES: usize = 3;
+const MIN_EXACT_SIZE_CASES: usize = 3;
+const MIN_SUMMARY_CONSUMER_CASES: usize = 3;
 
 // Force one point of the (floor, erasures) grid over the corpus, exercising
 // exactly the programs whose effect plan moves under it, and require at least
@@ -60,8 +62,8 @@ fn run_forced(tier: EffectTier, erasures: bool, floor_count: usize) {
     };
     let tag = tag.as_str();
     let mut auto_cfg = Config::from_env();
-    auto_cfg.flags.compiler_cache = false;
-    auto_cfg.flags.quiet = true;
+    auto_cfg.update_flags(|flags| flags.compiler_cache = false);
+    auto_cfg.update_flags(|flags| flags.quiet = true);
     let forced_cfg = forced(tier, erasures);
     let base = Path::new(".");
     let roots = default_roots(base);
@@ -141,16 +143,16 @@ fn run_native_diff(
     a_cfg: &Config,
     b_tag: &str,
     b_cfg: &Config,
+    cases: &[PathBuf],
     floor: usize,
 ) {
     require_cc();
-    let cases = sub_lowering_cases();
     assert!(
         cases.len() >= floor,
         "{tag} has only {} native-vs-native sub-lowering cases (floor {floor})",
         cases.len()
     );
-    let fails = parallel_check(&cases, |case| {
+    let fails = parallel_check(cases, |case| {
         let a = native_output(case, &format!("{tag}-{a_tag}"), a_cfg)?;
         let b = native_output(case, &format!("{tag}-{b_tag}"), b_cfg)?;
         let a_err = String::from_utf8_lossy(&a.stderr);
@@ -246,16 +248,17 @@ fn slowest_lowering_matches_interpreter() {
 #[test]
 fn native_effects_toggle_matches_native() {
     let mut fast = Config::from_env();
-    fast.flags.quiet = true;
-    fast.flags.compiler_cache = false;
+    fast.update_flags(|flags| flags.quiet = true);
+    fast.update_flags(|flags| flags.compiler_cache = false);
     let mut slow = fast.clone();
-    slow.flags.native_effects = false;
+    slow.update_flags(|flags| flags.native_effects = false);
     run_native_diff(
         "native-effects",
         "on",
         &fast,
         "off",
         &slow,
+        &sub_lowering_cases(),
         MIN_NATIVE_SUB_LOWERING_CASES,
     );
 }
@@ -263,18 +266,116 @@ fn native_effects_toggle_matches_native() {
 #[test]
 fn trampoline_toggle_matches_native() {
     let mut tramp = Config::from_env();
-    tramp.flags.native_effects = false;
-    tramp.flags.trampoline = true;
-    tramp.flags.quiet = true;
-    tramp.flags.compiler_cache = false;
+    tramp.update_flags(|flags| flags.native_effects = false);
+    tramp.update_flags(|flags| flags.trampoline = true);
+    tramp.update_flags(|flags| flags.quiet = true);
+    tramp.update_flags(|flags| flags.compiler_cache = false);
     let mut no_tramp = tramp.clone();
-    no_tramp.flags.trampoline = false;
+    no_tramp.update_flags(|flags| flags.trampoline = false);
     run_native_diff(
         "trampoline",
         "on",
         &tramp,
         "off",
         &no_tramp,
+        &sub_lowering_cases(),
         MIN_NATIVE_SUB_LOWERING_CASES,
+    );
+}
+
+// The corpus programs whose fact sheets prove an exact element count today, so
+// the sized-destination rewrite actually fires on them. Extend this list when a
+// new program starts taking the sized path.
+fn exact_size_cases() -> Vec<PathBuf> {
+    [
+        "examples/fixtures/compiler/deep_immutable.pr",
+        "examples/fixtures/compiler/exact_size_map.pr",
+        "examples/world.pr",
+    ]
+    .into_iter()
+    .map(PathBuf::from)
+    .collect()
+}
+
+// Sized destination allocation is the one rewrite whose failure mode is
+// silent agreement: a wrong exact count fills the destination identically in
+// both tiers, so interpreter parity cannot catch it. The only oracle is the
+// program built with the pass on versus off, which is what this diff runs.
+// The dump probe keeps the test honest: if the summary domain stops proving
+// the count, the sized path never fires and the diff would pass vacuously.
+#[test]
+fn exact_size_toggle_matches_native() {
+    let probe = source(Path::new("examples/fixtures/compiler/exact_size_map.pr"));
+    let facts = prism::dump("optimizer-facts", &probe)
+        .expect("the exact-size fixture dumps optimizer facts");
+    assert!(
+        facts.contains("$xs"),
+        "the sized-destination rewrite no longer fires on its own fixture; the toggle diff below would be vacuous"
+    );
+    let mut base = DynFlags::from_env();
+    base.quiet = true;
+    base.compiler_cache = false;
+    let sized = Config::from_flags(base.clone());
+    base.no_exact_size = true;
+    let growable = Config::from_flags(base);
+    run_native_diff(
+        "exact-size",
+        "on",
+        &sized,
+        "off",
+        &growable,
+        &exact_size_cases(),
+        MIN_EXACT_SIZE_CASES,
+    );
+}
+
+fn summary_consumer_cases() -> Vec<PathBuf> {
+    [
+        "tests/cases/run/reified_under_world.pr",
+        "examples/fold.pr",
+        "examples/fixtures/compiler/iter_callback.pr",
+        "examples/fixtures/compiler/known_closure.pr",
+    ]
+    .into_iter()
+    .map(PathBuf::from)
+    .collect()
+}
+
+// The interprocedural summaries feed three optimizing consumers: direct-call
+// discovery in specialization, sized destination allocation, and the
+// summary-admitted multi-site inliner. All three are cost decisions, so a
+// build with every consumer disabled must be observationally identical to the
+// default build. The tier probe keeps the diff honest: the first case's
+// lowering tier is a promotion the summary-driven inlining earns, so if the
+// domain stops feeding its consumers the probe fails before the diff can pass
+// vacuously.
+#[test]
+fn summary_consumers_toggle_matches_native() {
+    let probe = source(Path::new("tests/cases/run/reified_under_world.pr"));
+    let tier = prism::dump("tier", &probe).expect("the promoted case dumps its lowering tier");
+    assert_eq!(
+        tier.trim(),
+        "local-partial",
+        "the summary-driven promotion no longer fires; the toggle diff below would be vacuous"
+    );
+    let mut base = DynFlags::from_env();
+    base.quiet = true;
+    base.compiler_cache = false;
+    let fed = Config::from_flags(base.clone());
+    base.no_exact_size = true;
+    let mut starved = Config::from_flags(base);
+    for pass in [CorePass::HoSpecialize, CorePass::Inline] {
+        starved
+            .disable_pass(pass)
+            .expect("an O1 summary consumer can be disabled");
+    }
+    run_native_diff(
+        "summary-consumers",
+        "fed",
+        &fed,
+        "starved",
+        &starved,
+        &summary_consumer_cases(),
+        MIN_SUMMARY_CONSUMER_CASES,
     );
 }

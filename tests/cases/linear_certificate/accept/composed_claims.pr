@@ -1,0 +1,3 @@
+-- Claims compose: one row demands linearity and zero allocation together,
+-- while stack growth stays unconstrained.
+fn keep(x : Int) : Int @ {linear, noalloc} = x + 1

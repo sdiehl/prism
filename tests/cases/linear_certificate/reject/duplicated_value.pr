@@ -1,0 +1,7 @@
+-- An owned heap value consumed twice on one path needs a real `dup`, which is
+-- exactly what the claim forbids.
+type List = Nil | Cons(Int, List)
+
+type Pair = Pair(List, List)
+
+fn twin(xs : List) : Pair @ linear = Pair(xs, xs)

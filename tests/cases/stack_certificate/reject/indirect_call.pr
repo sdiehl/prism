@@ -1,0 +1,3 @@
+-- An indirect call through a first-class function value has no callee
+-- certificate at the site, so the claim fails conservatively.
+fn apply(f : (Int) -> Int, x : Int) : Int @ bounded_stack = f(x)

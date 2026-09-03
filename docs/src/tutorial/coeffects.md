@@ -31,6 +31,32 @@ Integer arithmetic and this recursion satisfy the promise. Constructing a fresh 
 
 This sharpens the meaning of purity from the previous chapter. A pure function has no outward observable effect, but it may still allocate. `@ noalloc` certifies the stronger and separate resource property.
 
+The same fact can be demanded of a callable. Written on a function-typed parameter, `@ noalloc` obliges every argument supplied for it to carry the certificate:
+
+```prism
+fip fn step(n : Int) : Int = n + 1
+
+fn iterate(f : ((Int) -> Int) @ noalloc, x : Int) : Int = f(f(x))
+
+fn main() = println(iterate(step, 40))
+```
+
+```output
+42
+```
+
+An uncertified callable cannot flow into the demanding slot:
+
+```prism,compile_fail
+fn boxed(n : Int) : List(Int) = [n]
+
+fn demand(f : ((Int) -> List(Int)) @ noalloc, x : Int) : List(Int) = f(x)
+
+fn main() = println(demand(boxed, 1))
+```
+
+Passing `step` to an ordinary parameter needs no annotation. Forgetting the fact is free; only a demanding slot asks for proof.
+
 ## Constrain how a function value is consumed
 
 `@ once` on a function value says that its receiver consumes it at most once:
@@ -56,16 +82,21 @@ fn apply_once(f : ((Int) -> Int) @ once, value : Int) : Int =
 
 Python can write “called at most once” in a docstring or wrap the callback in a runtime guard. Prism makes the restriction visible before the program runs.
 
+The unrestricted default has a spelled form, `@ many`: it admits repeated use, is exclusive with `once`, and a `once` value never fits a `many` slot (the reverse always does).
+
 ## The checked vocabulary
 
-Prism currently checks four coeffects:
+Prism currently checks seven coeffects:
 
-| Coeffect   | Promise                                                               |
-| ---------- | --------------------------------------------------------------------- |
-| `noalloc`  | evaluation allocates no fresh heap cell                               |
-| `once`     | a value is consumed at most once                                      |
-| `portable` | a value carries only state safe to move across the supported boundary |
-| `noescape` | a borrowed value does not escape its permitted scope                  |
+| Coeffect        | Promise                                                               |
+| --------------- | --------------------------------------------------------------------- |
+| `noalloc`       | evaluation allocates no fresh heap cell                               |
+| `linear`        | no owned heap input is duplicated across the certified call tree      |
+| `bounded_stack` | the certified call tree runs in bounded stack                         |
+| `once`          | a value is consumed at most once                                      |
+| `many`          | a value may be consumed freely (the spelled default)                  |
+| `portable`      | a value carries only state safe to move across the supported boundary |
+| `noescape`      | a borrowed value does not escape its permitted scope                  |
 
 Coeffects are compile-time contracts and are erased before execution. They do not perform operations and they do not need handlers.
 

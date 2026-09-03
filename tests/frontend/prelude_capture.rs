@@ -14,9 +14,14 @@ use prism::{check_validated_on_in, default_roots, with_prelude, Config, Error, W
 // (or the error a strict run fails with).
 fn check(src: &str, mode: WarnDupes) -> Result<Vec<String>, Error> {
     let mut cfg = Config::default();
-    cfg.flags.warn_prelude_capture = mode;
+    cfg.update_flags(|flags| flags.warn_prelude_capture = mode);
     let checked = check_validated_on_in(&with_prelude(src), &default_roots(Path::new(".")), &cfg)?;
-    Ok(checked.warnings.iter().map(|w| w.msg.clone()).collect())
+    Ok(checked
+        .reports
+        .warnings
+        .iter()
+        .map(|w| w.msg.clone())
+        .collect())
 }
 
 // `count` is opened unqualified by the prelude's `import Data.List (..)`, so a
@@ -46,11 +51,12 @@ fn capture_is_flagged_by_default() {
     .expect("program type checks");
     assert!(
         checked
+            .reports
             .warnings
             .iter()
             .any(|w| w.msg.contains("Data.List.count")),
         "prelude capture must be flagged by default, got {:?}",
-        checked.warnings
+        checked.reports.warnings
     );
 }
 

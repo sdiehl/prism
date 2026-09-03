@@ -38,7 +38,7 @@ curl -fsSL https://apt.llvm.org/llvm.sh | sudo bash -s 22     # Debian/Ubuntu
 Then install prism (macOS Apple Silicon; Linux x86_64, aarch64):
 
 ```shell
-curl --proto '=https' --tlsv1.2 -fsSL https://sdiehl.github.io/prism/install.sh | PRISM_VERSION=v0.21.0 sh
+curl --proto '=https' --tlsv1.2 -fsSL https://sdiehl.github.io/prism/install.sh | PRISM_VERSION=v0.22.0 sh
 ```
 
 The installer verifies each release asset's SHA-256 against the release manifest (and its build-provenance attestation when an authenticated `gh` is available) before unpacking. It installs `prismup`, the Prism toolchain manager, to `~/.prismup/bin` and uses it to install the compiler; installed versions live under `~/.prismup/prism/` and `prismup -s <version>` switches between them. No sudo. If Nix is present it uses the flake instead, with hashes verified by the Nix store.
@@ -54,14 +54,14 @@ docker run ghcr.io/sdiehl/prism --version
 
 # Debian / Ubuntu (LLVM repository, then package)
 curl -fsSL https://apt.llvm.org/llvm.sh | sudo bash -s 22
-curl -fLO https://github.com/sdiehl/prism/releases/download/v0.21.0/prism_0.21.0_amd64.deb && sudo apt install ./prism_0.21.0_amd64.deb
+curl -fLO https://github.com/sdiehl/prism/releases/download/v0.22.0/prism_0.22.0_amd64.deb && sudo apt install ./prism_0.22.0_amd64.deb
 
 # Fedora / RHEL
-sudo dnf install https://github.com/sdiehl/prism/releases/download/v0.21.0/prism-0.21.0-1.x86_64.rpm
+sudo dnf install https://github.com/sdiehl/prism/releases/download/v0.22.0/prism-0.22.0-1.x86_64.rpm
 
 # Arch (prebuilt package or local PKGBUILD)
-sudo pacman -U https://github.com/sdiehl/prism/releases/download/v0.21.0/prism-0.21.0-1-x86_64.pkg.tar.zst
-curl -fLO https://github.com/sdiehl/prism/releases/download/v0.21.0/PKGBUILD && makepkg -si
+sudo pacman -U https://github.com/sdiehl/prism/releases/download/v0.22.0/prism-0.22.0-1-x86_64.pkg.tar.zst
+curl -fLO https://github.com/sdiehl/prism/releases/download/v0.22.0/PKGBUILD && makepkg -si
 ```
 
 ### From Source

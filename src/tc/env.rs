@@ -1,10 +1,12 @@
 pub(super) use crate::types::sig::{convert_data, convert_data_rp, parse_sig, wrap_forall};
 pub(super) use crate::types::{collect_row_vars, for_each_row_tail};
 use std::collections::{BTreeMap, BTreeSet};
+use std::ops::Deref;
 
+use im::{OrdMap, OrdSet};
 use marginalia::Span;
 
-use super::{CtorInfo, DataInfo, EffOpInfo, Env, NominalRepr, Tc};
+use super::{CtorInfo, DataInfo, EffOpInfo, NominalRepr, Tc, TypeParameter};
 use crate::core::builtins::{Builtin, FloatOp, OUTPUT_BUILTINS};
 use crate::error::suggest;
 use crate::error::{ErrKind, TypeError};
@@ -25,6 +27,205 @@ pub(crate) fn is_builtin_effect(name: &str) -> bool {
         || name == names::BREAK_EFFECT
         || name == names::CONTINUE_EFFECT
         || name == names::RETURN_EFFECT
+}
+
+const EMPTY_SUMMARY_COUNT: usize = 0;
+const SUMMARY_COUNT_INCREMENT: usize = 1;
+
+/// Persistent type environment with free-variable side indexes.
+///
+/// Cloning shares the ordered map, while the indexes let generalization inspect
+/// only bindings that can constrain quantification instead of re-walking every
+/// closed prelude scheme.
+#[derive(Clone, Debug, Default)]
+pub struct Env {
+    types: OrdMap<Sym, Type>,
+    // Names bound by a binder inside the declaration currently being checked
+    // (parameters, `let` binders, pattern and handler binders), as opposed to
+    // top-level definitions. The env is cloned per descent, so this is exactly
+    // the set of binders enclosing the current path. `generalize_let` consults
+    // it: a local value referencing one of these names must not generalize,
+    // because elaboration expands a generalized value at each use site and a
+    // re-emitted local reference would resolve in the use site's scope.
+    local_binders: OrdSet<Sym>,
+    free_exists: BTreeMap<u32, usize>,
+    free_row_exists: BTreeMap<u32, usize>,
+    free_type_vars: BTreeMap<Sym, usize>,
+    // Pinned `var`-cell existentials, contributed only by the desugared
+    // `get@x@n`/`set@x@n` operation schemes. They are indexed apart from
+    // `free_exists` because their anchoring is scoped: while the owning body is
+    // still being checked they must hold the cell monomorphic against local
+    // `let` generalization, but once a top-level declaration is finished the
+    // cell is discharged (the desugar's escape check guarantees it), and a
+    // solved cell type must not leak the owner's rigid variables into every
+    // later declaration's quantification.
+    var_op_exists: BTreeMap<u32, usize>,
+}
+
+impl Env {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    // Bind a name introduced by a binder during checking, as opposed to a
+    // top-level definition. Every parameter, `let`, lambda, pattern, and
+    // handler binder must come through here rather than `insert`, or
+    // `generalize_let` misreads a local reference as a top-level one and
+    // admits a value expansion that a use-site binder could capture.
+    pub(crate) fn insert_local(&mut self, name: Sym, ty: Type) -> Option<Type> {
+        self.local_binders.insert(name);
+        self.insert(name, ty)
+    }
+
+    pub(crate) fn binds_locally(&self, name: &Sym) -> bool {
+        self.local_binders.contains(name)
+    }
+
+    pub fn insert(&mut self, name: Sym, ty: Type) -> Option<Type> {
+        let summary = type_summary(&ty);
+        let var_op = is_var_op_binding(&name);
+        let old = self.types.insert(name, ty);
+        if let Some(previous) = &old {
+            self.adjust_summary(&type_summary(previous), var_op, false);
+        }
+        self.adjust_summary(&summary, var_op, true);
+        old
+    }
+
+    pub(crate) fn remove(&mut self, name: &Sym) -> Option<Type> {
+        let old = self.types.remove(name);
+        if let Some(previous) = &old {
+            self.adjust_summary(&type_summary(previous), is_var_op_binding(name), false);
+        }
+        old
+    }
+
+    fn adjust_summary(&mut self, summary: &TypeSummary, var_op: bool, add: bool) {
+        let exists = if var_op {
+            &mut self.var_op_exists
+        } else {
+            &mut self.free_exists
+        };
+        adjust_counts(exists, summary.exists.iter().copied(), add);
+        adjust_counts(
+            &mut self.free_row_exists,
+            summary.row_exists.iter().copied(),
+            add,
+        );
+        adjust_counts(
+            &mut self.free_type_vars,
+            summary.type_vars.iter().copied(),
+            add,
+        );
+    }
+
+    pub(super) fn free_exists(&self) -> impl Iterator<Item = u32> + '_ {
+        self.free_exists.keys().copied()
+    }
+
+    pub(super) fn var_op_exists(&self) -> impl Iterator<Item = u32> + '_ {
+        self.var_op_exists.keys().copied()
+    }
+
+    pub(super) fn free_row_exists(&self) -> impl Iterator<Item = u32> + '_ {
+        self.free_row_exists.keys().copied()
+    }
+
+    pub(super) fn free_type_vars(&self) -> impl Iterator<Item = Sym> + '_ {
+        self.free_type_vars.keys().copied()
+    }
+}
+
+impl Deref for Env {
+    type Target = OrdMap<Sym, Type>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.types
+    }
+}
+
+impl Extend<(Sym, Type)> for Env {
+    fn extend<T: IntoIterator<Item = (Sym, Type)>>(&mut self, iter: T) {
+        for (name, ty) in iter {
+            self.insert(name, ty);
+        }
+    }
+}
+
+impl FromIterator<(Sym, Type)> for Env {
+    fn from_iter<T: IntoIterator<Item = (Sym, Type)>>(iter: T) -> Self {
+        let mut env = Self::new();
+        env.extend(iter);
+        env
+    }
+}
+
+struct TypeSummary {
+    exists: BTreeSet<u32>,
+    row_exists: BTreeSet<u32>,
+    type_vars: BTreeSet<Sym>,
+}
+
+// Whether an environment binding is a desugared `var`-cell operation
+// (`get@x@n`/`set@x@n`), whose pinned existential anchors generalization only
+// while the owning declaration is still being checked.
+fn is_var_op_binding(name: &Sym) -> bool {
+    names::is_var_op(name.as_str())
+}
+
+fn type_summary(ty: &Type) -> TypeSummary {
+    let mut exists = BTreeSet::new();
+    ty.free_exist(&mut exists);
+    let mut row_exists = BTreeSet::new();
+    ty.free_exist_row(&mut row_exists);
+    let mut type_vars = BTreeSet::new();
+    collect_type_vars(ty, &mut type_vars);
+    TypeSummary {
+        exists,
+        row_exists,
+        type_vars,
+    }
+}
+
+fn adjust_counts<K: Ord>(
+    counts: &mut BTreeMap<K, usize>,
+    keys: impl IntoIterator<Item = K>,
+    add: bool,
+) {
+    for key in keys {
+        if add {
+            *counts.entry(key).or_default() += SUMMARY_COUNT_INCREMENT;
+        } else if let Some(count) = counts.get_mut(&key) {
+            *count -= SUMMARY_COUNT_INCREMENT;
+            if *count == EMPTY_SUMMARY_COUNT {
+                counts.remove(&key);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod env_summary_tests {
+    use super::{Env, Type};
+    use crate::sym::Sym;
+
+    const EXISTENTIAL: u32 = 17;
+
+    #[test]
+    fn replacing_shadowed_bindings_updates_free_variable_counts() {
+        let mut env = Env::new();
+        let first = Sym::from("first");
+        let second = Sym::from("second");
+        env.insert(first, Type::Exist(EXISTENTIAL));
+        env.insert(second, Type::Exist(EXISTENTIAL));
+        assert_eq!(env.free_exists().collect::<Vec<_>>(), [EXISTENTIAL]);
+
+        env.insert(first, Type::Int);
+        assert_eq!(env.free_exists().collect::<Vec<_>>(), [EXISTENTIAL]);
+        env.insert(second, Type::Int);
+        assert!(env.free_exists().next().is_none());
+    }
 }
 
 // Constructor field types are converted before a `Tc` exists. Check their
@@ -147,12 +348,12 @@ impl Tc<'_> {
                 // message here rather than a downstream unification failure. A
                 // syntactically-unknown argument (a bare variable or application) is
                 // accepted at any domain: its kind is pinned by inference.
-                let mut con_kind = Kind::arrow(&info.param_kinds);
+                let mut con_kind = Kind::arrow(&info.param_kinds());
                 for (i, arg) in ts.iter().enumerate() {
                     let Kind::Fun(dom, rest) = con_kind else {
                         return Err(ErrKind::TooManyTypeArgs {
                             name: n.clone(),
-                            takes: info.param_kinds.len(),
+                            takes: info.params.len(),
                             given: ts.len(),
                         }
                         .at(span));
@@ -331,7 +532,7 @@ impl Tc<'_> {
             ast::Ty::Con(n, args) => {
                 // A `Row`-kinded parameter position takes an effect row, not a
                 // type, so its argument is lowered as a row (`Cmd(a, e)`).
-                let kinds = self.data.get(n).map(|d| d.param_kinds.clone());
+                let kinds = self.data.get(n).map(DataInfo::param_kinds);
                 let mut conv: Vec<Type> = args
                     .iter()
                     .enumerate()
@@ -555,8 +756,8 @@ fn saturate_fill(
                 conv.push(saturate_fill(x, data, fill, memo));
             }
             if let Some(info) = data.get(n.as_str()) {
-                if !conv.is_empty() && conv.len() < info.param_kinds.len() {
-                    let kinds = &info.param_kinds[conv.len()..];
+                if !conv.is_empty() && conv.len() < info.params.len() {
+                    let kinds = &info.param_kinds()[conv.len()..];
                     let suffix = memo
                         .entry((n, conv.clone()))
                         .or_insert_with(|| {
@@ -771,10 +972,7 @@ pub(super) fn demand_var_kinds(
                 .try_for_each(|a| demand_var_kinds(a, data, vars, span))
         }
         ast::Ty::Con(n, args) => {
-            let kinds = data
-                .get(n)
-                .map(|d| d.param_kinds.clone())
-                .unwrap_or_default();
+            let kinds = data.get(n).map(DataInfo::param_kinds).unwrap_or_default();
             for (i, arg) in args.iter().enumerate() {
                 match (kinds.get(i), arg) {
                     (Some(Kind::Row), ast::Ty::Var(v)) => demand(vars, v, Kind::Row)?,
@@ -847,7 +1045,7 @@ fn ann_row_var_names(
         ast::Ty::Con(n, args) => {
             if let Some(info) = data.get(n) {
                 for (i, arg) in args.iter().enumerate() {
-                    if matches!(info.param_kinds.get(i), Some(Kind::Row)) {
+                    if matches!(info.params.get(i).map(|p| &p.kind), Some(Kind::Row)) {
                         if let ast::Ty::Var(m) = arg {
                             out.insert(Sym::from(m));
                         }
@@ -1097,8 +1295,10 @@ pub(super) fn build_data(prog: &Program<Core>) -> Result<BuildDataResult, TypeEr
     data.insert(
         ARRAY.to_string(),
         DataInfo {
-            params: vec!["a".to_string()],
-            param_kinds: vec![Kind::Type],
+            params: vec![TypeParameter {
+                name: "a".to_string(),
+                kind: Kind::Type,
+            }],
             ctors: vec![],
             repr: NominalRepr::BoxedCell,
         },
@@ -1111,7 +1311,6 @@ pub(super) fn build_data(prog: &Program<Core>) -> Result<BuildDataResult, TypeEr
         BUF.to_string(),
         DataInfo {
             params: vec![],
-            param_kinds: vec![],
             ctors: vec![],
             repr: NominalRepr::BoxedCell,
         },
@@ -1124,7 +1323,6 @@ pub(super) fn build_data(prog: &Program<Core>) -> Result<BuildDataResult, TypeEr
         FLOAT_BUF.to_string(),
         DataInfo {
             params: vec![],
-            param_kinds: vec![],
             ctors: vec![],
             repr: NominalRepr::BoxedCell,
         },
@@ -1135,7 +1333,6 @@ pub(super) fn build_data(prog: &Program<Core>) -> Result<BuildDataResult, TypeEr
         INT_BUF.to_string(),
         DataInfo {
             params: vec![],
-            param_kinds: vec![],
             ctors: vec![],
             repr: NominalRepr::BoxedCell,
         },
@@ -1153,7 +1350,6 @@ pub(super) fn build_data(prog: &Program<Core>) -> Result<BuildDataResult, TypeEr
             name.to_string(),
             DataInfo {
                 params: vec![],
-                param_kinds: vec![],
                 ctors: vec![],
                 repr: NominalRepr::Vec128,
             },
@@ -1167,8 +1363,13 @@ pub(super) fn build_data(prog: &Program<Core>) -> Result<BuildDataResult, TypeEr
         data.insert(
             dd.name.clone(),
             DataInfo {
-                params: dd.params.clone(),
-                param_kinds: kinds,
+                params: dd
+                    .params
+                    .iter()
+                    .cloned()
+                    .zip(kinds)
+                    .map(|(name, kind)| TypeParameter { name, kind })
+                    .collect(),
                 ctors: dd.ctors.iter().map(|c| c.name.clone()).collect(),
                 repr: if dd.newtype {
                     NominalRepr::Transparent
@@ -1410,14 +1611,48 @@ mod tests {
     fn builtin_signatures_parse() {
         for (name, sig) in super::builtin_sigs() {
             let (_, effs) = super::parse_sig(name, sig).expect("builtin signature parses");
+            // Each effecting builtin's row is written twice, in the registry and
+            // here, so a silent change to either side is caught. The socket and
+            // mobility boundaries (`prim_net_*`, `prim_kont_*`) reach the host
+            // OS, so they carry the same row as the file and process prims.
             let want: &[&str] = match name {
-                "print" | "println" | "prim_print" | "prim_println" | "prim_read_int"
-                | "prim_read_line" | "prim_rand" | "srand" | "system" | "eprint"
-                | "prim_getenv" | "prim_read_file" | "prim_read_bytes" | "prim_write_bytes"
-                | "write_file" | "prim_file_exists" | "append_file" | "remove_file"
-                | "prim_store_get" | "prim_store_put" | "prim_store_has" | "prim_args_count"
-                | "prim_arg" | "prim_wall_now" | "prim_mono_now" | "prim_entropy"
-                | "probe_enabled" => &["IO"],
+                "print"
+                | "println"
+                | "prim_print"
+                | "prim_println"
+                | "prim_read_int"
+                | "prim_read_line"
+                | "prim_rand"
+                | "srand"
+                | "system"
+                | "eprint"
+                | "prim_getenv"
+                | "prim_read_file"
+                | "prim_read_bytes"
+                | "prim_write_bytes"
+                | "write_file"
+                | "prim_file_exists"
+                | "append_file"
+                | "remove_file"
+                | "prim_store_get"
+                | "prim_store_put"
+                | "prim_store_has"
+                | "prim_args_count"
+                | "prim_arg"
+                | "prim_wall_now"
+                | "prim_mono_now"
+                | "prim_entropy"
+                | "probe_enabled"
+                | "prim_net_listen"
+                | "prim_net_accept"
+                | "prim_net_connect"
+                | "prim_net_recv"
+                | "prim_net_send"
+                | "prim_net_close"
+                | "prim_net_local_addr"
+                | "prim_net_peer_addr"
+                | "prim_kont_encode"
+                | "prim_kont_resume" => &["IO"],
                 "error" | "fatal" => &["Exn"],
                 _ => &[],
             };

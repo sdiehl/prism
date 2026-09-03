@@ -134,7 +134,7 @@ fn top(x) =
   mk(t@1)
 
 == fip ==
-[E1998] Type Error: allocation certificate `@ noalloc` failed for function `top`: in `top`, call to `mk` may allocate (`mk` has no zero-allocation certificate)
+[E6076] Type Error: allocation certificate `@ noalloc` failed for function `top`: in `top`, call to `mk` may allocate (`mk` has no zero-allocation certificate)
    ╭─[ <source>:8:1 ]
    │
  8 │ fn top(x : Int) : Box @ noalloc = mk(x)

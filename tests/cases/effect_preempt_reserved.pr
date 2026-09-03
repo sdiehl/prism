@@ -1,0 +1,7 @@
+-- `Preempt` is a reserved seam name: declaring it is rejected so no program can
+-- give the future preemptive-scheduling seam a private meaning. `Net` was
+-- reserved the same way until its capability shipped in `Std.Net`.
+effect Preempt
+  yield_now() : Unit
+
+fn main() : Int = 0

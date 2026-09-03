@@ -17,7 +17,7 @@ use crate::lineage::{
     QueryFact, QueryKind,
 };
 use crate::resolve::Root;
-use crate::store::disk::{resolve_store_path, Store};
+use crate::store::disk::Store;
 
 use super::identity::{compiler_binary_fingerprint, ModuleInterface};
 use super::input::semantic_source_digest;
@@ -64,10 +64,8 @@ fn missing_interface(module: &str) -> Error {
 // fact ledger. One home for the guard shared by the tracker (loading a prior
 // fact) and the batch commit (persisting this run's facts).
 fn decision_store(cfg: &Config) -> Result<Option<Store>, Error> {
-    if cfg.flags.compiler_cache && !cfg.flags.store {
-        Ok(Some(Store::open_or_create(resolve_store_path(
-            cfg.flags.store_path.as_deref(),
-        ))?))
+    if cfg.flags().compiler_cache && !cfg.flags().store {
+        Ok(Some(cfg.open_store()?))
     } else {
         Ok(None)
     }

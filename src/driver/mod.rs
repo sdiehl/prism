@@ -1,9 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::convert::Infallible;
 use std::path::Path;
 use std::sync::OnceLock;
 
 use crate::core::fbip::{borrow_sigs, infer_borrow_sigs, Fips, Sigs};
 use crate::core::opt::PassStage;
+use crate::core::typed::effect_lower::{FinishedLowering, TypedLoweringTransitionError};
 use crate::core::typed::{
     explain_effect_tiers, insert_rc as insert_typed_rc, lower_effects as lower_typed_effects,
     prepare_effects, reuse as reuse_typed, Decline, EffectPlan, Prepared, TypedLowering,
@@ -12,7 +14,7 @@ use crate::core::{
     balanced, fip_annots, hash_program, hash_root, insert_rc, pp_core_pretty, reachable_fns, reuse,
     typed_verification_error, verify_typed_core, Comp, Core, DepGraph, Digest, EffectStrategy,
     ElaboratedCore, Hashes, LoweredCore, OpGrades, TypedCore, TypedEffectLowered, TypedElaborated,
-    Value, VerifyEnv, HASH_SCHEME,
+    TypedReuseLowered, Value, VerifyEnv,
 };
 use crate::error::{render_warning, Error, SourceMap, TypeError};
 use crate::names::ENTRY_POINT;
@@ -49,12 +51,15 @@ mod module_graph;
 mod modules;
 #[cfg(feature = "native")]
 mod native;
+mod prune;
 mod query;
 mod report;
 mod scheduler;
 mod semantic_patch;
 mod session;
 pub mod stable_lock;
+#[cfg(test)]
+mod tests;
 mod timing;
 mod verify;
 pub use artifact::{ArtifactField, ArtifactIdentity, ArtifactRow};
@@ -90,8 +95,7 @@ pub use execution::{
     STEP_RULER_FORMAT,
 };
 use front::{run_front, run_front_verdict, Front, FrontRequest};
-#[cfg(feature = "native")]
-pub(crate) use identity::stdlib_value_schemes;
+pub(crate) use identity::NAMESPACE_FORMAT;
 pub(crate) use identity::{
     addressable_surface, addressable_surface_in, stdlib_driver_src, AddressableSurface,
 };
@@ -101,7 +105,8 @@ pub use identity::{
     PublicDef, StdlibHash, MODULE_INTERFACE_FORMAT,
 };
 #[cfg(feature = "native")]
-pub(crate) use identity::{BuildIdentity, BuildRoot};
+pub(crate) use identity::{stdlib_value_schemes, BuildIdentity, BuildRoot};
+pub use identity::{EnvelopeHeader, WireKind, NAMESPACE_ARTIFACT_KIND};
 pub use interface::RehydratedModuleInterface;
 pub use module_graph::{
     module_graph, ModuleGraph, ModuleGraphNode, ModuleInvalidation, ModuleInvalidationCause,
@@ -125,129 +130,15 @@ pub use verify::attest_on;
 
 pub use prism_syntax::error::source::{PRELUDE, PRELUDE_END_MARK};
 
+impl From<scheduler::QueryWorkerFailure> for Error {
+    fn from(failure: scheduler::QueryWorkerFailure) -> Self {
+        Self::InternalInvariant(failure.to_string())
+    }
+}
+
 /// The source file extension. Modules `import Foo` resolve to `Foo.pr`.
 pub const SOURCE_EXT: &str = "pr";
 pub(super) const ROOT_MODULE_NAME: &str = "<root>";
-
-/// Artifact kind for a whole-program namespace root.
-pub const NAMESPACE_ARTIFACT_KIND: &str = "namespace";
-
-/// Layout version of the `dump namespace` export envelope. The export records it
-/// so a reader can tell which layout it is decoding and dispatch on it; a
-/// layout-breaking change to the envelope bumps this. It is independent of the
-/// hash scheme tag, which versions the hashing itself, not the export around it.
-const NAMESPACE_FORMAT: u32 = 1;
-
-/// The wire envelope's kind tag: the five things every serialized envelope can
-/// name.
-///
-/// One header shape, `[scheme tag][kind][contract digest][body?]`, read five ways
-/// rather than five formats. This enum is the single home of the family; the `dump namespace`
-/// export and (later) the binary codec name their kind from here rather than
-/// re-typing the strings. When the `lib/std/Wire.pr` codec needs the same
-/// strings, they cross the phase boundary as a pinned hook (the `names.rs`
-/// pattern: one canonical home with tested inverses), never a re-typed literal.
-///
-/// The textual name is what the human-facing header spells; the varint tag is
-/// reserved for the compact binary body and is pinned here so the two encodings
-/// agree on the family and its ordering before that body exists.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum WireKind {
-    /// A value at a frozen layout: contract digest names the type's `Stable.Vn`.
-    Value,
-    /// A definition: contract digest is the scheme identity, body is anonymous Core.
-    Def,
-    /// An effect signature: contract digest is the signature's shape digest.
-    Protocol,
-    /// A reified continuation: a `value` over `def` digests.
-    Kont,
-    /// A certificate: an attestation braided with the replay log.
-    Cert,
-}
-
-impl WireKind {
-    /// The textual header name, the stable string every text reader dispatches on.
-    #[must_use]
-    pub const fn tag(self) -> &'static str {
-        match self {
-            Self::Value => "value",
-            Self::Def => "def",
-            Self::Protocol => "protocol",
-            Self::Kont => "kont",
-            Self::Cert => "cert",
-        }
-    }
-
-    /// The varint discriminant reserved for the compact binary codec. Not emitted
-    /// in the text envelope; pinned alongside `tag` so both encodings share one
-    /// family ordering even though the text envelope does not emit it.
-    #[must_use]
-    pub const fn varint(self) -> u8 {
-        match self {
-            Self::Value => 0,
-            Self::Def => 1,
-            Self::Protocol => 2,
-            Self::Kont => 3,
-            Self::Cert => 4,
-        }
-    }
-
-    /// Recover a kind from its textual tag, rejecting anything outside the family.
-    #[must_use]
-    pub fn parse(tag: &str) -> Option<Self> {
-        [
-            Self::Value,
-            Self::Def,
-            Self::Protocol,
-            Self::Kont,
-            Self::Cert,
-        ]
-        .into_iter()
-        .find(|k| k.tag() == tag)
-    }
-}
-
-/// The envelope header recovered from a `dump namespace` export: enough to
-/// dispatch a reader before it touches the body.
-///
-/// [`parse`](Self::parse) rejects a
-/// scheme it does not recognize and a kind outside the family, so a stale or
-/// foreign frame is caught on the header, not three fields into the body:
-/// the contract is checked before the body, always.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct EnvelopeHeader {
-    /// Which of the five envelope kinds this frame carries.
-    pub kind: WireKind,
-    /// The contract digest the reader checks before touching the body.
-    pub contract: String,
-    /// The export layout version (`NAMESPACE_FORMAT`).
-    pub format: u32,
-}
-
-impl EnvelopeHeader {
-    /// Parse the `envelope` object of a serialized export. Returns `None` on a
-    /// foreign scheme, an unknown kind, or a missing/ill-typed field.
-    #[must_use]
-    pub fn parse(doc: &serde_json::Value) -> Option<Self> {
-        let env = doc.get("envelope")?;
-        if env.get("scheme")?.as_str()? != HASH_SCHEME {
-            return None;
-        }
-        Some(Self {
-            kind: WireKind::parse(env.get("kind")?.as_str()?)?,
-            contract: env.get("contract")?.as_str()?.to_string(),
-            format: u32::try_from(env.get("format")?.as_u64()?).ok()?,
-        })
-    }
-}
-
-#[cfg(feature = "native")]
-const NATIVE_KONT_FRAME_FLAGS: [&str; 4] = [
-    "-DPRISM_NATIVE_KONT_FRAMES",
-    "-fno-omit-frame-pointer",
-    "-funwind-tables",
-    "-fno-optimize-sibling-calls",
-];
 
 #[must_use]
 pub fn with_prelude(src: &str) -> String {
@@ -337,7 +228,7 @@ pub fn example_program(src: &str) -> String {
 /// ```
 /// let src = prism::with_prelude("fn double(x : Int) : Int = x * 2");
 /// let checked = prism::check(&src).unwrap();
-/// let double = checked.decls.iter().find(|d| d.name == "double").unwrap();
+/// let double = checked.defs.decls.iter().find(|d| d.name == "double").unwrap();
 /// assert_eq!(double.ty.show(), "(Int) -> Int");
 /// ```
 ///
@@ -394,8 +285,8 @@ pub fn check_on_in(src: &str, roots: &[Root], cfg: &Config) -> Result<Checked, E
 
 /// Like [`check_on_in`], but retaining typed holes as reports.
 ///
-/// A typed hole is returned in [`Checked::holes`] instead of being raised, so a
-/// tool can ask what a hole's type and in-scope candidates are. Every other type
+/// A typed hole is returned in [`crate::types::Reports::holes`] instead of
+/// being raised, so a tool can ask what a hole's type and in-scope candidates are. Every other type
 /// error still fails exactly as it does under [`check_on_in`]: the query answers
 /// only about a program whose sole remaining question is the hole.
 ///
@@ -403,6 +294,21 @@ pub fn check_on_in(src: &str, roots: &[Root], cfg: &Config) -> Result<Checked, E
 /// Fails on lex, parse, module, or type errors other than the holes themselves.
 pub fn check_allow_holes_on_in(src: &str, roots: &[Root], cfg: &Config) -> Result<Checked, Error> {
     Ok(run_front(src, roots, cfg, FrontRequest::CheckHoles)?.into_checked())
+}
+
+/// The documentation harness's verdict on a doc example.
+///
+/// Hole-tolerant like [`check_allow_holes_on_in`], but elaborated and
+/// semantically validated the way `prism check` validates a program, so a doc
+/// example cannot carry a `fip`, `noalloc`, or `replayable` claim the
+/// compiler would reject. Quiet: no lints, no warning emission.
+///
+/// # Errors
+/// Fails on lex, parse, module, type, or semantic-validation errors other than
+/// the holes themselves.
+pub fn check_docs_on(src: &str, roots: &[Root]) -> Result<Checked, Error> {
+    let cfg = Config::default();
+    Ok(run_front(src, roots, &cfg, FrontRequest::CheckHolesValidated)?.into_checked())
 }
 
 // The checked Core-surface tree plus presentation facts used only by
@@ -451,7 +357,7 @@ fn lint_surface(src: &str, prog: &Program) -> Vec<Warning> {
 // shadowed bindings) on stderr, with a source caret when the warning points into
 // this source. Errors abort earlier, so this only runs once a program type checks.
 fn emit_warnings(src: &str, checked: &Checked) {
-    for w in &checked.warnings {
+    for w in &checked.reports.warnings {
         emit_warning(src, w);
     }
 }
@@ -511,6 +417,7 @@ fn store_commit(
     let hashes = hash_program(core, &hash_metas);
     let graph = DepGraph::of(core);
     let metas: BTreeMap<Sym, DefMeta> = checked
+        .defs
         .decls
         .iter()
         .map(|d| {
@@ -524,7 +431,7 @@ fn store_commit(
             )
         })
         .collect();
-    let root = store::resolve_store_path(cfg.flags.store_path.as_deref());
+    let root = store::resolve_store_path(cfg.flags().store_path.as_deref());
     let store = store::Store::open_or_create(&root)?;
     // Record this program's canonical `(class, head) -> instance-hash` bindings,
     // refusing any that a previously committed program bound to a different
@@ -545,7 +452,7 @@ fn store_commit(
     // unchanged (already compiled and stored); `objects_written` are the ones
     // that moved and were recompiled into the store. Behind the quiet knob, like
     // the other compiler-internal stat lines.
-    if !cfg.flags.quiet {
+    if !cfg.flags().quiet {
         eprintln!(
             "store: {} unchanged, {} recompiled",
             stats.objects_hit, stats.objects_written
@@ -655,10 +562,11 @@ fn rc_borrow_sigs(
     cfg: &Config,
 ) -> Sigs {
     let declared = borrow_sigs(program);
-    if !cfg.flags.borrow_infer {
+    if !cfg.flags().borrow_infer {
         return declared;
     }
     let pure_fns = checked
+        .defs
         .decls
         .iter()
         .filter(|decl| decl.pure)
@@ -679,32 +587,19 @@ fn prepared_core_with_opts(
     let lowered = lower_opt(
         typed,
         &verify_env,
-        &checked.ctors,
+        &checked.defs.ctors,
         &checked.op_grades(),
         cfg,
     )?;
-    emit_lower_warning(src, lowered.warning.as_deref(), cfg.flags.verbose);
+    emit_lower_warning(src, lowered.warning(), cfg.flags().verbose);
     finish_lowered(lowered, &sigs, cfg)?;
     Ok(core)
-}
-
-struct LoweredSpine {
-    core: TypedCore<TypedEffectLowered>,
-    verify_env: VerifyEnv,
-    ctors: BTreeMap<String, CtorInfo>,
-    warning: Option<String>,
 }
 
 // Effect-lower the verified typed Core, then run the late (post-lowering)
 // optimization passes. The witness-carrying tree is authoritative and the sole
 // transformation path; no legacy effect-lowering query or cache artifact is
 // produced.
-const TYPED_LOWER_STACK: usize = 64 * 1024 * 1024;
-
-fn on_typed_lower_stack<T>(f: impl FnOnce() -> T) -> T {
-    stacker::maybe_grow(TYPED_LOWER_STACK, TYPED_LOWER_STACK, f)
-}
-
 fn stage_validation_error(stage: &str, violations: &[String]) -> Error {
     Error::InternalInvariant(format!(
         "{stage} Core failed structural validation:\n{}",
@@ -712,11 +607,26 @@ fn stage_validation_error(stage: &str, violations: &[String]) -> Error {
     ))
 }
 
+fn lowering_transition_error(error: TypedLoweringTransitionError<Error>) -> Error {
+    match error {
+        TypedLoweringTransitionError::Pass(error) => error,
+        TypedLoweringTransitionError::Invariant(error) => error.into(),
+    }
+}
+
+fn lowering_erasure_error(error: TypedLoweringTransitionError<Infallible>) -> Error {
+    match error {
+        TypedLoweringTransitionError::Pass(never) => match never {},
+        TypedLoweringTransitionError::Invariant(error) => error.into(),
+    }
+}
+
 fn validated_elaborated_core(core: Core) -> Result<ElaboratedCore, Error> {
     ElaboratedCore::validate(core)
         .map_err(|violations| stage_validation_error("elaborated", &violations))
 }
 
+#[cfg(feature = "native")]
 fn validated_lowered_core(core: Core) -> Result<LoweredCore, Error> {
     LoweredCore::validate(core).map_err(|violations| stage_validation_error("lowered", &violations))
 }
@@ -727,78 +637,68 @@ fn lower_opt(
     ctors: &BTreeMap<String, CtorInfo>,
     grades: &OpGrades,
     cfg: &Config,
-) -> Result<LoweredSpine, Error> {
-    on_typed_lower_stack(|| lower_opt_on_grown_stack(typed, verify_env, ctors, grades, cfg))
-}
-
-fn lower_opt_on_grown_stack(
-    typed: TypedCore<TypedElaborated>,
-    verify_env: &VerifyEnv,
-    ctors: &BTreeMap<String, CtorInfo>,
-    grades: &OpGrades,
-    cfg: &Config,
-) -> Result<LoweredSpine, Error> {
-    let mut typed_flags = cfg.flags.clone();
+) -> Result<TypedLowering, Error> {
+    let mut typed_flags = cfg.flags().clone();
     typed_flags.quiet = true;
-    let typed = timing::timed_res(
-        cfg.timing.as_ref(),
+    let lowering = timing::timed_res(
+        cfg.timing(),
         timing::Phase::LowerEffects,
         "",
         || lower_typed_effects(typed, verify_env, ctors, &typed_flags, grades).map_err(Error::from),
         |_| timing::RowExtras::default(),
     )?;
-    let TypedLowering {
-        core: typed,
-        env: typed_env,
-        ctors: typed_ctors,
-        warning: typed_warning,
-        strategy: _,
-        confined_decline: _,
-    } = typed;
-    let typed = timing::timed_res(
-        cfg.timing.as_ref(),
+    timing::timed_res(
+        cfg.timing(),
         timing::Phase::OptLate,
         "",
         || {
-            downstream::run_typed_opt_queries(
-                typed,
-                &typed_env,
-                &BTreeSet::new(),
-                PassStage::Late,
-                cfg,
-            )
+            lowering
+                .try_map_core(|typed, env| {
+                    downstream::run_typed_opt_queries(
+                        typed,
+                        env,
+                        &BTreeSet::new(),
+                        PassStage::Late,
+                        cfg,
+                    )
+                })
+                .map_err(lowering_transition_error)
         },
-        |_| timing::RowExtras::default(),
-    )?;
-    Ok(LoweredSpine {
-        core: typed,
-        verify_env: typed_env,
-        ctors: typed_ctors,
-        warning: typed_warning,
-    })
-}
-
-fn finish_lowered(lowered: LoweredSpine, sigs: &Sigs, cfg: &Config) -> Result<LoweredCore, Error> {
-    timing::timed_res(
-        cfg.timing.as_ref(),
-        timing::Phase::Rc,
-        "",
-        || on_typed_lower_stack(|| finish_lowered_on_grown_stack(lowered, sigs)),
         |_| timing::RowExtras::default(),
     )
 }
 
-fn finish_lowered_on_grown_stack(lowered: LoweredSpine, sigs: &Sigs) -> Result<LoweredCore, Error> {
-    let typed_owned = verify_typed_core(insert_typed_rc(lowered.core, sigs), &lowered.verify_env)
-        .map_err(typed_verification_error)?;
-    let typed_reused = verify_typed_core(reuse_typed(typed_owned), &lowered.verify_env)
-        .map_err(typed_verification_error)?;
-    // The one semantic erasure on the native route: nothing downstream of this
-    // call sees a typed node.
-    let final_core = typed_reused.erase();
-    balanced(&final_core, sigs)
-        .map_err(|error| Error::CodegenBackend(format!("ICE: rc imbalance: {error}")))?;
-    validated_lowered_core(final_core)
+fn finish_lowered(
+    lowered: TypedLowering,
+    sigs: &Sigs,
+    cfg: &Config,
+) -> Result<FinishedLowering, Error> {
+    timing::timed_res(
+        cfg.timing(),
+        timing::Phase::Rc,
+        "",
+        || {
+            let finished = lowered
+                .try_finish_core(|core, env| finish_lowered_typed(core, env, sigs))
+                .map_err(lowering_transition_error)?;
+            balanced(finished.core(), sigs)
+                .map_err(|error| Error::CodegenBackend(format!("ICE: rc imbalance: {error}")))?;
+            Ok(finished)
+        },
+        |_| timing::RowExtras::default(),
+    )
+}
+
+fn finish_lowered_typed(
+    core: TypedCore<TypedEffectLowered>,
+    env: &VerifyEnv,
+    sigs: &Sigs,
+) -> Result<TypedCore<TypedReuseLowered>, Error> {
+    let typed_owned =
+        verify_typed_core(insert_typed_rc(core, sigs), env).map_err(typed_verification_error)?;
+    let typed_reused =
+        verify_typed_core(reuse_typed(typed_owned), env).map_err(typed_verification_error)?;
+    Ok(typed_reused)
 }
 
 fn lowered_core(
@@ -807,8 +707,9 @@ fn lowered_core(
     cfg: &Config,
 ) -> Result<(Checked, LoweredCore, BTreeMap<String, CtorInfo>, Sigs), Error> {
     let (checked, sigs, lowered) = lowered_front(src, roots, cfg)?;
-    let core = on_typed_lower_stack(|| validated_lowered_core(lowered.core.clone().erase()))?;
-    Ok((checked, core, lowered.ctors, sigs))
+    let finished = lowered.try_erase_core().map_err(lowering_erasure_error)?;
+    let (core, ctors) = finished.into_core_and_constructors();
+    Ok((checked, core, ctors, sigs))
 }
 
 fn reuse_lowered_core(
@@ -817,8 +718,8 @@ fn reuse_lowered_core(
     cfg: &Config,
 ) -> Result<(Checked, LoweredCore, BTreeMap<String, CtorInfo>, Sigs), Error> {
     let (checked, sigs, lowered) = lowered_front(src, roots, cfg)?;
-    let ctors = lowered.ctors.clone();
-    let core = finish_lowered(lowered, &sigs, cfg)?;
+    let finished = finish_lowered(lowered, &sigs, cfg)?;
+    let (core, ctors) = finished.into_core_and_constructors();
     Ok((checked, core, ctors, sigs))
 }
 
@@ -826,18 +727,18 @@ fn lowered_front(
     src: &str,
     roots: &[Root],
     cfg: &Config,
-) -> Result<(Checked, Sigs, LoweredSpine), Error> {
+) -> Result<(Checked, Sigs, TypedLowering), Error> {
     let (program, checked, core, typed, verify_env) =
         run_front(src, roots, cfg, FrontRequest::Full)?.into_typed_pre();
     let sigs = rc_borrow_sigs(&program, &checked, &core, cfg);
     let lowered = lower_opt(
         typed,
         &verify_env,
-        &checked.ctors,
+        &checked.defs.ctors,
         &checked.op_grades(),
         cfg,
     )?;
-    emit_lower_warning(src, lowered.warning.as_deref(), cfg.flags.verbose);
+    emit_lower_warning(src, lowered.warning(), cfg.flags().verbose);
     Ok((checked, sigs, lowered))
 }
 
@@ -848,8 +749,8 @@ fn lowered_core_with_identity(
     cfg: &Config,
 ) -> Result<(Checked, LoweredCore, BTreeMap<String, CtorInfo>, Hashes), Error> {
     let (checked, lowered, sigs, hashes) = lowered_spine_with_identity(src, roots, cfg)?;
-    let ctors = lowered.ctors.clone();
-    let core = finish_lowered(lowered, &sigs, cfg)?;
+    let finished = finish_lowered(lowered, &sigs, cfg)?;
+    let (core, ctors) = finished.into_core_and_constructors();
     Ok((checked, core, ctors, hashes))
 }
 
@@ -863,7 +764,7 @@ fn lowered_spine_with_identity(
     src: &str,
     roots: &[Root],
     cfg: &Config,
-) -> Result<(Checked, LoweredSpine, Sigs, Hashes), Error> {
+) -> Result<(Checked, TypedLowering, Sigs, Hashes), Error> {
     let (program, checked, identity_core, core, typed, verify_env) =
         run_front(src, roots, cfg, FrontRequest::Full)?.into_compilation();
     let declared = borrow_sigs(&program);
@@ -888,11 +789,11 @@ fn lowered_spine_with_identity(
     let lowered = lower_opt(
         typed,
         &verify_env,
-        &checked.ctors,
+        &checked.defs.ctors,
         &checked.op_grades(),
         cfg,
     )?;
-    emit_lower_warning(src, lowered.warning.as_deref(), cfg.flags.verbose);
+    emit_lower_warning(src, lowered.warning(), cfg.flags().verbose);
     Ok((checked, lowered, sigs, hashes))
 }
 
@@ -912,150 +813,6 @@ fn emit_lower_warning(src: &str, warning: Option<&str>, verbose: bool) {
             "{}",
             render_warning(src, "<source>", &Span::empty(0), msg, true)
         );
-    }
-}
-
-#[cfg(test)]
-mod typed_post_route_tests {
-    use crate::core::residual_effects;
-
-    use super::*;
-    use crate::flags::EffectTier;
-
-    fn assert_route(source: &str, cfg: &Config) {
-        let (_, core, _, sigs) = reuse_lowered_core(source, &[], cfg).expect("typed route");
-        balanced(&core, &sigs).expect("the final typed term is balanced");
-        residual_effects(&core).expect("effect nodes do not cross the final boundary");
-    }
-
-    #[test]
-    fn production_route_finishes_a_pure_program() {
-        assert_route("fn main() : Int = 42\n", &Config::default());
-    }
-
-    #[test]
-    fn production_route_finishes_an_evidence_handler() {
-        assert_route(
-            "effect Ask\n  ask() : Int\n\nfn reader() : Int ! {Ask} = ask() + 1\n\nfn main() : Int =\n  handle reader() with {\n    ask() resume k => k(41),\n    return x => x\n  }\n",
-            &Config::default(),
-        );
-    }
-
-    #[test]
-    fn production_route_finishes_a_whole_program_lowering() {
-        let mut cfg = Config::default();
-        cfg.flags.effect_tier = EffectTier::FreeMonad;
-        cfg.flags.quiet = true;
-        assert_route(
-            "effect Ask\n  ask() : Int\n\nfn make() = \\() -> let answer = ask() in answer\n\nfn main() =\n  let _unused = make()\n  0\n",
-            &cfg,
-        );
-    }
-
-    #[test]
-    fn production_route_accepts_the_verified_typed_control_shape() {
-        // A bare `forever` loop can only leave through `return`. Typed control
-        // erasure omits the legacy builder's unreachable `SMore(Unit)` branch,
-        // whose Unit witness is invalid at the function's Int answer type. The
-        // verified typed tree is the sole effect-lowering result.
-        let src = with_prelude(include_str!("../../examples/imperative.pr"));
-        let roots = default_roots(Path::new("."));
-        let mut cfg = Config::default();
-        cfg.flags.compiler_cache = false;
-        cfg.flags.quiet = true;
-        let (program, checked, _, typed, verify_env) =
-            run_front(&src, &roots, &cfg, FrontRequest::Full)
-                .expect("front")
-                .into_typed_pre();
-        let sigs = borrow_sigs(&program);
-        let lowered = lower_opt(
-            typed,
-            &verify_env,
-            &checked.ctors,
-            &checked.op_grades(),
-            &cfg,
-        )
-        .expect("typed lowering");
-        let final_core = finish_lowered(lowered, &sigs, &cfg).expect("typed final route");
-        balanced(&final_core, &sigs).expect("balanced typed final");
-        residual_effects(&final_core).expect("no residual effect nodes");
-    }
-
-    #[test]
-    fn num_float_ieee_has_no_post_lowering_structural_delta() {
-        let src = with_prelude(include_str!("../../tests/cases/run/num_float_ieee.pr"));
-        let roots = default_roots(Path::new("."));
-        let mut cfg = Config::default();
-        cfg.flags.compiler_cache = false;
-        cfg.flags.quiet = true;
-        let (program, checked, _, typed, verify_env) =
-            run_front(&src, &roots, &cfg, FrontRequest::Full)
-                .expect("front")
-                .into_typed_pre();
-        let sigs = borrow_sigs(&program);
-        let lowered = lower_opt(
-            typed,
-            &verify_env,
-            &checked.ctors,
-            &checked.op_grades(),
-            &cfg,
-        )
-        .expect("typed lowering");
-        finish_lowered(lowered, &sigs, &cfg).expect("typed final route");
-    }
-
-    #[test]
-    fn production_route_finishes_with_inferred_borrows() {
-        let mut cfg = Config::default();
-        cfg.flags.borrow_infer = true;
-        cfg.flags.quiet = true;
-        // The row reaches `len` as the result of a call, which stays let-bound
-        // through optimization, so the borrowed position is covered by a named
-        // token at the call site (a literal constructor argument would force
-        // the parameter back to owned).
-        let src = "type Row = Tip | Node(Int, Row)\n\nfn build(n : Int) : Row =\n  if n == 0 then Tip else Node(n, build(n - 1))\n\nfn len(r : Row) : Int =\n  match r of\n    Tip => 0\n    Node(_, rest) => 1 + len(rest)\n\nfn main() : Int =\n  len(build(2))\n";
-        let (_, core, _, sigs) = reuse_lowered_core(src, &[], &cfg).expect("typed route");
-        balanced(&core, &sigs).expect("balanced with inferred borrows");
-        residual_effects(&core).expect("no residual effect nodes");
-        let mask = sigs
-            .get(&Sym::new("len"))
-            .expect("len earns an inferred loan");
-        assert!(
-            mask.iter().any(|b| *b),
-            "len keeps at least one borrowed parameter"
-        );
-    }
-
-    #[test]
-    fn interpreter_preparation_returns_the_unlowered_core() {
-        let src = with_prelude(
-            "effect Ask\n  ask() : Int\n\nfn main() : Int =\n  handle ask() with {\n    ask() resume k => k(42),\n    return x => x\n  }\n",
-        );
-        let roots = default_roots(Path::new("."));
-        let mut cfg = Config::default();
-        cfg.flags.compiler_cache = false;
-        cfg.flags.quiet = true;
-        let (_, _, expected, _, _) = run_front(&src, &roots, &cfg, FrontRequest::Full)
-            .expect("front")
-            .into_typed_pre();
-        let actual = prepared_core(&src, &roots, &cfg).expect("prepared interpreter core");
-        assert_eq!(
-            serde_json::to_vec(&*actual).expect("expected bytes"),
-            serde_json::to_vec(&*expected).expect("actual bytes"),
-            "the interpreter must keep evaluating pre-effect-lowering Core"
-        );
-        assert!(
-            residual_effects(&actual).is_err(),
-            "the interpreter must retain the source effect nodes"
-        );
-    }
-
-    #[cfg(feature = "native")]
-    #[test]
-    fn report_uses_the_same_verified_final_core() {
-        let output = report::report_on("fn main() : Int = 42\n", &[], &Config::default());
-        assert!(output.contains("== llvm =="));
-        assert!(!output.contains("(skipped:"), "{output}");
     }
 }
 
@@ -1105,19 +862,17 @@ fn typed_effect_facts(
     cfg: &Config,
 ) -> Result<(EffectStrategy, Option<String>), Error> {
     let mut cfg = cfg.clone();
-    cfg.flags.quiet = true;
+    cfg.update_flags(|flags| flags.quiet = true);
     let (_, checked, _, typed, verify_env) =
         run_front(src, roots, &cfg, FrontRequest::Full)?.into_typed_pre();
-    let lowering = on_typed_lower_stack(|| {
-        lower_typed_effects(
-            typed,
-            &verify_env,
-            &checked.ctors,
-            &cfg.flags,
-            &checked.op_grades(),
-        )
-    })?;
-    Ok((lowering.strategy, lowering.warning))
+    let lowering = lower_typed_effects(
+        typed,
+        &verify_env,
+        &checked.defs.ctors,
+        cfg.flags(),
+        &checked.op_grades(),
+    )?;
+    Ok((lowering.strategy(), lowering.warning().map(str::to_owned)))
 }
 
 /// The prepared tree, the plan solved for it, and what the cascade decided from
@@ -1138,23 +893,25 @@ struct TierFacts {
 /// preparation the strategy decision runs on.
 fn tier_facts(src: &str, roots: &[Root], cfg: &Config) -> Result<TierFacts, Error> {
     let mut cfg = cfg.clone();
-    cfg.flags.quiet = true;
+    cfg.update_flags(|flags| flags.quiet = true);
     let (_, checked, _, typed, verify_env) =
         run_front(src, roots, &cfg, FrontRequest::Full)?.into_typed_pre();
     let grades = checked.op_grades();
     let echo = typed.clone();
-    let lowering = on_typed_lower_stack(|| {
-        lower_typed_effects(typed, &verify_env, &checked.ctors, &cfg.flags, &grades)
-    })?;
-    let prepared = on_typed_lower_stack(|| {
-        prepare_effects(echo, &verify_env, &checked.ctors, &cfg.flags, &grades)
-    })?;
-    let plan = EffectPlan::analyze(&prepared.fns);
+    let lowering = lower_typed_effects(
+        typed,
+        &verify_env,
+        &checked.defs.ctors,
+        cfg.flags(),
+        &grades,
+    )?;
+    let prepared = prepare_effects(echo, &verify_env, &checked.defs.ctors, cfg.flags(), &grades)?;
+    let plan = EffectPlan::analyze(prepared.functions());
     Ok(TierFacts {
         prepared,
         plan,
-        strategy: lowering.strategy,
-        declined: lowering.confined_decline,
+        strategy: lowering.strategy(),
+        declined: lowering.confined_decline().copied(),
     })
 }
 
@@ -1176,7 +933,7 @@ pub(crate) fn typed_effect_plan(src: &str, roots: &[Root], cfg: &Config) -> Resu
 pub(crate) fn typed_tier_explain(src: &str, roots: &[Root], cfg: &Config) -> Result<String, Error> {
     let facts = tier_facts(src, roots, cfg)?;
     Ok(explain_effect_tiers(
-        &facts.prepared.fns,
+        facts.prepared.functions(),
         &facts.plan,
         facts.strategy,
         facts.declined,
@@ -1390,11 +1147,16 @@ fn strip_prelude(core: Core, prelude: &HashSet<Sym>) -> Core {
 // to either must change the hash even when the Core body is byte-identical.
 pub(crate) fn hash_meta(checked: &Checked, sigs: &Sigs, fips: &Fips) -> BTreeMap<Sym, String> {
     checked
+        .defs
         .decls
         .iter()
         .map(|d| {
             let sym = Sym::new(&d.name);
-            let fip = fips.get(&sym).copied().and_then(Fip::keyword).unwrap_or("");
+            let fip = fips
+                .get(&sym)
+                .copied()
+                .and_then(Fip::render)
+                .unwrap_or_default();
             let mask: String = sigs.get(&sym).map_or_else(String::new, |bs| {
                 bs.iter().map(|b| if *b { 'b' } else { '.' }).collect()
             });
@@ -1429,330 +1191,4 @@ pub(crate) fn core_root_digest(
         .map(|(sym, hash)| (sym.as_str().to_string(), hash))
         .collect();
     hash_root(&entries).into_string()
-}
-
-#[cfg(test)]
-mod envelope_tests {
-    #[cfg(feature = "native")]
-    use std::collections::BTreeMap;
-    #[cfg(feature = "native")]
-    use std::path::Path;
-
-    #[cfg(feature = "native")]
-    use crate::resolve::{Root, SourceBundleIdentity};
-    #[cfg(feature = "native")]
-    use crate::stdlib::STDLIB;
-
-    #[cfg(feature = "native")]
-    use super::identity::native_kont_table_for;
-    #[cfg(feature = "native")]
-    use super::{default_roots, dump_on, Config};
-    use super::{dump, example_program, EnvelopeHeader, WireKind, HASH_SCHEME, NAMESPACE_FORMAT};
-    #[cfg(feature = "native")]
-    use prism_native::MAIN_SYMBOL;
-
-    const STORE_PKG_NAME: &str = "StorePkg";
-    #[cfg(feature = "native")]
-    const STORE_PKG_SOURCE: &str = "pub fn answer() : Int = 41\n";
-    #[cfg(feature = "native")]
-    const STORE_PKG_ROOT: &str = "abc123";
-
-    #[test]
-    fn example_program_keeps_leading_imports_outside_main() {
-        let source = "import Data.Tensor (..)\n\nstrides(new([2, 3], 0.0))\n";
-        let program = example_program(source);
-        assert!(program.starts_with("import Data.Tensor (..)\nfn main() =\n"));
-        assert!(program.contains("  strides(new([2, 3], 0.0))"));
-        assert_eq!(example_program(&program), program, "wrapping is idempotent");
-    }
-
-    /// The five-kind family: textual tags are distinct, varints are the distinct
-    /// contiguous discriminants the binary codec will reuse, and `parse` inverts
-    /// `tag`. This checks the family so the text header and the future body cannot
-    /// drift out of a shared ordering.
-    #[test]
-    fn kind_family_is_pinned() {
-        let all = [
-            WireKind::Value,
-            WireKind::Def,
-            WireKind::Protocol,
-            WireKind::Kont,
-            WireKind::Cert,
-        ];
-        for (i, k) in all.into_iter().enumerate() {
-            assert_eq!(WireKind::parse(k.tag()), Some(k));
-            assert_eq!(usize::from(k.varint()), i);
-        }
-        assert_eq!(WireKind::parse("gremlin"), None);
-    }
-
-    /// A `dump namespace` export parses back to its header: scheme accepted, kind
-    /// and contract digest recoverable, format matched.
-    #[test]
-    fn namespace_header_round_trips() {
-        let out = dump("namespace", "let main = 1\n").expect("namespace export");
-        let doc: serde_json::Value = serde_json::from_str(&out).expect("valid json export");
-        let hdr = EnvelopeHeader::parse(&doc).expect("header parses");
-        assert_eq!(hdr.kind, WireKind::Def);
-        assert_eq!(hdr.format, NAMESPACE_FORMAT);
-        assert!(!hdr.contract.is_empty());
-    }
-
-    #[test]
-    fn artifact_identity_fingerprint_names_roots() {
-        let identity = super::Config::default()
-            .artifact_identity_for("llvm")
-            .with_source_root("source123")
-            .with_stdlib_root("std456")
-            .with_package_roots([format!("{STORE_PKG_NAME}@{HASH_SCHEME}:pkg789")]);
-        let fingerprint = identity.fingerprint();
-        assert!(fingerprint.contains(&format!("source-root={HASH_SCHEME}:source123;")));
-        assert!(fingerprint.contains(&format!("stdlib-root={HASH_SCHEME}:std456;")));
-        assert!(fingerprint.contains(&format!(
-            "package-root={STORE_PKG_NAME}@{HASH_SCHEME}:pkg789;"
-        )));
-    }
-
-    /// Native kont serialization needs this table as its code-identity bridge:
-    /// raw native symbols are paired with the same definition hashes used by the
-    /// interpreter kont envelope.
-    #[cfg(feature = "native")]
-    #[test]
-    fn native_kont_table_names_native_symbols_by_hash() {
-        let out = dump("native-kont-table", "fn main() = 1\n").expect("native kont table");
-        assert!(out.starts_with(&format!("scheme  {HASH_SCHEME}\nbundle  ")));
-        assert!(
-            out.contains(&format!("compiler  {}\n", env!("CARGO_PKG_VERSION")))
-                && out.contains(&format!("target  {}\n", env!("PRISM_TARGET")))
-                && out.contains("backend  llvm\n")
-                && out.contains("flag  scheduler  cooperative\n")
-                && out.contains("flag  backend-opt  2\n")
-                && out.contains("flag  effect-tier  auto\n"),
-            "native table includes portable artifact identity:\n{out}"
-        );
-        assert!(
-            !out.contains("native-cc-version"),
-            "dumped native table must not embed host-specific C compiler strings:\n{out}"
-        );
-        assert!(
-            out.contains(&format!("flag  source-root  {HASH_SCHEME}:"))
-                && out.contains(&format!("flag  stdlib-root  {HASH_SCHEME}:")),
-            "native table names source and Std roots:\n{out}"
-        );
-        assert!(
-            out.lines().any(|line| {
-                line.starts_with(&format!("fn      {MAIN_SYMBOL}  ")) && line.ends_with("  main")
-            }),
-            "native table includes the main symbol and its definition hash:\n{out}"
-        );
-    }
-
-    #[cfg(feature = "native")]
-    #[test]
-    fn native_kont_table_names_package_source_roots() {
-        let mut modules = BTreeMap::new();
-        modules.insert(STORE_PKG_NAME.to_string(), STORE_PKG_SOURCE.to_string());
-        let bundle_identity =
-            SourceBundleIdentity::package(STORE_PKG_NAME, HASH_SCHEME, STORE_PKG_ROOT);
-        let expected = format!("flag  package-root  {}\n", bundle_identity.descriptor());
-        let roots = vec![
-            Root::identified_source_bundle(
-                format!("<package {STORE_PKG_NAME} {STORE_PKG_ROOT}>"),
-                bundle_identity,
-                modules,
-            ),
-            Root::Embedded(STDLIB),
-        ];
-        let out = native_kont_table_for(
-            "import StorePkg (answer)\nfn main() : Int = answer() + 1\n",
-            &roots,
-            &Config::default(),
-        )
-        .expect("native kont table");
-        assert!(
-            out.contains(&expected),
-            "native table names package roots:\n{out}"
-        );
-        assert!(
-            out.contains("flag  native-cc  ")
-                && out.contains("flag  native-cc-version  ")
-                && out.contains("flag  native-cc-flags  "),
-            "native build table names native linker inputs:\n{out}"
-        );
-    }
-
-    #[cfg(feature = "native")]
-    #[test]
-    fn native_kont_state_map_names_entry_abi_words() {
-        let out = dump(
-            "native-kont-state-map",
-            "fn count(i, last) = if i > last then i else count(i + 1, last)\n\nfn main() = count(1, 2)\n",
-        )
-        .expect("native kont state map");
-        assert!(out.starts_with(&format!("state-map 1\nscheme  {HASH_SCHEME}\nbundle  ")));
-        assert!(
-            out.contains("slot-format prism-native-abi-word-v1")
-                && out.contains("backend  llvm\n")
-                && out.contains("flag  scheduler  cooperative\n")
-                && out.contains(&format!("state {} ", prism_native::native_symbol("count")))
-                && out.contains(" count arity 2 slots abi-word[arg0=%a0:word,arg1=%a1:word]"),
-            "native state map includes concrete entry ABI words:\n{out}"
-        );
-    }
-
-    // The other side of the instrumentation gate: under the DEFAULT flags the
-    // metadata table must still be embedded while the enter/arg/leave calls and
-    // shadow-name constants must be absent, so neither half of the opt-in can
-    // silently flip.
-    #[cfg(feature = "native")]
-    #[test]
-    fn llvm_dump_default_has_table_without_frame_instrumentation() {
-        let out = dump("llvm", "fn main() = 1\n").expect("llvm dump");
-        assert!(
-            out.contains("@prism_native_kont_table = constant"),
-            "default LLVM IR embeds the native kont table global:\n{out}"
-        );
-        assert!(
-            !out.contains("@prism_native_kont_enter") && !out.contains(".kont.shadow."),
-            "default LLVM IR must not carry opt-in frame instrumentation:\n{out}"
-        );
-    }
-
-    #[cfg(feature = "native")]
-    #[test]
-    fn llvm_dump_embeds_native_kont_table_global() {
-        // The native kont metadata globals are always emitted, but the enter/arg/leave
-        // ABI instrumentation calls are gated behind `native_kont_frames`. Enable that
-        // flag (leaving every other flag at the ambient default) so this dump exercises
-        // both the metadata table and the instrumented lowering under one assertion set.
-        let mut cfg = Config::from_env();
-        cfg.flags.native_kont_frames = true;
-        let roots = default_roots(Path::new("."));
-        let llvm = |src: &str| dump_on("llvm", src, &roots, &cfg).expect("llvm dump");
-
-        let out = llvm("fn main() = 1\n");
-        assert!(
-            out.contains("@prism_native_kont_table = constant"),
-            "LLVM IR embeds the native kont table global:\n{out}"
-        );
-        assert!(
-            out.contains("@prism_native_kont_state_map = constant")
-                && out.contains("state-map 1")
-                && out.contains("slot-format prism-native-abi-word-v1")
-                && out.contains("slots abi-word[]"),
-            "LLVM IR embeds the native kont state-map:\n{out}"
-        );
-        let out = llvm(
-            "fn count(i, last) = if i > last then i else count(i + 1, last)\n\nfn main() = count(1, 2)\n",
-        );
-        assert!(
-            out.contains(&format!("state {} ", prism_native::native_symbol("count")))
-                && out.contains(" count arity 2 slots abi-word[arg0=%a0:word,arg1=%a1:word]"),
-            "LLVM IR embeds concrete ABI-word slots for native arguments:\n{out}"
-        );
-        assert!(
-            out.contains("call void @prism_native_kont_enter")
-                && out.contains("call void @prism_native_kont_arg")
-                && out.contains("call void @prism_native_kont_leave"),
-            "LLVM IR instruments native kont entry ABI values:\n{out}"
-        );
-        assert!(
-            out.contains(MAIN_SYMBOL) && out.contains(" main\\0A"),
-            "LLVM IR table includes the native main symbol and Core name:\n{out}"
-        );
-        assert!(
-            out.contains("@prism_native_kont_ptrs = constant")
-                && out.contains("@prism_native_kont_ptrs_len = constant")
-                && out.contains(&format!("ptr @{MAIN_SYMBOL}")),
-            "LLVM IR embeds an exact function-pointer kont lookup table:\n{out}"
-        );
-    }
-
-    /// A mismatched scheme is rejected on the header, before any body is decoded.
-    #[test]
-    fn foreign_scheme_is_rejected() {
-        let doc = serde_json::json!({
-            "envelope": {
-                "scheme": "some-other-scheme-v9",
-                "kind": WireKind::Def.tag(),
-                "contract": "deadbeef",
-                "format": NAMESPACE_FORMAT,
-            },
-        });
-        assert_eq!(EnvelopeHeader::parse(&doc), None);
-    }
-}
-
-#[cfg(test)]
-mod content_hash_canonicity_tests {
-    use super::{check_on_in, Config};
-    use crate::resolve::default_roots;
-    use std::path::Path;
-
-    // The elaboration content hash folds each declaration's `Type::show()`
-    // rendering (`hash_meta`), so a stable content address rests on alpha-
-    // equivalent definitions rendering byte-identically. Generalization assigns
-    // canonical variable names in structural order, so two programs that differ
-    // only in the spelling of a type variable must yield the same rendered
-    // scheme; if this ever regressed, equal definitions would receive different
-    // addresses and content addressing would no longer be a pure function of
-    // meaning. This pins the invariant the hash silently depends on.
-    #[test]
-    fn alpha_equivalent_signatures_render_canonically() {
-        let roots = default_roots(Path::new("."));
-        let mut cfg = Config::default();
-        cfg.flags.quiet = true;
-        let show_id = |src: &str| {
-            check_on_in(src, &roots, &cfg)
-                .expect("program checks")
-                .decls
-                .iter()
-                .find(|d| d.name == "id")
-                .map(|d| d.ty.show())
-        };
-        let left = show_id("fn id(x : a) : a = x\n").expect("id present");
-        let right = show_id("fn id(x : zebra) : zebra = x\n").expect("id present");
-        assert_eq!(
-            left, right,
-            "alpha-equivalent signatures must render identically"
-        );
-        // Generalization canonicalizes the source-chosen name away, proving the
-        // rendering is a function of structure, not of the written variable.
-        assert!(
-            left.starts_with("forall a."),
-            "generalization renames to the canonical `a`, got {left}"
-        );
-        assert!(!right.contains("zebra"), "canonical rename dropped `zebra`");
-    }
-}
-
-#[cfg(test)]
-mod source_map_tests {
-    use crate::driver::{with_custom_prelude, with_prelude};
-    use crate::error::SourceMap;
-
-    // Diagnostics under a custom prelude must be user-relative, exactly like
-    // the built-in path: the composed source carries the boundary mark, and
-    // SourceMap reads it back. This was silently wrong (offset by the whole
-    // custom prelude) before the mark existed.
-    #[test]
-    fn custom_prelude_positions_are_user_relative() {
-        let user_src = "fn main() =\n  oops()\n";
-        let full = with_custom_prelude("fn helper() = 1\nfn helper2() = 2", user_src);
-        let map = SourceMap::new(&full);
-        assert_eq!(map.user(), user_src);
-        let off = map.prelude_len() + map.user().find("oops").unwrap();
-        assert_eq!(map.at(off), "line 2:3");
-    }
-
-    // The built-in prelude path is unchanged: located by its known text, no
-    // boundary mark involved.
-    #[test]
-    fn builtin_prelude_positions_are_user_relative() {
-        let user_src = "fn main() = 1\n";
-        let full = with_prelude(user_src);
-        let map = SourceMap::new(&full);
-        assert_eq!(map.user(), user_src);
-        assert_eq!(map.at(map.prelude_len()), "line 1:1");
-    }
 }

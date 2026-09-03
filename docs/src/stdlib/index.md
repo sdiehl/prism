@@ -5,8 +5,8 @@ Prism's standard library is ordinary Prism source, not compiler built-ins. A sma
 ## Merkle root
 
 - **Scheme**: `prism-core-hash-v2`
-- **Hash**: `9d4820696a00f42302d02b45cc0a1e1db4f625b0c6c50990ad71163a702dbe54`
-- **Compiler version**: Prism v0.21.0
+- **Hash**: `03d40d70fcd66dc8d8487a77ad63de56379fb23f22f87198f2edcf674eb93c43`
+- **Compiler version**: Prism v0.22.0
 
 ## Modules
 
@@ -14,6 +14,7 @@ Prism's standard library is ordinary Prism source, not compiler built-ins. A sma
 - [Control.Fresh](./control-fresh.md) - The `Fresh` effect: a deterministic monotonic name supply (gensym).
 - [Control.Layer](./control-layer.md) - The children-and-rebuild interface a generic traversal runs on, and the collecting queries that ride it.
 - [Control.Reader](./control-reader.md) - The canonical `Reader(r)` effect: a read-only ambient environment.
+- [Control.Recursion](./control-recursion.md) - Type-changing folds and unfolds over ordinary recursive datatypes.
 - [Control.Rewrite](./control-rewrite.md) - Strategy combinators: a pass as a composition of small local rules instead of a hand-written recursive match.
 - [Control.Solve](./control-solve.md) - The `Solve` effect: a metavariable solver as an effect.
 - [Control.State](./control-state.md) - The canonical `State(s)` effect: a threaded piece of mutable-looking state, interpreted through a private cell scoped to the run.
@@ -92,10 +93,11 @@ Prism's standard library is ordinary Prism source, not compiler built-ins. A sma
 - [Incr](./incr.md) - Incremental computation as a handler over a content-addressed dependency graph.
 - [Json](./json.md) - JSON: a dynamic value tree, a total parser, a canonical encoder, and a typed layer.
 - [Math](./math.md) - Named mathematical constants, matching Rust's `f64::consts` surface.
+- [Net](./net.md) - Net: TCP stream sockets, as an ordinary algebraic effect.
 - [Quickcheck](./quickcheck.md) - Property testing: run a boolean property over many generated inputs and report the first counterexample, deterministically.
 - [Replay](./replay.md) - Record/replay handlers for the capability effects.
 - [Sequence](./sequence.md) - The one lazy iteration protocol: pull-based sequences with natural names.
-- [Teleport](./teleport.md) - The checked mobility boundary for portable, single-use computations.
+- [Teleport](./teleport.md) - The checked mobility boundary: freezing a portable, single-use computation into an envelope, and placing that envelope wherever the installed transport puts it.
 - [Test](./test.md) - Per-type value generators for property testing.
 - [Time](./time.md) - Time: instants, wall-clock timestamps, durations, and RFC 3339.
 - [Wire](./wire.md) - The opt-in serialization layer.

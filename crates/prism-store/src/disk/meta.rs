@@ -18,14 +18,10 @@
 //! an unknown key is ignored on read so the format can grow without a version
 //! bump for additive fields.
 
-use std::fs;
 use std::io;
 use std::path::Path;
 
-use super::{
-    atomic_write, evict_shard_overflow, shard_path, HashHex, FIELD_SEP, META_DIR,
-    OBJECT_SHARD_BUDGET,
-};
+use super::{evict_shard_overflow, shard_path, HashHex, FIELD_SEP, META_DIR, OBJECT_SHARD_BUDGET};
 
 const META_HEADER: &str = "prism-store-meta\tv1";
 const KEY_NAME: &str = "name";
@@ -44,13 +40,18 @@ pub struct DefMeta {
     pub doc: String,
 }
 
-pub(super) fn put(root: &Path, hash: &HashHex<'_>, m: &DefMeta) -> io::Result<()> {
+pub(super) fn put(
+    root: &Path,
+    pending: Option<&super::PendingWrites>,
+    hash: &HashHex<'_>,
+    m: &DefMeta,
+) -> io::Result<()> {
     let body = format!(
         "{META_HEADER}\n{KEY_NAME}{FIELD_SEP}{}\n{KEY_TYPE}{FIELD_SEP}{}\n{KEY_DOC}{FIELD_SEP}{}\n",
         m.name, m.ty, m.doc
     );
     let path = shard_path(&root.join(META_DIR), hash);
-    atomic_write(&path, body.as_bytes())?;
+    super::atomic_write_in(pending, &path, body.as_bytes())?;
     // Metadata rides the object layer's budget: one blob per object hash, so
     // the layers grow in lockstep and share one bound. An evicted blob's
     // object survives; only its human-facing facts are re-derived.
@@ -60,13 +61,17 @@ pub(super) fn put(root: &Path, hash: &HashHex<'_>, m: &DefMeta) -> io::Result<()
     Ok(())
 }
 
-pub(super) fn get(root: &Path, hash: &HashHex<'_>) -> io::Result<Option<DefMeta>> {
+pub(super) fn get(
+    root: &Path,
+    pending: Option<&super::PendingWrites>,
+    hash: &HashHex<'_>,
+) -> io::Result<Option<DefMeta>> {
     let path = shard_path(&root.join(META_DIR), hash);
-    let text = match fs::read_to_string(&path) {
-        Ok(t) => t,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(e),
+    let Some(bytes) = super::read_visible(pending, &path)? else {
+        return Ok(None);
     };
+    let text = String::from_utf8(bytes)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
     let mut lines = text.lines();
     if lines.next() != Some(META_HEADER) {
         return Err(io::Error::new(

@@ -31,8 +31,8 @@ const TIERS: &[EffectTier] = &EffectTier::ALL;
 // native/tier_parity.rs forces a tier (equivalent to setting `PRISM_EFFECT_TIER`).
 fn forced(tier: EffectTier) -> Config {
     let mut cfg = Config::from_env();
-    cfg.flags.effect_tier = tier;
-    cfg.flags.compiler_cache = false;
+    cfg.update_flags(|flags| flags.effect_tier = tier);
+    cfg.update_flags(|flags| flags.compiler_cache = false);
     cfg
 }
 

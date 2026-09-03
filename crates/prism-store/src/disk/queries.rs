@@ -6,9 +6,8 @@ use std::sync::atomic::AtomicBool;
 use std::time::SystemTime;
 
 use super::{
-    atomic_write_if_absent, evict_shard_overflow, refresh_entry_age, runaway_estimate, shard_path,
-    GcProgress, GcProgressFn, StoreHash, QUERIES_DIR, QUERY_SHARD_BUDGET, SAMPLE_SHARD,
-    SHARD_COUNT,
+    evict_shard_overflow, refresh_entry_age, runaway_estimate, shard_path, GcProgress,
+    GcProgressFn, StoreHash, QUERIES_DIR, QUERY_SHARD_BUDGET, SAMPLE_SHARD, SHARD_COUNT,
 };
 
 #[cfg(test)]
@@ -79,13 +78,18 @@ fn decode_output(text: &str) -> io::Result<String> {
     Ok(output.to_string())
 }
 
-pub(super) fn get(root: &Path, kind: &str, key: &StoreHash<'_>) -> io::Result<Option<String>> {
+pub(super) fn get(
+    root: &Path,
+    pending: Option<&super::PendingWrites>,
+    kind: &str,
+    key: &StoreHash<'_>,
+) -> io::Result<Option<String>> {
     let path = path(root, kind, key)?;
-    let text = match fs::read_to_string(path) {
-        Ok(text) => text,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(e),
+    let Some(bytes) = super::read_visible(pending, &path)? else {
+        return Ok(None);
     };
+    let text = String::from_utf8(bytes)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
     Ok(Some(decode_output(&text)?))
 }
 
@@ -242,10 +246,10 @@ pub(super) fn sweep_stale(
 // Stamp the layer's layout version beside the kind directories. Only the
 // write path pays the existence probe; readers rely on the layout structurally
 // (a pre-shard tree simply never matches a sharded path).
-fn stamp_layout(root: &Path) -> io::Result<()> {
+fn stamp_layout(root: &Path, pending: Option<&super::PendingWrites>) -> io::Result<()> {
     let stamp = root.join(QUERIES_DIR).join(QUERY_LAYOUT_FILE);
     if !stamp.exists() {
-        atomic_write_if_absent(&stamp, format!("{QUERY_LAYOUT}\n").as_bytes())?;
+        super::atomic_write_if_absent_in(pending, &stamp, format!("{QUERY_LAYOUT}\n").as_bytes())?;
     }
     Ok(())
 }
@@ -270,12 +274,13 @@ fn warn_if_runaway_kind(kind: &str, key: &StoreHash<'_>, entry: &Path) {
 
 pub(super) fn put(
     root: &Path,
+    pending: Option<&super::PendingWrites>,
     kind: &str,
     key: &StoreHash<'_>,
     output: &StoreHash<'_>,
 ) -> io::Result<()> {
     let path = path(root, kind, key)?;
-    if let Some(existing) = get(root, kind, key)? {
+    if let Some(existing) = get(root, pending, kind, key)? {
         if existing == output.as_str() {
             // A re-publish confirms the binding is hot; refreshing its age
             // keeps it ahead of colder entries when its shard evicts.
@@ -292,16 +297,16 @@ pub(super) fn put(
     }
     #[cfg(test)]
     faults::hit(FaultPoint::BeforeQueryPublish)?;
-    stamp_layout(root)?;
+    stamp_layout(root, pending)?;
     let bytes = format!("{QUERY_FORMAT}\n{}\n", output.as_str());
-    if atomic_write_if_absent(&path, bytes.as_bytes())? {
+    if super::atomic_write_if_absent_in(pending, &path, bytes.as_bytes())? {
         if let Some(shard_dir) = path.parent() {
             evict_shard_overflow(shard_dir, &path, QUERY_SHARD_BUDGET);
         }
         warn_if_runaway_kind(kind, key, &path);
         return Ok(());
     }
-    match get(root, kind, key)? {
+    match get(root, pending, kind, key)? {
         Some(existing) if existing == output.as_str() => Ok(()),
         Some(existing) => Err(io::Error::new(
             io::ErrorKind::InvalidData,

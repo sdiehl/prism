@@ -1,17 +1,29 @@
--- `teleport` (Teleport module) is the checked mobility boundary. It runs a
+-- `teleport` (Teleport module) is the checked mobility boundary. It seals a
 -- portable, single-use closure -- one that captures only content-addressed code
 -- and portable data, invoked at most once, so it is safe to move to a fresh
--- runtime. The compiler proves the `@ {once, portable}` contract at each call;
--- running a teleported closure is observationally identical to calling it, so it
--- threads no differently on the two backends. Compose it with `Replay.record`
--- for a durable, replayable mobile run.
+-- runtime -- into an envelope, and hands that envelope to the installed
+-- `Placement` transport. The compiler proves the `@ {once, portable}` contract at
+-- each call. `run_here` is the transport that lands the envelope in this
+-- process: it still decodes what was sealed, so the cut is real and only the
+-- distance is zero. Compose it with `Replay.record` for a durable, replayable
+-- mobile run.
 import Teleport (..)
 
 fn double(n : Int) : Int = n + n
 
--- A teleported closure may call top-level functions (code references) freely.
-fn moved(x : Int) : Int = teleport(\() -> double(x) + 1)
+-- A teleported closure may name top-level functions (code references) and
+-- portable parameters freely; both of these are sealed and landed rather than
+-- called, so what they print is printed by the landing side.
+fn plain(n : Int) : Unit ! {IO} = println(double(n))
 
-fn main() =
-  println(teleport(\() -> double(20)))
-  println(moved(5))
+fn bumped(n : Int) : Unit ! {IO} = println(double(n) + 1)
+
+fn moved(x : Int) : Result(Unit, MoveError) ! {Placement, IO | e} =
+  teleport(\() -> bumped(x))
+
+fn scene() : Unit ! {Placement, IO | e} =
+  let _first = teleport(\() -> plain(20))
+  let _second = moved(5)
+  ()
+
+fn main() = run_here(scene)

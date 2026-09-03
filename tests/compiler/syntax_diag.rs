@@ -57,10 +57,11 @@ fn read(path: &Path) -> String {
     fs::read_to_string(path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
 }
 
-// The committed golden: the dump's bytes plus exactly one terminating newline, so
-// the file satisfies the end-of-file hook while the comparison stays exact bytes.
+// The committed golden: the dump's bytes with the build stamp punched out, plus
+// one terminating newline for the end-of-file hook. The stamp is still checked
+// live below, against the dump rather than the golden.
 fn golden_document(dump: &str) -> String {
-    format!("{dump}\n")
+    format!("{}\n", super::seam::json(dump))
 }
 
 // Write a golden atomically (temp then rename) so an interrupted acceptance never
@@ -99,6 +100,11 @@ fn golden_diagnostic(stem: &str, accepting: bool) -> Value {
 
     let doc: Value = serde_json::from_str(&out).unwrap_or_else(|e| panic!("{stem}: JSON: {e}"));
     assert_eq!(doc["schema"], SCHEMA, "{stem}: schema tag");
+    assert_eq!(
+        doc["compiler"],
+        env!("CARGO_PKG_VERSION"),
+        "{stem}: compiler version"
+    );
     let diags = doc["diagnostics"]
         .as_array()
         .unwrap_or_else(|| panic!("{stem}: diagnostics must be an array"));

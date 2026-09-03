@@ -75,10 +75,11 @@ pub(super) const ENTRIES: &[Explanation] = &[
         code: "E6006",
         title: "reserved effect name",
         prose: "The program declares an effect whose name the compiler reserves for \
-                a seam of its own, such as the concurrency preemption seam or the \
-                network boundary capability. Those names carry fixed meaning in \
-                lowering, so a user declaration cannot take them over.",
-        example: "effect Net\n  fetch() : String\n\nfn main() = println(1)",
+                a seam of its own, such as the concurrency preemption seam. Those \
+                names carry fixed meaning in lowering, so a user declaration \
+                cannot take them over. A reserved name leaves the set once its \
+                seam ships as an ordinary effect, as `Net` did.",
+        example: "effect Preempt\n  yield_now() : Unit\n\nfn main() = println(1)",
         fix: "Rename the effect to something outside the reserved set; the message \
               names what the reserved effect is used for.",
     },
@@ -831,5 +832,206 @@ pub(super) const ENTRIES: &[Explanation] = &[
         example: "fn x_of(p) = 0\n\ntype Point = Point { x : Int } deriving (Lens)\n\nfn main() = println(1)",
         fix: "Rename the field, or drop `Lens` from the `deriving` clause and \
               write that field's accessor by hand under a name of your own.",
+    },
+    Explanation {
+        code: "E6075",
+        title: "a `fip` or `fbip` function allocates past its budget",
+        prose: "`fip` and `fbip` declare an allocation budget per call: the bare \
+                keyword declares zero, and a parenthesized grade (`fip(2)`) \
+                allows that many fresh heap cells. The check walks the body \
+                after reuse lowering, so a constructor rebuilt through a `reuse` \
+                token costs nothing while one built fresh costs one cell, and it \
+                charges every call the callee's own declared budget in full, \
+                recursive calls included, so the per-call figure holds over the \
+                whole dynamic extent. A call to a function carrying no \
+                zero-allocation certificate, or an indirect call through a \
+                function value, has no budget to charge and leaves the total \
+                unbounded. The message lists the witness sites that add up past \
+                the declaration.",
+        example: "type Lst = Nil | Cons(Int, Lst)\n\nfip fn wrap(xs) = Cons(0, xs)",
+        fix: "Match the allocation with a `reuse` of a cell the function already \
+              owns, certify the callees the message names, raise the declared \
+              budget (`fip(1)`), or drop the annotation.",
+    },
+    Explanation {
+        code: "E6076",
+        title: "a `@ noalloc` function allocates",
+        prose: "`@ noalloc` claims the allocation half of `fip` on its own: this \
+                call, and everything it reaches, runs without taking a fresh \
+                heap cell. It is checked by the same walk as the keyword form at \
+                a budget of zero, so every constructor, tuple, or closure cell \
+                built outside a `reuse`, every primitive that is not on the \
+                allocation-free allow-list, and every call to a function \
+                carrying no zero-allocation certificate of its own is a \
+                rejection. `alloc` counts too: carving a cell from an arena is \
+                cheaper than the heap, not free.",
+        example: "type Box = Box(Int)\n\nfn boxit(x : Int) : Box @ noalloc = Box(x)",
+        fix: "Rewrite the body to work in place, certify the callees the message \
+              names (`@ noalloc`, `fip`, or `fbip`), or drop the claim.",
+    },
+    Explanation {
+        code: "E6077",
+        title: "a linear function borrows a parameter",
+        prose: "The linearity fact, claimed by `@ linear` or as one third of \
+                `fip`, says the function owns each parameter and consumes it \
+                exactly once. A borrowed parameter is the opposite arrangement: \
+                the caller keeps the reference and the callee only reads through \
+                it, so the cells behind it are not the callee's to consume or to \
+                hand to a `reuse`. The borrow is refused at the signature, \
+                before the body is looked at, because no body can repair it.",
+        example: "fip fn keep(borrow x) = x",
+        fix: "Take the parameter by value, or drop the linearity claim; `fbip` \
+              keeps the allocation budget without it.",
+    },
+    Explanation {
+        code: "E6078",
+        title: "a linear function uses one value twice",
+        prose: "Linearity is a fact about heap references: each owned one is \
+                consumed at most once, which is what lets the compiler hand its \
+                cell straight to a `reuse`. A second use needs a `dup`, which \
+                retains the cell and defeats that. The check runs over raw Core, \
+                before reference counting, so it sees the uses as written. \
+                Scalars are exempt, since duplicating an immediate is a runtime \
+                no-op and `x + x` on an `Int` stays linear; this rejection is \
+                always about a heap value.",
+        example: "type Lst = Nil | Cons(Int, Lst)\n\nfip fn use_twice(xs) =\n  match xs of\n    Nil => xs\n    Cons(h, t) => xs",
+        fix: "Use each owned reference once, returning the value the match \
+              rebuilt rather than the one it consumed, or drop the linearity \
+              claim.",
+    },
+    Explanation {
+        code: "E6079",
+        title: "a linear function calls one that is not linear",
+        prose: "Each claimed fact closes over the call tree on its own. A \
+                function claiming linearity may only call functions that carry \
+                linearity themselves, since an uncertified callee is free to \
+                duplicate the owned value it is handed and the caller's proof \
+                would say nothing about what happened to it. `fbip` certifies \
+                the allocation budget alone and says nothing about ownership, so \
+                an `fbip` callee does not discharge a `fip` caller's linearity. \
+                The closure runs per fact, which is why an `fbip` caller may \
+                call either discipline.",
+        example: "fip fn use_it(x) = helper(x)\n\nfbip fn helper(x) = x",
+        fix: "Certify the callee the message names (`@ linear` or `fip`), or \
+              weaken the caller to `fbip`.",
+    },
+    Explanation {
+        code: "E6080",
+        title: "a bounded-stack function recurses in non-tail position",
+        prose: "Bounded stack, claimed by `@ bounded_stack` or as one third of \
+                `fip`, says the function runs in constant stack. Codegen \
+                delivers that by turning recursion into a loop, which it can do \
+                for a tail call, for a tail call under a single constructor, and \
+                for a tail call under an associative addition. A recursive call \
+                anywhere else keeps one live frame per element, so the claim is \
+                false however small the inputs happen to be in practice.",
+        example: "fip fn wrap(x) = x\n\nfip fn relay(x) = wrap(relay(x))",
+        fix: "Move the recursive call into tail position, with an accumulator if \
+              the result has to be built up on the way, or drop to `fbip`, which \
+              keeps the allocation budget without the stack bound.",
+    },
+    Explanation {
+        code: "E6081",
+        title: "one function mixes the two loopable recursion shapes",
+        prose: "Codegen turns recursion under a single constructor and recursion \
+                under an associative addition into loops, but by two different \
+                rewrites, and it applies one of them per function. A body whose \
+                recursive call sites use both shapes has no single rewrite to \
+                pick, so the bounded-stack claim cannot be discharged even \
+                though each site on its own would be fine.",
+        example: "-- The two shapes, one per function:\n--   Cons(h, go(t))   tail modulo constructor\n--   h + go(t)        tail modulo addition",
+        fix: "Split the function so each half uses one shape, or drop to `fbip`.",
+    },
+    Explanation {
+        code: "E6082",
+        title: "loopable recursion paired with a mutual call",
+        prose: "Recursion under a single constructor or an associative addition \
+                becomes a loop only for a direct self-call: the rewrite threads \
+                the hole through the frame it is already standing in. A mutually \
+                recursive call leaves that frame, so the shape has no loop to \
+                become and the bounded-stack claim fails. A plain tail call is a \
+                different case, and mutual tail calls remain fine, because the \
+                ABI lets one frame be reused by another function of the same \
+                arity.",
+        example: "type Lst = Nil | Cons(Int, Lst)\n\nfip fn evens(xs) =\n  match xs of\n    Nil => Nil\n    Cons(h, t) => Cons(h, odds(t))\n\nfip fn odds(xs) =\n  match xs of\n    Nil => Nil\n    Cons(_, t) => evens(t)",
+        fix: "Make the mutual call a plain tail call, inline the partner so the \
+              recursion is direct, or drop to `fbip`.",
+    },
+    Explanation {
+        code: "E6083",
+        title: "a mutually recursive partner carries no stack certificate",
+        prose: "Bounded stack is a property of a recursion group, not of one \
+                function: every member of a cycle runs inside every other \
+                member's stack. Certifying one entry point therefore proves \
+                nothing while a partner it calls back into is unconstrained, \
+                since the uncertified member can recurse to whatever depth it \
+                likes and its frames are the caller's frames. The message names \
+                the member that is missing a certificate.",
+        example: "fn even(n : Int) : Int @ bounded_stack =\n  if n == 0 then 1 else odd(n - 1)\n\nfn odd(n : Int) : Int =\n  if n == 0 then 0 else even(n - 1)",
+        fix: "Give every member of the cycle the same certificate \
+              (`@ bounded_stack` or `fip`), or drop the claim from the group.",
+    },
+    Explanation {
+        code: "E6084",
+        title: "a bounded-stack function calls outside the certified tree",
+        prose: "The stack bound closes over the call tree. An uncertified callee \
+                may recurse to any depth, and its frames sit on top of the \
+                caller's, so the caller's constant-stack claim would be false \
+                whatever its own shape. Every function the body reaches \
+                therefore needs a bounded-stack certificate of its own, or has \
+                to be a primitive that runs in constant stack. The message gives \
+                the reason the tree is left open.",
+        example: "fn helper(n : Int) : Int = n + 1\n\nfn count(n : Int, acc : Int) : Int @ bounded_stack =\n  if n == 0 then helper(acc) else count(n - 1, acc + 1)",
+        fix: "Certify the callee (`@ bounded_stack` or `fip`), inline it, or drop \
+              the claim.",
+    },
+    Explanation {
+        code: "E6085",
+        title: "a closure contract sits on a type that is not a function",
+        prose: "`@ once`, `@ many`, and `@ portable` constrain how a closure is \
+                used: how many times it may be called, and what it may capture. \
+                They are read at a closure boundary, so they attach to a \
+                function type and to nothing else. On any other type there is no \
+                boundary to constrain and the row would be inert, so it is \
+                refused where it was written rather than quietly ignored. The \
+                declaration claims (`@ noalloc`, `@ linear`, `@ bounded_stack`) \
+                are a different family and belong on a declaration's return \
+                type.",
+        example: "fn run_once(x : Int @ once) : Int = x",
+        fix: "Move the row onto the function type it constrains, as in \
+              `f : (() -> Int) @ once`, or drop it.",
+    },
+    Explanation {
+        code: "E6086",
+        title: "a callable argument is not certified allocation-free",
+        prose: "A parameter whose function type carries `@ noalloc` is a demand \
+                on the caller: whatever is passed there will be invoked inside \
+                an allocation-free region, so it has to carry a zero-allocation \
+                certificate before the call is admitted. The check traces the \
+                supplied callable back to its definition and asks for that \
+                certificate. A plain function has none, and a graded one \
+                (`fip(1)`) has a budget above zero, which is also a rejection. \
+                The demand is settled at the call site, where the callable still \
+                has a name, rather than at the indirect call inside the callee, \
+                where it no longer does.",
+        example: "type Box = Box(Int)\n\nfn boxit(x : Int) : Box = Box(x)\n\nfn apply(f : ((Int) -> Box) @ noalloc, x : Int) : Box = f(x)\n\nfn drive(x : Int) : Box = apply(boxit, x)",
+        fix: "Certify the function being passed (`@ noalloc`, `fip`, or `fbip` at \
+              budget zero) and make its body allocation-free, or drop `@ noalloc` \
+              from the parameter's type.",
+    },
+    Explanation {
+        code: "E6087",
+        title: "a callable argument cannot be traced to a certificate",
+        prose: "The `@ noalloc` demand on a parameter's function type is \
+                discharged by finding the certificate of whatever is passed, \
+                which means the argument has to be traceable: a named top-level \
+                function, or a parameter whose own type carries the same demand. \
+                A literal lambda written at the call site, or a function value \
+                pulled back out of a data structure, has no name to look up and \
+                no signature to read, so there is nothing to check and the call \
+                is refused rather than admitted on trust.",
+        example: "fn apply(f : ((Int) -> Int) @ noalloc, x : Int) : Int = f(x)\n\nfn drive(x : Int) : Int = apply(\\(y) -> y + x, x)",
+        fix: "Lift the callable to a top-level function and certify it, or thread \
+              it through a parameter whose type already carries `@ noalloc`.",
     },
 ];

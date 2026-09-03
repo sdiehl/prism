@@ -1,13 +1,14 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
 use crate::sym::Sym;
 use crate::syntax::ast::{Grade, Program};
+use crate::tc::{SeedClassMethod, TypecheckSeedBuilder};
 use crate::types::ty::Kind;
 use crate::types::{
-    Canon, Checked, ClassInfo, CtorInfo, DataInfo, EffOpInfo, Env, InstInfo, InstKeys, NominalRepr,
-    Type, TypecheckSeed,
+    Checked, CtorInfo, DataInfo, EffOpInfo, InstInfo, NominalRepr, Type, TypeParameter,
+    TypecheckSeed,
 };
 
 use super::identity::{interface_entry, ModuleInterface, ModuleInterfaceEntry};
@@ -22,34 +23,14 @@ const INSTANCE_METADATA_KIND: &str = "instance-metadata";
 /// Checked interface facts reconstructed without dependency implementation bodies.
 #[derive(Clone, Debug)]
 pub struct RehydratedModuleInterface {
-    pub env: Env,
-    pub constrained: BTreeMap<Sym, (Type, Vec<(Sym, Type)>)>,
-    pub data: BTreeMap<String, DataInfo>,
-    pub ctors: BTreeMap<String, CtorInfo>,
-    pub eff_ops: BTreeMap<String, EffOpInfo>,
-    pub classes: BTreeMap<Sym, ClassInfo>,
-    pub methods: BTreeMap<Sym, (Sym, usize)>,
-    pub instances: BTreeMap<Sym, InstInfo>,
-    pub inst_keys: InstKeys,
-    pub canonical: Canon,
+    seed: TypecheckSeed,
 }
 
 impl RehydratedModuleInterface {
     /// Convert these facts into the typechecker's dependency seed.
     #[must_use]
     pub fn typecheck_seed(&self) -> TypecheckSeed {
-        TypecheckSeed {
-            env: self.env.clone(),
-            data: self.data.clone(),
-            ctors: self.ctors.clone(),
-            eff_ops: self.eff_ops.clone(),
-            classes: self.classes.clone(),
-            instances: self.instances.clone(),
-            inst_keys: self.inst_keys.clone(),
-            canonical: self.canonical.clone(),
-            methods: self.methods.clone(),
-            constrained: self.constrained.clone(),
-        }
+        self.seed.clone()
     }
 }
 
@@ -174,18 +155,18 @@ fn reexported_names(entry: &Program, checked: &Checked) -> BTreeSet<String> {
             }
         } else {
             let prefix = format!("{path}.");
-            for key in checked.data.keys() {
+            for key in checked.defs.data.keys() {
                 if key.starts_with(&prefix) {
                     out.insert(key.clone());
                 }
             }
-            for key in checked.constrained.keys() {
+            for key in checked.dispatch.constrained.keys() {
                 let key = key.to_string();
                 if key.starts_with(&prefix) {
                     out.insert(key);
                 }
             }
-            for key in checked.classes.keys() {
+            for key in checked.dispatch.classes.keys() {
                 let key = key.to_string();
                 if key.starts_with(&prefix) {
                     out.insert(key);
@@ -210,23 +191,28 @@ pub(super) fn metadata_entries(
         .collect::<BTreeSet<_>>();
     let mut entries = Vec::new();
     for name in &exports {
-        if let Some((scheme, constraints)) = checked.constrained.get(&Sym::from(name.as_str())) {
+        if let Some(constrained) = checked.dispatch.constrained.get(&Sym::from(name.as_str())) {
+            let constraints = constrained
+                .constraints
+                .iter()
+                .map(|c| (c.class, c.head.clone()))
+                .collect::<Vec<_>>();
             entries.push(payload_entry(
                 VALUE_METADATA_KIND,
                 name,
                 &ValuePayload {
-                    scheme: scheme.show(),
-                    constraints: show_constraints(constraints),
+                    scheme: constrained.scheme.show(),
+                    constraints: show_constraints(&constraints),
                 },
             )?);
         }
-        if let Some(info) = checked.data.get(name) {
+        if let Some(info) = checked.defs.data.get(name) {
             entries.push(payload_entry(
                 DATA_METADATA_KIND,
                 name,
                 &DataPayload {
-                    params: info.params.clone(),
-                    param_kinds: info.param_kinds.iter().map(kind_to_wire).collect(),
+                    params: info.param_names(),
+                    param_kinds: info.param_kinds().iter().map(kind_to_wire).collect(),
                     ctors: if opaques.contains(name) {
                         Vec::new()
                     } else {
@@ -237,8 +223,9 @@ pub(super) fn metadata_entries(
             )?);
             if !opaques.contains(name) {
                 for ctor_name in &info.ctors {
-                    if let Some(ctor) = checked.ctors.get(ctor_name) {
+                    if let Some(ctor) = checked.defs.ctors.get(ctor_name) {
                         let scheme = checked
+                            .interface
                             .env
                             .get(&Sym::from(ctor_name.as_str()))
                             .map_or_else(String::new, Type::show);
@@ -259,7 +246,7 @@ pub(super) fn metadata_entries(
                 }
             }
         }
-        if let Some(class) = checked.classes.get(&Sym::from(name.as_str())) {
+        if let Some(class) = checked.dispatch.classes.get(&Sym::from(name.as_str())) {
             entries.push(payload_entry(
                 CLASS_METADATA_KIND,
                 name,
@@ -272,14 +259,18 @@ pub(super) fn metadata_entries(
                         .map(|(method, ty)| MethodPayload {
                             name: method.to_string(),
                             ty: ty.show(),
-                            scheme: checked.env.get(method).map_or_else(String::new, Type::show),
+                            scheme: checked
+                                .interface
+                                .env
+                                .get(method)
+                                .map_or_else(String::new, Type::show),
                         })
                         .collect(),
                 },
             )?);
         }
     }
-    for (name, op) in &checked.eff_ops {
+    for (name, op) in &checked.defs.eff_ops {
         if exports.contains(op.effect_name.as_str()) {
             entries.push(payload_entry(
                 EFFECT_OP_METADATA_KIND,
@@ -291,6 +282,7 @@ pub(super) fn metadata_entries(
                     ret: op.ret.show(),
                     grade: op.grade.word().to_string(),
                     scheme: checked
+                        .interface
                         .env
                         .get(&Sym::from(name.as_str()))
                         .map_or_else(String::new, Type::show),
@@ -303,7 +295,7 @@ pub(super) fn metadata_entries(
         .iter()
         .map(|instance| instance.name.as_str())
         .collect::<BTreeSet<_>>();
-    for (name, instance) in &checked.instances {
+    for (name, instance) in &checked.dispatch.instances {
         let exported_head = matches!(
             &instance.head,
             Type::Con(head, _) if exports.contains(head.as_str())
@@ -322,7 +314,11 @@ pub(super) fn metadata_entries(
                     module: instance.module.clone(),
                     context: show_constraints(&instance.context),
                     supers: show_constraints(&instance.supers),
-                    canonical: checked.canonical.values().any(|selected| selected == name),
+                    canonical: checked
+                        .dispatch
+                        .canonical
+                        .values()
+                        .any(|selected| selected == name),
                 },
             )?);
         }
@@ -331,84 +327,86 @@ pub(super) fn metadata_entries(
 }
 
 pub(super) fn rehydrate(interface: &ModuleInterface) -> Result<RehydratedModuleInterface, String> {
-    let mut facts = RehydratedModuleInterface {
-        env: interface.exported_value_env()?,
-        constrained: BTreeMap::new(),
-        data: BTreeMap::new(),
-        ctors: BTreeMap::new(),
-        eff_ops: BTreeMap::new(),
-        classes: BTreeMap::new(),
-        methods: BTreeMap::new(),
-        instances: BTreeMap::new(),
-        inst_keys: BTreeMap::new(),
-        canonical: BTreeMap::new(),
-    };
+    let mut facts = TypecheckSeedBuilder::new(interface.exported_value_env()?);
     for entry in &interface.entries {
         match entry.kind.as_str() {
             VALUE_METADATA_KIND => {
                 let payload: ValuePayload = parse_payload(entry)?;
-                facts.constrained.insert(
-                    Sym::from(entry.name.as_str()),
-                    (
+                facts
+                    .insert_constrained(
+                        Sym::from(entry.name.as_str()),
                         parse_type(&entry.name, &payload.scheme)?,
                         parse_constraints(&entry.name, payload.constraints)?,
-                    ),
-                );
+                    )
+                    .map_err(|error| error.to_string())?;
             }
             DATA_METADATA_KIND => {
                 let payload: DataPayload = parse_payload(entry)?;
-                facts.data.insert(
-                    entry.name.clone(),
-                    DataInfo {
-                        params: payload.params,
-                        param_kinds: payload
-                            .param_kinds
-                            .into_iter()
-                            .map(kind_from_wire)
-                            .collect(),
-                        ctors: payload.ctors,
-                        repr: payload.repr.into(),
-                    },
-                );
+                if payload.params.len() != payload.param_kinds.len() {
+                    return Err(format!(
+                        "data `{}` has {} parameters but {} kinds",
+                        entry.name,
+                        payload.params.len(),
+                        payload.param_kinds.len()
+                    ));
+                }
+                facts
+                    .insert_data(
+                        entry.name.clone(),
+                        DataInfo {
+                            params: payload
+                                .params
+                                .into_iter()
+                                .zip(payload.param_kinds.into_iter().map(kind_from_wire))
+                                .map(|(name, kind)| TypeParameter { name, kind })
+                                .collect(),
+                            ctors: payload.ctors,
+                            repr: payload.repr.into(),
+                        },
+                    )
+                    .map_err(|error| error.to_string())?;
             }
             CTOR_METADATA_KIND => {
                 let payload: CtorPayload = parse_payload(entry)?;
                 let args = parse_types(&entry.name, payload.args)?;
                 let scheme = parse_type(&entry.name, &payload.scheme)?;
-                facts.env.insert(Sym::from(entry.name.as_str()), scheme);
-                facts.ctors.insert(
-                    entry.name.clone(),
-                    CtorInfo {
-                        type_name: Sym::from(payload.type_name),
-                        params: payload.params.into_iter().map(Sym::from).collect(),
-                        param_kinds: payload
-                            .param_kinds
-                            .into_iter()
-                            .map(kind_from_wire)
-                            .collect(),
-                        args,
-                        tag: payload.tag,
-                        fields: payload.fields.into_iter().map(Sym::from).collect(),
-                    },
-                );
+                facts
+                    .insert_constructor(
+                        entry.name.clone(),
+                        scheme,
+                        CtorInfo {
+                            type_name: Sym::from(payload.type_name),
+                            params: payload.params.into_iter().map(Sym::from).collect(),
+                            param_kinds: payload
+                                .param_kinds
+                                .into_iter()
+                                .map(kind_from_wire)
+                                .collect(),
+                            args,
+                            tag: payload.tag,
+                            fields: payload.fields.into_iter().map(Sym::from).collect(),
+                        },
+                    )
+                    .map_err(|error| error.to_string())?;
             }
             EFFECT_OP_METADATA_KIND => {
                 let payload: EffectOpPayload = parse_payload(entry)?;
-                facts.env.insert(
-                    Sym::from(entry.name.as_str()),
-                    parse_type(&entry.name, &payload.scheme)?,
-                );
-                facts.eff_ops.insert(
-                    entry.name.clone(),
-                    EffOpInfo {
-                        effect_name: Sym::from(payload.effect_name),
-                        eff_params: payload.eff_params.into_iter().map(Sym::from).collect(),
-                        params: parse_types(&entry.name, payload.params)?,
-                        ret: parse_type(&entry.name, &payload.ret)?,
-                        grade: Grade::parse(&payload.grade)
-                            .ok_or_else(|| format!("invalid effect grade {:?}", payload.grade))?,
-                    },
-                );
+                let scheme = parse_type(&entry.name, &payload.scheme)?;
+                facts
+                    .insert_effect_operation(
+                        entry.name.clone(),
+                        scheme,
+                        EffOpInfo {
+                            effect_name: Sym::from(payload.effect_name),
+                            eff_params: payload.eff_params.into_iter().map(Sym::from).collect(),
+                            params: parse_types(&entry.name, payload.params)?,
+                            ret: parse_type(&entry.name, &payload.ret)?,
+                            grade: Grade::parse(&payload.grade).ok_or_else(|| {
+                                format!("invalid effect grade {:?}", payload.grade)
+                            })?,
+                        },
+                    )
+                    .map_err(|error| error.to_string())?;
             }
             CLASS_METADATA_KIND => {
                 let payload: ClassPayload = parse_payload(entry)?;
@@ -425,56 +423,44 @@ pub(super) fn rehydrate(interface: &ModuleInterface) -> Result<RehydratedModuleI
                     .collect::<Result<Vec<_>, String>>()?;
                 let class_name = Sym::from(entry.name.as_str());
                 let class_param = Sym::from(payload.param.as_str());
-                for (index, (name, _, scheme)) in methods.iter().enumerate() {
-                    facts.env.insert(*name, scheme.clone());
-                    facts.methods.insert(*name, (class_name, index));
-                    facts.constrained.insert(
-                        *name,
-                        (scheme.clone(), vec![(class_name, Type::Var(class_param))]),
-                    );
-                }
-                facts.classes.insert(
-                    class_name,
-                    ClassInfo {
-                        param: class_param,
-                        supers: payload.supers.into_iter().map(Sym::from).collect(),
-                        methods: methods
+                facts
+                    .insert_class(
+                        class_name,
+                        class_param,
+                        payload.supers.into_iter().map(Sym::from).collect(),
+                        methods
                             .into_iter()
-                            .map(|(name, ty, _)| (name, ty))
+                            .map(|(name, ty, scheme)| SeedClassMethod { name, ty, scheme })
                             .collect(),
-                    },
-                );
+                    )
+                    .map_err(|error| error.to_string())?;
             }
             INSTANCE_METADATA_KIND => {
                 let payload: InstancePayload = parse_payload(entry)?;
                 let name = Sym::from(entry.name.as_str());
                 let class = Sym::from(payload.class);
                 let head = parse_type(&entry.name, &payload.head)?;
-                let key = crate::tc::instance_head_key(&head)
-                    .ok_or_else(|| format!("invalid instance head {} in interface", head.show()))?;
                 facts
-                    .inst_keys
-                    .entry((class, key.clone()))
-                    .or_default()
-                    .push(name);
-                if payload.canonical {
-                    facts.canonical.insert((class, key), name);
-                }
-                facts.instances.insert(
-                    name,
-                    InstInfo {
-                        class,
-                        head,
-                        module: payload.module,
-                        context: parse_constraints(&entry.name, payload.context)?,
-                        supers: parse_constraints(&entry.name, payload.supers)?,
-                    },
-                );
+                    .insert_instance(
+                        name,
+                        InstInfo {
+                            class,
+                            head,
+                            module: payload.module,
+                            context: parse_constraints(&entry.name, payload.context)?,
+                            supers: parse_constraints(&entry.name, payload.supers)?,
+                        },
+                        payload.canonical,
+                    )
+                    .map_err(|error| error.to_string())?;
             }
             _ => {}
         }
     }
-    Ok(facts)
+    facts
+        .finish()
+        .map(|seed| RehydratedModuleInterface { seed })
+        .map_err(|error| error.to_string())
 }
 
 fn payload_entry(

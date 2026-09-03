@@ -1,0 +1,199 @@
+---
+source: tests/snapshots.rs
+expression: "normalize_pipeline_report(&prism::report(&src))"
+input_file: tests/cases/fip_budget_exceeded.pr
+---
+== tokens ==
+VOpen Type UIdent("Box") Eq UIdent("Box") LParen KwInt RParen VSemi Type UIdent("Pair") Eq UIdent("Pair") LParen UIdent("Box") Comma UIdent("Box") RParen VSemi Fip LParen Int(IntLit { value: 1, suffix: None }) RParen Fn Ident("box") LParen Ident("x") RParen Eq UIdent("Box") LParen Ident("x") RParen VSemi Fip LParen Int(IntLit { value: 2, suffix: None }) RParen Fn Ident("pair") LParen Ident("x") Comma Ident("y") RParen Eq UIdent("Pair") LParen Ident("box") LParen Ident("x") RParen Comma Ident("box") LParen Ident("y") RParen RParen VClose
+
+== ast ==
+Program {
+    types: [
+        DataDecl {
+            name: "Box",
+            params: [],
+            param_kinds: [],
+            ctors: [
+                Ctor {
+                    name: "Box",
+                    args: [
+                        Int,
+                    ],
+                    fields: None,
+                },
+            ],
+            deriving: [],
+            newtype: false,
+            span: 353..372,
+        },
+        DataDecl {
+            name: "Pair",
+            params: [],
+            param_kinds: [],
+            ctors: [
+                Ctor {
+                    name: "Pair",
+                    args: [
+                        Con(
+                            "Box",
+                            [],
+                        ),
+                        Con(
+                            "Box",
+                            [],
+                        ),
+                    ],
+                    fields: None,
+                },
+            ],
+            deriving: [],
+            newtype: false,
+            span: 374..400,
+        },
+    ],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "box",
+            params: [
+                Param {
+                    name: "x",
+                    ty: None,
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "Box",
+                        ),
+                        span: 421..424,
+                    },
+                    [
+                        Spanned {
+                            node: Var(
+                                "x",
+                            ),
+                            span: 425..426,
+                        },
+                    ],
+                ),
+                span: 421..427,
+            },
+            wheres: [],
+            fip: Fip(
+                1,
+            ),
+            span: 402..427,
+        },
+        Decl {
+            name: "pair",
+            params: [
+                Param {
+                    name: "x",
+                    ty: None,
+                    borrow: false,
+                    default: None,
+                },
+                Param {
+                    name: "y",
+                    ty: None,
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "Pair",
+                        ),
+                        span: 452..456,
+                    },
+                    [
+                        Spanned {
+                            node: Call(
+                                Spanned {
+                                    node: Var(
+                                        "box",
+                                    ),
+                                    span: 457..460,
+                                },
+                                [
+                                    Spanned {
+                                        node: Var(
+                                            "x",
+                                        ),
+                                        span: 461..462,
+                                    },
+                                ],
+                            ),
+                            span: 457..463,
+                        },
+                        Spanned {
+                            node: Call(
+                                Spanned {
+                                    node: Var(
+                                        "box",
+                                    ),
+                                    span: 465..468,
+                                },
+                                [
+                                    Spanned {
+                                        node: Var(
+                                            "y",
+                                        ),
+                                        span: 469..470,
+                                    },
+                                ],
+                            ),
+                            span: 465..471,
+                        },
+                    ],
+                ),
+                span: 452..472,
+            },
+            wheres: [],
+            fip: Fip(
+                2,
+            ),
+            span: 429..472,
+        },
+    ],
+}
+
+== types ==
+box : (Int) -> Box
+pair : (Int, Int) -> Pair
+
+== core (cbpv) ==
+fn box(x) =
+  return x to t@0
+  return Box(t@0)
+fn pair(x, y) =
+  return x to t@1
+  box(t@1) to t@2
+  return y to t@3
+  box(t@3) to t@4
+  return Pair(t@2, t@4)
+
+== fip ==
+[E6075] Type Error: usage check `fip(2)` failed for function `pair`: needs an allocation budget of at least 3, declared at most 2: call to `box` charges its declared allocation budget of 1; call to `box` charges its declared allocation budget of 1; constructor `Pair` is built fresh outside `reuse`
+    ╭─[ <source>:12:1 ]
+    │
+ 12 │ fip(2) fn pair(x, y) = Pair(box(x), box(y))
+    │ ─────────────────────┬─────────────────────  
+    │                      ╰─────────────────────── usage check `fip(2)` failed for function `pair`: needs an allocation budget of at least 3, declared at most 2: call to `box` charges its declared allocation budget of 1; call to `box` charges its declared allocation budget of 1; constructor `Pair` is built fresh outside `reuse`
+────╯

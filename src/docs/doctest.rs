@@ -244,7 +244,7 @@ pub(crate) fn run(examples: &[Example], roots: &[Root], _base: &Path) -> Report 
                 .failures
                 .push((ex.origin.clone(), format!("compile error: {e}"))),
             Ok(checked) => {
-                let has_main = checked.decls.iter().any(|d| d.name == ENTRY_POINT);
+                let has_main = checked.defs.decls.iter().any(|d| d.name == ENTRY_POINT);
                 if ex.mode == Mode::Check && has_main {
                     match interpret_on(&full, roots) {
                         Ok(_) => r.passed += 1,
@@ -297,7 +297,7 @@ pub(crate) fn actual_output(
 ) -> Result<Vec<String>, String> {
     let full = with_prelude(&runnable(module, code));
     let checked = check_quiet(&full, roots).map_err(|e| format!("compile error: {e}"))?;
-    if !checked.decls.iter().any(|d| d.name == ENTRY_POINT) {
+    if !checked.defs.decls.iter().any(|d| d.name == ENTRY_POINT) {
         return Err("example has no `main` and no expression to run".into());
     }
     let run = interpret_on(&full, roots).map_err(|e| format!("run error: {e}"))?;

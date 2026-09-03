@@ -31,7 +31,7 @@ fn typed_from_program(
     let program = prism::syntax::desugar::desugar(resolved).expect("fixture desugars");
     let checked = prism::types::check(&program).expect("fixture typechecks");
     let grades = checked.op_grades();
-    let ctors = checked.ctors.clone();
+    let ctors = checked.defs.ctors.clone();
     let elaboration = prism::core::elaborate_typed(&program, &checked).expect("fixture elaborates");
     let (_compat, typed, env) = elaboration.into_parts();
     (typed, env, ctors, grades)
@@ -50,7 +50,7 @@ fn mixed_direct_and_effectful_map_keeps_the_pure_clone_direct() {
     let prepared = prepare(typed.clone(), &env, &ctors, &flags, &grades)
         .expect("convention preparation succeeds");
     let clone = prepared
-        .fns
+        .functions()
         .iter()
         .find(|function| function.name().as_str().starts_with("Data.List.map$ec"))
         .expect("the mixed demand materializes a map convention clone");
@@ -58,12 +58,12 @@ fn mixed_direct_and_effectful_map_keeps_the_pure_clone_direct() {
     let clone_sig = clone.sig().clone();
     let original = Sym::new("Data.List.map");
     let pure_use = prepared
-        .fns
+        .functions()
         .iter()
         .find(|function| function.name().as_str() == "pure_use")
         .expect("pure caller remains reachable");
     let effect_use = prepared
-        .fns
+        .functions()
         .iter()
         .find(|function| function.name().as_str() == "effect_use")
         .expect("effectful caller remains reachable");
@@ -75,8 +75,8 @@ fn mixed_direct_and_effectful_map_keeps_the_pure_clone_direct() {
     assert!(calls(clone).contains(&clone_name));
     assert!(!calls(clone).contains(&original));
 
-    let effects = EffectPlan::analyze(&prepared.fns);
-    let region = analysis::plan(&prepared.fns, &effects, false);
+    let effects = EffectPlan::analyze(prepared.functions());
+    let region = analysis::plan(prepared.functions(), &effects, false);
     assert_eq!(region.scope, MonadicScope::Selective);
     assert!(region.members.contains(&original));
     assert!(region.members.contains(&effect_use.name()));
@@ -90,10 +90,10 @@ fn mixed_direct_and_effectful_map_keeps_the_pure_clone_direct() {
 
     let lowered = lower_effects(typed, &env, &ctors, &flags, &grades)
         .expect("the convention-split program lowers");
-    assert_ne!(lowered.strategy, EffectStrategy::WholeProgramFreeMonad);
+    assert_ne!(lowered.strategy(), EffectStrategy::WholeProgramFreeMonad);
     assert_eq!(
         lowered
-            .core
+            .core()
             .functions()
             .iter()
             .find(|function| function.name() == clone_name)
@@ -122,7 +122,7 @@ fn pure_and_unrolled_controls_pin_the_expected_tiers_and_outputs() {
         let (typed, env, ctors, grades) = typed_from_program(source);
         let lowered = lower_effects(typed, &env, &ctors, &DynFlags::default(), &grades)
             .unwrap_or_else(|error| panic!("{name} control lowers: {error}"));
-        assert_eq!(lowered.strategy, strategy, "{name} control tier");
+        assert_eq!(lowered.strategy(), strategy, "{name} control tier");
 
         let run = prism::interpret(&prism::driver::with_prelude(source))
             .unwrap_or_else(|error| panic!("{name} control interprets: {error}"));
@@ -152,7 +152,7 @@ fn main() =
         .expect("single-convention preparation succeeds");
     assert!(
         prepared
-            .fns
+            .functions()
             .iter()
             .all(|function| !function.name().as_str().contains("$ec")),
         "one known convention does not need a clone"

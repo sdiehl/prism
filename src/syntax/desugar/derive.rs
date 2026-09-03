@@ -500,6 +500,8 @@ fn mdecl(name: &str, params: &[&str], body: S<Expr>, z: Span) -> Decl {
         fip: Fip::No,
         replayable: false,
         no_alloc: false,
+        bounded_stack: false,
+        linear: false,
         span: z,
     }
 }

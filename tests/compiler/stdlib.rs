@@ -7,6 +7,8 @@ use std::path::Path;
 
 use prism::{check, interpret, with_prelude};
 
+const RECURSION_LAWS: &str = include_str!("../stdlib_fixtures/recursion_laws.pr");
+
 fn out(src: &str) -> String {
     let run = interpret(&with_prelude(src)).expect("resolves and runs");
     run.out.iter().fold(String::new(), |mut s, v| {
@@ -42,6 +44,19 @@ fn stdlib_module_is_importable_qualified() {
     assert_eq!(
         out("import Data.Foldable\nfn main() = print(Data.Foldable.sum([4, 5, 6]))"),
         "15\n"
+    );
+}
+
+#[test]
+fn control_recursion_laws_effects_and_order_hold() {
+    assert_eq!(
+        out(RECURSION_LAWS),
+        "tree structural laws: OK, passed 100 tests.\n\
+term structural laws: OK, passed 100 tests.\n\
+materialized cata-ana equals hylo: OK, passed 100 tests.\n\
+true\n\
+(5, [\"a\", \"branch\", \"b\", \"c\"])\n\
+true\n"
     );
 }
 

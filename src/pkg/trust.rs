@@ -1236,7 +1236,7 @@ pub fn publish_cmd(
 ) -> Result<String, Error> {
     crate::commit_to_store(full_src, roots, cfg)?;
     let identity = crate::namespace_identity(full_src, roots)?;
-    let store_root = resolve_store_path(cfg.flags.store_path.as_deref());
+    let store_root = resolve_store_path(cfg.flags().store_path.as_deref());
     let dst = DiskTransport::open(&store_root)?;
     let log = store_log(&store_root);
     let row = IndexRow {
@@ -1247,7 +1247,7 @@ pub fn publish_cmd(
         kind: identity.kind.to_string(),
         root: identity.root,
     };
-    let receipt = publish(&dst, &log, row, &cfg.flags)?;
+    let receipt = publish(&dst, &log, row, cfg.flags())?;
 
     let mut out = String::new();
     let _ = writeln!(
@@ -1290,7 +1290,7 @@ pub fn publish_source_cmd(
     cfg: &Config,
 ) -> Result<String, Error> {
     crate::commit_to_store(full_src, roots, cfg)?;
-    let store_root = resolve_store_path(cfg.flags.store_path.as_deref());
+    let store_root = resolve_store_path(cfg.flags().store_path.as_deref());
     let store = Store::open_or_create(&store_root)?;
     let bundle = encode_source_bundle([(name, user_src)]);
     let root = Digest::from(blake3::hash(&bundle).to_hex().to_string());
@@ -1306,7 +1306,7 @@ pub fn publish_source_cmd(
         kind: INDEX_KIND_SOURCE.to_string(),
         root,
     };
-    let receipt = publish(&dst, &log, row, &cfg.flags)?;
+    let receipt = publish(&dst, &log, row, cfg.flags())?;
 
     let mut out = String::new();
     let _ = writeln!(
@@ -1346,7 +1346,7 @@ pub fn publish_source_cmd(
 /// # Errors
 /// A front-end error deriving the shared baseline, or a store/filesystem error.
 pub fn audit_cmd(cfg: &Config, allow_unsigned: bool) -> Result<AuditReport, Error> {
-    let store_root = resolve_store_path(cfg.flags.store_path.as_deref());
+    let store_root = resolve_store_path(cfg.flags().store_path.as_deref());
     let dst = DiskTransport::open(&store_root)?;
     // Absent a lockfile, audit every pointer the signed index publishes; the typed
     // `audit` entry point accepts a lock-derived pin set when one is available.
@@ -1362,7 +1362,7 @@ pub fn audit_cmd(cfg: &Config, allow_unsigned: bool) -> Result<AuditReport, Erro
         &log,
         &locked,
         &baseline,
-        &cfg.flags,
+        cfg.flags(),
         allow_unsigned,
     )?;
     Ok(report)

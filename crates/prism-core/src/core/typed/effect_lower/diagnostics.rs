@@ -8,8 +8,8 @@ use prism_syntax::names::ENTRY_POINT;
 
 use super::decline::Decline;
 use super::plan::{open_resume_escapes, EffectPlan};
-use super::walk::each_subterm;
-use super::{TypedComp, TypedCompKind, TypedCoreFn};
+use super::walk::contains_mask;
+use super::TypedCoreFn;
 
 /// Per-lowering reporter for a typed fast-path matcher whose accepted input
 /// violates its own post-condition.
@@ -122,15 +122,6 @@ fn free_monad_causes(
         causes.push("an effect reaches `main` unhandled".to_string());
     }
     causes
-}
-
-fn contains_mask(comp: &TypedComp) -> bool {
-    if matches!(comp.kind(), TypedCompKind::Mask(..)) {
-        return true;
-    }
-    let mut found = false;
-    each_subterm(comp, &mut |child| found |= contains_mask(child));
-    found
 }
 
 #[cfg(test)]

@@ -30,12 +30,14 @@ fn implementation_edit_preserves_checked_interface() {
         check_with_seed(importer, &after.rehydrate().unwrap().typecheck_seed()).unwrap();
     assert_eq!(
         before_checked
+            .defs
             .decls
             .first()
             .expect("before importer")
             .ty
             .show(),
         after_checked
+            .defs
             .decls
             .first()
             .expect("after importer")
@@ -64,6 +66,53 @@ fn interface_projection_is_versioned_and_self_verifying() {
     let error = ModuleInterface::from_json(&interface.to_json().unwrap()).unwrap_err();
     assert!(error.contains("row"));
     assert!(interface.exported_value_env().is_err());
+}
+
+#[test]
+fn multiplicity_rows_survive_the_interface() {
+    let interface = interface(
+        "pub fn twice(g : ((Int) -> Int) @ many, x : Int) : Int = g(g(x))\n\
+         pub fn apply1(g : ((Int) -> Int) @ once, x : Int) : Int = g(x)\n",
+    );
+    let env = interface.exported_value_env().unwrap();
+    assert_eq!(
+        env.get(&Sym::from("twice")).expect("exported twice").show(),
+        "(((Int) -> Int) @ many, Int) -> Int"
+    );
+    assert_eq!(
+        env.get(&Sym::from("apply1"))
+            .expect("exported apply1")
+            .show(),
+        "(((Int) -> Int) @ once, Int) -> Int"
+    );
+    // The rehydrated schemes still carry the contravariant multiplicity
+    // relation: a `@ once` closure fits the imported `@ once` slot but is
+    // rejected by the imported `@ many` slot.
+    let seed = interface.rehydrate().unwrap().typecheck_seed();
+    let ok = "fn f(g : ((Int) -> Int) @ once) : Int = apply1(g, 1)\n";
+    assert!(
+        check_with_seed(ok, &seed).is_ok(),
+        "a `@ once` closure must fit an imported `@ once` slot"
+    );
+    let bad = "fn f(g : ((Int) -> Int) @ once) : Int = twice(g, 1)\n";
+    assert!(
+        check_with_seed(bad, &seed).is_err(),
+        "a `@ once` closure must be rejected by an imported `@ many` slot"
+    );
+}
+
+#[test]
+fn callable_noalloc_demand_survives_the_interface() {
+    let interface =
+        interface("pub fn iterate(f : ((Int) -> Int) @ noalloc, x : Int) : Int = f(f(x))\n");
+    let env = interface.exported_value_env().unwrap();
+    assert_eq!(
+        env.get(&Sym::from("iterate"))
+            .expect("exported iterate")
+            .show(),
+        "(((Int) -> Int) @ noalloc, Int) -> Int"
+    );
+    interface.rehydrate().unwrap();
 }
 
 #[test]
@@ -101,17 +150,20 @@ fn transparent_data_shape_and_constructor_facts_rehydrate() {
     );
     let json = interface.to_json().unwrap();
     let decoded = ModuleInterface::from_json(&json).unwrap();
-    let facts = decoded.rehydrate().unwrap();
+    let seed = decoded.rehydrate().unwrap().typecheck_seed();
 
-    let shape = facts.data.get("Shape").expect("exported data metadata");
+    let shape = seed
+        .data_types()
+        .get("Shape")
+        .expect("exported data metadata");
     assert_eq!(shape.ctors, ["Circle", "Square"]);
     assert_eq!(shape.repr, NominalRepr::BoxedCell);
-    assert_eq!(facts.ctors["Circle"].tag, FIRST_CTOR_TAG);
-    assert_eq!(facts.ctors["Square"].tag, SECOND_CTOR_TAG);
-    assert!(facts.env.contains_key(&Sym::from("Circle")));
-    assert!(facts.env.contains_key(&Sym::from("Square")));
-    assert!(facts
-        .instances
+    assert_eq!(seed.constructors()["Circle"].tag, FIRST_CTOR_TAG);
+    assert_eq!(seed.constructors()["Square"].tag, SECOND_CTOR_TAG);
+    assert!(seed.environment().contains_key(&Sym::from("Circle")));
+    assert!(seed.environment().contains_key(&Sym::from("Square")));
+    assert!(seed
+        .instances()
         .values()
         .any(|instance| instance.head.show() == "Shape"));
 
@@ -120,8 +172,8 @@ fn transparent_data_shape_and_constructor_facts_rehydrate() {
     Circle(r) => r
     Square(w) => w
 ";
-    let checked = check_with_seed(importer, &facts.typecheck_seed()).unwrap();
-    assert!(checked.decls.iter().any(|decl| decl.name == "radius"));
+    let checked = check_with_seed(importer, &seed).unwrap();
+    assert!(checked.defs.decls.iter().any(|decl| decl.name == "radius"));
 }
 
 #[test]
@@ -130,17 +182,14 @@ fn opaque_data_rehydrates_shape_without_constructors() {
         "opaque type Counter = Counter(Int)\n\
          pub fn zero() : Counter = Counter(0)\n",
     );
-    let facts = interface.rehydrate().unwrap();
-    assert!(facts.data["Counter"].ctors.is_empty());
-    assert_eq!(facts.data["Counter"].repr, NominalRepr::BoxedCell);
-    assert!(!facts.ctors.contains_key("Counter"));
-    assert!(!facts.env.contains_key(&Sym::from("Counter")));
+    let seed = interface.rehydrate().unwrap().typecheck_seed();
+    assert!(seed.data_types()["Counter"].ctors.is_empty());
+    assert_eq!(seed.data_types()["Counter"].repr, NominalRepr::BoxedCell);
+    assert!(!seed.constructors().contains_key("Counter"));
+    assert!(!seed.environment().contains_key(&Sym::from("Counter")));
 
-    check_with_seed(
-        "fn maybe(x : Counter) : OrNull(Counter) = This(x)\n",
-        &facts.typecheck_seed(),
-    )
-    .expect("opaque ordinary data retains its boxed representation evidence");
+    check_with_seed("fn maybe(x : Counter) : OrNull(Counter) = This(x)\n", &seed)
+        .expect("opaque ordinary data retains its boxed representation evidence");
 }
 
 #[test]
@@ -149,15 +198,12 @@ fn opaque_newtype_keeps_transparent_representation_evidence() {
         "opaque newtype Zero = Zero(Unit)\n\
          pub fn zero() : Zero = Zero(())\n",
     );
-    let facts = interface.rehydrate().unwrap();
-    assert!(facts.data["Zero"].ctors.is_empty());
-    assert_eq!(facts.data["Zero"].repr, NominalRepr::Transparent);
+    let seed = interface.rehydrate().unwrap().typecheck_seed();
+    assert!(seed.data_types()["Zero"].ctors.is_empty());
+    assert_eq!(seed.data_types()["Zero"].repr, NominalRepr::Transparent);
 
-    let error = check_with_seed(
-        "fn maybe(x : Zero) : OrNull(Zero) = This(x)\n",
-        &facts.typecheck_seed(),
-    )
-    .expect_err("opacity cannot turn a transparent newtype into a boxed cell");
+    let error = check_with_seed("fn maybe(x : Zero) : OrNull(Zero) = This(x)\n", &seed)
+        .expect_err("opacity cannot turn a transparent newtype into a boxed cell");
     let Error::Type(error) = error else {
         panic!("expected a type error, got {error}");
     };
@@ -177,34 +223,34 @@ canonical Identity(Int) = identityInt
 pub fn generic(x : a) : a given Identity(a) = identity(x)
 ",
     );
-    let facts = interface.rehydrate().unwrap();
+    let seed = interface.rehydrate().unwrap().typecheck_seed();
 
-    let tick = facts
-        .eff_ops
+    let tick = seed
+        .effect_operations()
         .get("tick")
         .expect("exported effect operation");
     assert_eq!(tick.effect_name, Sym::from("Tick"));
-    let identity = facts
-        .classes
+    let identity = seed
+        .classes()
         .get(&Sym::from("Identity"))
         .expect("exported class");
     assert_eq!(
         identity.methods.first().expect("identity method").0,
         Sym::from("identity")
     );
-    assert!(facts.env.contains_key(&Sym::from("identity")));
-    assert!(facts.constrained.contains_key(&Sym::from("generic")));
+    assert!(seed.environment().contains_key(&Sym::from("identity")));
+    assert!(seed.constrained().contains_key(&Sym::from("generic")));
     assert_eq!(
-        facts.methods[&Sym::from("identity")].0,
+        seed.methods()[&Sym::from("identity")].class,
         Sym::from("Identity")
     );
-    assert!(facts.instances.contains_key(&Sym::from("identityInt")));
-    assert!(facts
-        .inst_keys
+    assert!(seed.instances().contains_key(&Sym::from("identityInt")));
+    assert!(seed
+        .instance_keys()
         .values()
         .any(|instances| instances.contains(&Sym::from("identityInt"))));
-    assert!(facts
-        .canonical
+    assert!(seed
+        .canonical_instances()
         .values()
         .any(|instance| *instance == Sym::from("identityInt")));
 
@@ -212,10 +258,22 @@ pub fn generic(x : a) : a given Identity(a) = identity(x)
 fn use_identity(x : Int) : Int = identity(x)
 fn use_generic(x : Int) : Int = generic(x)
 ";
-    let checked = check_with_seed(importer, &facts.typecheck_seed()).unwrap();
-    assert!(checked.decls.iter().any(|decl| decl.name == "use_tick"));
-    assert!(checked.decls.iter().any(|decl| decl.name == "use_identity"));
-    assert!(checked.decls.iter().any(|decl| decl.name == "use_generic"));
+    let checked = check_with_seed(importer, &seed).unwrap();
+    assert!(checked
+        .defs
+        .decls
+        .iter()
+        .any(|decl| decl.name == "use_tick"));
+    assert!(checked
+        .defs
+        .decls
+        .iter()
+        .any(|decl| decl.name == "use_identity"));
+    assert!(checked
+        .defs
+        .decls
+        .iter()
+        .any(|decl| decl.name == "use_generic"));
 }
 
 // A `pub import` re-export must survive into the module's checked interface:
@@ -243,11 +301,12 @@ fn reexports_survive_module_interfaces() {
     let interface = module_interface(module, &with_prelude(module), &roots).unwrap();
     let seed = interface.rehydrate().unwrap().typecheck_seed();
     assert!(
-        seed.data.contains_key("Sub.Shade"),
+        seed.data_types().contains_key("Sub.Shade"),
         "the re-exported type must rehydrate from the interface"
     );
     assert!(
-        seed.ctors.contains_key("Sub.Bright") && seed.ctors.contains_key("Sub.Dim"),
+        seed.constructors().contains_key("Sub.Bright")
+            && seed.constructors().contains_key("Sub.Dim"),
         "the re-exported constructors must rehydrate from the interface"
     );
 }

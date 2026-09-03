@@ -1,0 +1,12 @@
+-- A fresh cell per call is exactly what a nonzero allocation budget grants:
+-- `box` is rejected under bare `fip` (fully in place admits no fresh cell) but
+-- holds under `fip(1)`. Budgets compose additively: `pair` spends one cell of
+-- its own and charges each callee's declared budget in full at the call site,
+-- so its inferred budget is 1 + 1 + 1 and `fip(3)` is exact.
+type Box = Box(Int)
+
+type Pair = Pair(Box, Box)
+
+fip(1) fn box(x) = Box(x)
+
+fip(3) fn pair(x, y) = Pair(box(x), box(y))

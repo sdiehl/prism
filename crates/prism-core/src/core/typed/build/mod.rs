@@ -25,12 +25,12 @@ use env::{core_row_vars, row_vars};
 use solve::{free_core_vars, free_row_vars};
 use walk::Builder;
 
+use super::on_core_stack;
 use super::verify::row_included;
 use super::{
     CompSig, CoreFnSig, CoreQuantifier, CoreType, Elaborated, TypedCoreFn, UncheckedTypedCore,
     VerifyEnv,
 };
-use super::{CORE_GROW_STACK, CORE_MIN_STACK};
 
 #[cfg(test)]
 use crate::types::ty::EffRow;
@@ -92,9 +92,7 @@ pub fn build_typed(
     signatures: &BTreeMap<Sym, CoreFnSig>,
     verify_env: &VerifyEnv,
 ) -> Result<UncheckedTypedCore<Elaborated>, Error> {
-    stacker::maybe_grow(CORE_MIN_STACK, CORE_GROW_STACK, || {
-        build_typed_on_grown_stack(core, signatures, verify_env)
-    })
+    on_core_stack(|| build_typed_on_grown_stack(core, signatures, verify_env))
 }
 
 fn build_typed_on_grown_stack(

@@ -11,15 +11,37 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-use super::{atomic_write_if_absent, shard_path, HashHex, Written, CERTS_DIR};
+use super::{shard_path, HashHex, Written, CERTS_DIR};
 
 // Publish by the link-if-absent commit, exactly like the object layer: the commit
 // point itself refuses to replace an existing file, so a writer that loses the
 // race falls through to the byte comparison instead of renaming over the winner.
 // A check followed by a replacing rename would leave that window open.
-pub(super) fn put(root: &Path, subject: &HashHex<'_>, bytes: &[u8]) -> io::Result<Written> {
+pub(super) fn put(
+    root: &Path,
+    pending: Option<&super::PendingWrites>,
+    subject: &HashHex<'_>,
+    bytes: &[u8],
+) -> io::Result<Written> {
     let path = shard_path(&root.join(CERTS_DIR), subject);
-    if !path.exists() && atomic_write_if_absent(&path, bytes)? {
+    if let Some(existing) = pending
+        .map(|pending| super::pending_read(pending, &path))
+        .transpose()?
+        .flatten()
+    {
+        return if existing == bytes {
+            Ok(Written::Hit)
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                format!(
+                    "staged certificate at {} already holds different bytes for subject {subject}",
+                    path.display()
+                ),
+            ))
+        };
+    }
+    if !path.exists() && super::atomic_write_if_absent_in(pending, &path, bytes)? {
         return Ok(Written::New);
     }
     let existing = fs::read(&path)?;
@@ -36,14 +58,19 @@ pub(super) fn put(root: &Path, subject: &HashHex<'_>, bytes: &[u8]) -> io::Resul
     ))
 }
 
-pub(super) fn get(root: &Path, subject: &HashHex<'_>) -> io::Result<Option<Vec<u8>>> {
-    match fs::read(shard_path(&root.join(CERTS_DIR), subject)) {
-        Ok(bytes) => Ok(Some(bytes)),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(e),
-    }
+pub(super) fn get(
+    root: &Path,
+    pending: Option<&super::PendingWrites>,
+    subject: &HashHex<'_>,
+) -> io::Result<Option<Vec<u8>>> {
+    super::read_visible(pending, &shard_path(&root.join(CERTS_DIR), subject))
 }
 
-pub(super) fn has(root: &Path, subject: &HashHex<'_>) -> bool {
-    shard_path(&root.join(CERTS_DIR), subject).exists()
+pub(super) fn has(
+    root: &Path,
+    pending: Option<&super::PendingWrites>,
+    subject: &HashHex<'_>,
+) -> bool {
+    let path = shard_path(&root.join(CERTS_DIR), subject);
+    path.exists() || pending.is_some_and(|pending| super::pending_contains(pending, &path))
 }

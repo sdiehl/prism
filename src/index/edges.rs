@@ -229,6 +229,7 @@ fn types_and_effects(sources: &Sources<'_>, lowered: &Lowered, out: &mut BTreeSe
     let rows: BTreeMap<&str, &crate::types::Effects> = sources
         .production
         .checked
+        .defs
         .decls
         .iter()
         .map(|d| (d.name.as_str(), &d.effects))
@@ -236,6 +237,7 @@ fn types_and_effects(sources: &Sources<'_>, lowered: &Lowered, out: &mut BTreeSe
             sources
                 .production
                 .checked
+                .dispatch
                 .method_effects
                 .iter()
                 .map(|(name, effects)| (name.as_str(), effects)),
@@ -244,6 +246,7 @@ fn types_and_effects(sources: &Sources<'_>, lowered: &Lowered, out: &mut BTreeSe
     let checked: BTreeMap<&str, &Type> = sources
         .production
         .checked
+        .defs
         .decls
         .iter()
         .map(|d| (d.name.as_str(), &d.ty))

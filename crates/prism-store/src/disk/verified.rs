@@ -21,12 +21,11 @@
 //! carries.
 
 use std::fmt::Write as _;
-use std::fs;
 use std::io;
 use std::path::Path;
 
 use super::index::Lock;
-use super::{atomic_write, shard_path, HashHex, FIELD_SEP, VERIFIED_DIR};
+use super::{shard_path, HashHex, FIELD_SEP, VERIFIED_DIR};
 
 const VERIFIED_HEADER_V1: &str = "prism-store-verified\tv1";
 const VERIFIED_HEADER_V2: &str = "prism-store-verified\tv2";
@@ -53,7 +52,7 @@ const STATUS_FAIL: &str = "fail";
 // both read the old file and the loser's record is lost in the rewrite.
 pub(super) fn put(root: &Path, hash: &HashHex<'_>, record: &VerifiedRecord) -> io::Result<()> {
     let _lock = Lock::acquire(root)?;
-    let mut records = get(root, hash)?;
+    let mut records = get(root, None, hash)?;
     records.push(record.clone());
     let mut body = String::from(VERIFIED_HEADER_V2);
     body.push('\n');
@@ -65,16 +64,23 @@ pub(super) fn put(root: &Path, hash: &HashHex<'_>, record: &VerifiedRecord) -> i
             r.kind, r.scheme, r.identity
         );
     }
-    atomic_write(&shard_path(&root.join(VERIFIED_DIR), hash), body.as_bytes())
+    // The advisory lock must cover the publish as well as the read. Staging a
+    // replacement after releasing it would let two transactions overwrite one
+    // another's append.
+    super::atomic_write_now(&shard_path(&root.join(VERIFIED_DIR), hash), body.as_bytes())
 }
 
-pub(super) fn get(root: &Path, hash: &HashHex<'_>) -> io::Result<Vec<VerifiedRecord>> {
+pub(super) fn get(
+    root: &Path,
+    pending: Option<&super::PendingWrites>,
+    hash: &HashHex<'_>,
+) -> io::Result<Vec<VerifiedRecord>> {
     let path = shard_path(&root.join(VERIFIED_DIR), hash);
-    let text = match fs::read_to_string(&path) {
-        Ok(t) => t,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(e) => return Err(e),
+    let Some(bytes) = super::read_visible(pending, &path)? else {
+        return Ok(Vec::new());
     };
+    let text = String::from_utf8(bytes)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
     let mut lines = text.lines();
     let header = lines.next();
     if header != Some(VERIFIED_HEADER_V1) && header != Some(VERIFIED_HEADER_V2) {

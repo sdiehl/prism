@@ -1,0 +1,7 @@
+-- A `fip` callee is a linearity certificate: its own check already proves it
+-- consumes owned values linearly, so a claimed caller may hand one over.
+type Box = Box(Int)
+
+fip fn id(x) = x
+
+fn top(b : Box) : Box @ linear = id(b)

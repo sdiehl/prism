@@ -29,6 +29,8 @@ const RUNTIME_HEADERS: &[&str] = &[
     "prism_sort.h",
     "prism_kont.h",
     "prism_io.h",
+    "prism_net.h",
+    "prism_mobility.h",
 ];
 const RUNTIME_SOURCES: &[&str] = &[
     "prism_arena.c",
@@ -45,6 +47,8 @@ const RUNTIME_SOURCES: &[&str] = &[
     "prism_simd.c",
     "prism_kont.c",
     "prism_io.c",
+    "prism_net.c",
+    "prism_mobility.c",
 ];
 const RUNTIME_DIR: &str = "../../runtime";
 // The vendored double-precision libm lives in one subdirectory (many small

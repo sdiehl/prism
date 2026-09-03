@@ -332,8 +332,8 @@ source_filename = "prism"
 
 @.str0 = private constant { i64, i64, i64, [54 x i8] } { i64 1152921504606846976, i64 1398034944, i64 53, [54 x i8] c"ICE: effect op escaped a closed native handler clause\00" }, align 8
 @.str1 = private constant { i64, i64, i64, [50 x i8] } { i64 1152921504606846976, i64 1398034944, i64 49, [50 x i8] c"ICE: unhandled effect op in closed native handler\00" }, align 8
-@prism_native_kont_table = constant [954 x i8] c"scheme  prism-core-hash-v2\0Abundle  75678a6ea47b892e12efb298826b462e9e66906aca8873f648e8734551574fae\0Acompiler  0.21.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v2:75678a6ea47b892e12efb298826b462e9e66906aca8873f648e8734551574fae\0Aflag  stdlib-root  prism-core-hash-v2:9d4820696a00f42302d02b45cc0a1e1db4f625b0c6c50990ad71163a702dbe54\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  erasures  true\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  borrow-infer  true\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prismfn_main  356a812811f03ca83c1876512d4c1af42e366919d97df94ee2325b4c55dd3ad0  main\0Afn      prismfn_risky  7b94f3c7c791ea22bf9d8987b1b2d8c6a3f38fc66aa1ad66088fc485c84007e4  risky\0Afn      prismfn_safe  73d874444de375999280aa5f0f880aa7b3e2a7dbd4a37be6ad0af76b0848789e  safe\0A\00", section ",.prism_kont", align 1
-@prism_native_kont_state_map = constant [1092 x i8] c"state-map 1\0Ascheme  prism-core-hash-v2\0Abundle  75678a6ea47b892e12efb298826b462e9e66906aca8873f648e8734551574fae\0Acompiler  0.21.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v2:75678a6ea47b892e12efb298826b462e9e66906aca8873f648e8734551574fae\0Aflag  stdlib-root  prism-core-hash-v2:9d4820696a00f42302d02b45cc0a1e1db4f625b0c6c50990ad71163a702dbe54\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  erasures  true\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  borrow-infer  true\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prismfn_main 356a812811f03ca83c1876512d4c1af42e366919d97df94ee2325b4c55dd3ad0 main arity 0 slots abi-word[]\0Astate prismfn_risky 7b94f3c7c791ea22bf9d8987b1b2d8c6a3f38fc66aa1ad66088fc485c84007e4 risky arity 1 slots abi-word[arg0=%a0:word]\0Astate prismfn_safe 73d874444de375999280aa5f0f880aa7b3e2a7dbd4a37be6ad0af76b0848789e safe arity 1 slots abi-word[arg0=%a0:word]\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_table = constant [875 x i8] c"scheme  prism-core-hash-v2\0Abundle  75678a6ea47b892e12efb298826b462e9e66906aca8873f648e8734551574fae\0Acompiler  <version>\0Atarget  <target>\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v2:75678a6ea47b892e12efb298826b462e9e66906aca8873f648e8734551574fae\0Aflag  stdlib-root  <stdlib-root>\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  erasures  true\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  borrow-infer  true\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prismfn_main  356a812811f03ca83c1876512d4c1af42e366919d97df94ee2325b4c55dd3ad0  main\0Afn      prismfn_risky  7b94f3c7c791ea22bf9d8987b1b2d8c6a3f38fc66aa1ad66088fc485c84007e4  risky\0Afn      prismfn_safe  73d874444de375999280aa5f0f880aa7b3e2a7dbd4a37be6ad0af76b0848789e  safe\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_state_map = constant [1013 x i8] c"state-map 1\0Ascheme  prism-core-hash-v2\0Abundle  75678a6ea47b892e12efb298826b462e9e66906aca8873f648e8734551574fae\0Acompiler  <version>\0Atarget  <target>\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v2:75678a6ea47b892e12efb298826b462e9e66906aca8873f648e8734551574fae\0Aflag  stdlib-root  <stdlib-root>\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  erasures  true\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  borrow-infer  true\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prismfn_main 356a812811f03ca83c1876512d4c1af42e366919d97df94ee2325b4c55dd3ad0 main arity 0 slots abi-word[]\0Astate prismfn_risky 7b94f3c7c791ea22bf9d8987b1b2d8c6a3f38fc66aa1ad66088fc485c84007e4 risky arity 1 slots abi-word[arg0=%a0:word]\0Astate prismfn_safe 73d874444de375999280aa5f0f880aa7b3e2a7dbd4a37be6ad0af76b0848789e safe arity 1 slots abi-word[arg0=%a0:word]\0A\00", section ",.prism_kont", align 1
 @.kont_symbol0 = private constant [13 x i8] c"prismfn_main\00"
 @.kont_hash0 = private constant [65 x i8] c"356a812811f03ca83c1876512d4c1af42e366919d97df94ee2325b4c55dd3ad0\00"
 @.kont_name0 = private constant [5 x i8] c"main\00"
@@ -503,7 +503,6 @@ b7:                                               ; preds = %b6
   %t54 = getelementptr inbounds i8, ptr %t53, i64 8
   %t55 = load i64, ptr %t54, align 8
   switch i64 %t55, label %b10 [
-    i64 2, label %b11
     i64 1, label %b12
     i64 0, label %b13
   ]
@@ -513,18 +512,6 @@ b8:                                               ; preds = %b6
   call void @prism_rc_dec(i64 %t12)
   call void @prism_fatal(i64 ptrtoint (ptr @.str1 to i64))
   ret i64 0
-
-b11:                                              ; preds = %b7
-  %t56 = getelementptr inbounds i8, ptr %t53, i64 24
-  %t57 = load i64, ptr %t56, align 8
-  %t58 = getelementptr inbounds i8, ptr %t53, i64 32
-  %t59 = load i64, ptr %t58, align 8
-  call void @prism_rc_inc(i64 %t57)
-  call void @prism_rc_inc(i64 %t59)
-  call void @prism_rc_dec(i64 %t52)
-  %t63 = call i64 @prismfn_qApply(i64 %t57, i64 %t59)
-  %t64 = musttail call i64 @prismfn_5Zaregion(i64 %t63)
-  ret i64 %t64
 
 b12:                                              ; preds = %b7
   %t65 = getelementptr inbounds i8, ptr %t53, i64 24
@@ -549,6 +536,18 @@ b13:                                              ; preds = %b7
 b10:                                              ; preds = %b7
   call void @prism_match_error()
   unreachable
+
+b11:                                              ; No predecessors!
+  %t56 = getelementptr inbounds i8, ptr %t53, i64 24
+  %t57 = load i64, ptr %t56, align 8
+  %t58 = getelementptr inbounds i8, ptr %t53, i64 32
+  %t59 = load i64, ptr %t58, align 8
+  call void @prism_rc_inc(i64 %t57)
+  call void @prism_rc_inc(i64 %t59)
+  call void @prism_rc_dec(i64 %t52)
+  %t63 = call i64 @prismfn_qApply(i64 %t57, i64 %t59)
+  %t64 = musttail call i64 @prismfn_5Zaregion(i64 %t63)
+  ret i64 %t64
 }
 
 ; Function Attrs: nounwind

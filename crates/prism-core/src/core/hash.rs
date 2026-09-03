@@ -28,9 +28,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 
+use prism_common::{scc::tarjan_scc, sym::Sym};
+use prism_syntax::names;
+
 use super::cbpv::{self, Comp, Core, CoreFn, CorePat, HandleOp, Value};
 use super::fv;
-use prism_common::sym::Sym;
 
 pub use prism_common::digest::{Digest, HASH_PREFIX_HEX, SCHEME};
 
@@ -304,6 +306,62 @@ struct Enc<'a> {
     var_ids: BTreeMap<String, u32>,
 }
 
+enum EncodeFrame<'a> {
+    Comp(&'a Comp),
+    Value(&'a Value),
+    DelimitedValues(&'a [Value]),
+    Token(&'a str),
+    Close(char),
+    EnterOne(Sym),
+    EnterBorrowed(&'a [Sym]),
+    EnterOwned(Vec<Sym>),
+    ExitOne,
+    ExitScope(usize),
+    BeginCase(&'a [(CorePat, Comp)]),
+    CaseArm {
+        arms: &'a [(CorePat, Comp)],
+        index: usize,
+    },
+    AfterHandleBody {
+        return_var: Option<Sym>,
+        return_body: Option<&'a Comp>,
+        ops: &'a [HandleOp],
+    },
+    HandlerOps(&'a [HandleOp]),
+    HandlerClause {
+        canonical_name: String,
+        op: &'a HandleOp,
+    },
+    RecordField {
+        fields: &'a [(Sym, Value)],
+        index: usize,
+    },
+}
+
+fn push_values<'a>(pending: &mut Vec<EncodeFrame<'a>>, values: &'a [Value]) {
+    for value in values.iter().rev() {
+        pending.push(EncodeFrame::Value(value));
+    }
+}
+
+fn push_scope_one<'a>(pending: &mut Vec<EncodeFrame<'a>>, binder: Sym, body: &'a Comp) {
+    pending.push(EncodeFrame::ExitOne);
+    pending.push(EncodeFrame::Comp(body));
+    pending.push(EncodeFrame::EnterOne(binder));
+}
+
+fn push_scope_borrowed<'a>(pending: &mut Vec<EncodeFrame<'a>>, binders: &'a [Sym], body: &'a Comp) {
+    pending.push(EncodeFrame::ExitScope(binders.len()));
+    pending.push(EncodeFrame::Comp(body));
+    pending.push(EncodeFrame::EnterBorrowed(binders));
+}
+
+fn push_scope_owned<'a>(pending: &mut Vec<EncodeFrame<'a>>, binders: Vec<Sym>, body: &'a Comp) {
+    pending.push(EncodeFrame::ExitScope(binders.len()));
+    pending.push(EncodeFrame::Comp(body));
+    pending.push(EncodeFrame::EnterOwned(binders));
+}
+
 impl Enc<'_> {
     /// Length-prefixed token, so no name or string can be confused with its
     /// neighbours in the encoding.
@@ -328,9 +386,9 @@ impl Enc<'_> {
     // resolve to the same `k` whichever the walk reaches first. Any non-`var`
     // name is returned unchanged.
     fn op_name_canon(&mut self, name: &str) -> String {
-        let Some((verb, idx)) = prism_syntax::names::parse_var_get(name)
+        let Some((verb, idx)) = names::parse_var_get(name)
             .map(|(_, n)| ("get", n))
-            .or_else(|| prism_syntax::names::parse_var_set(name).map(|(_, n)| ("set", n)))
+            .or_else(|| names::parse_var_set(name).map(|(_, n)| ("set", n)))
         else {
             return name.to_string();
         };
@@ -359,74 +417,6 @@ impl Enc<'_> {
         } else {
             self.out.push('g');
             self.tok(s.as_str());
-        }
-    }
-
-    fn vals(&mut self, vs: &[Value]) {
-        self.out.push('[');
-        for v in vs {
-            self.val(v);
-        }
-        self.out.push(']');
-    }
-
-    fn val(&mut self, v: &Value) {
-        match v {
-            Value::Var(x) => {
-                self.out.push('v');
-                self.refer(*x);
-            }
-            Value::Int(n) => {
-                let _ = write!(self.out, "i{n}{NUM_END}");
-            }
-            Value::I64(n) => {
-                let _ = write!(self.out, "j{n}{NUM_END}");
-            }
-            Value::U64(n) => {
-                let _ = write!(self.out, "u{n}{NUM_END}");
-            }
-            // Bit pattern, so NaN payloads and -0.0 are committed exactly.
-            Value::Float(f) => {
-                let _ = write!(self.out, "f{}{NUM_END}", f.to_bits());
-            }
-            Value::Bool(b) => {
-                let _ = write!(self.out, "o{}{NUM_END}", u8::from(*b));
-            }
-            Value::Unit => self.out.push(UNIT_TAG),
-            Value::Str(s) => {
-                self.out.push('s');
-                self.tok(s);
-            }
-            Value::Thunk(c) => {
-                self.out.push('t');
-                self.comp(c);
-            }
-            Value::Ctor(n, tag, args) => {
-                self.out.push('c');
-                self.tok(n.as_str());
-                let _ = write!(self.out, "/{tag}{NUM_END}");
-                self.vals(args);
-            }
-            Value::Tuple(args) => {
-                self.out.push('p');
-                self.vals(args);
-            }
-            // Unboxed products get their own tags (`P`, `R`), appended without a
-            // scheme bump: no boxed program constructs these nodes, so existing
-            // content hashes are untouched.
-            Value::UnboxedTuple(args) => {
-                self.out.push('P');
-                self.vals(args);
-            }
-            Value::UnboxedRecord(fields) => {
-                self.out.push('R');
-                self.out.push('{');
-                for (n, v) in fields {
-                    self.tok(n.as_str());
-                    self.val(v);
-                }
-                self.out.push('}');
-            }
         }
     }
 
@@ -466,145 +456,250 @@ impl Enc<'_> {
         bs
     }
 
-    // Run `body` with `binders` pushed, then pop them.
-    fn scoped(&mut self, binders: &[Sym], body: impl FnOnce(&mut Self)) {
-        self.env.extend_from_slice(binders);
-        body(self);
-        self.env.truncate(self.env.len() - binders.len());
-    }
-
     fn comp(&mut self, c: &Comp) {
-        // The variant name uniquely tags the node, so distinct trees that share
-        // a child shape cannot collide.
-        let _ = write!(self.out, "<{}>", c.kind());
-        match c {
-            Comp::Return(v)
-            | Comp::Force(v)
-            | Comp::Error(v)
-            | Comp::Dup(v)
-            | Comp::Drop(v)
-            | Comp::RefNew(v)
-            | Comp::RefGet(v) => self.val(v),
-            // The `<{kind}>` prefix above already distinguishes the op, so hashing
-            // the operands in order reproduces the old per-variant byte sequence
-            // exactly (one value for the output/seed ops, none for the inputs).
-            Comp::Io(_, args) => {
-                for v in args {
-                    self.val(v);
-                }
-            }
-            Comp::FloatBuiltin(op, v) => {
-                self.tok(op.hash_tag());
-                self.val(v);
-            }
-            Comp::Neg(lane, v) => {
-                self.tok(lane.hash_tag());
-                self.val(v);
-            }
-            Comp::UnboxedProject(v, field) => {
-                self.val(v);
-                self.tok(field.as_str());
-            }
-            Comp::Bind(m, x, n) => {
-                self.comp(m);
-                self.scoped(&[*x], |e| e.comp(n));
-            }
-            Comp::Lam(xs, b) => {
-                let _ = write!(self.out, "{}{NUM_END}", xs.len());
-                self.scoped(xs, |e| e.comp(b));
-            }
-            Comp::App(f, args) => {
-                self.comp(f);
-                self.vals(args);
-            }
-            Comp::If(v, t, e) => {
-                self.val(v);
-                self.comp(t);
-                self.comp(e);
-            }
-            Comp::Prim(op, a, b) => {
-                self.tok(op.hash_tag());
-                self.val(a);
-                self.val(b);
-            }
-            // The call head is a dependency reference, so substitution applies.
-            Comp::Call(name, args) => {
-                self.refer(*name);
-                self.vals(args);
-            }
-            // Effect operation: a leaf, committed by name (generated `var` ops
-            // canonicalized so a rename or reorder does not move the hash).
-            Comp::Do(op, args) => {
-                self.op_tok(op.as_str());
-                self.vals(args);
-            }
-            Comp::Case(v, arms) => {
-                self.val(v);
-                self.out.push('{');
-                for (p, body) in arms {
-                    let bs = self.pat(p);
-                    self.scoped(&bs, |e| e.comp(body));
-                }
-                self.out.push('}');
-            }
-            Comp::Handle {
-                body,
-                return_var,
-                return_body,
-                ops,
-            } => {
-                self.comp(body);
-                match (return_var, return_body) {
-                    (Some(rv), Some(rb)) => {
-                        self.out.push('R');
-                        self.scoped(&[*rv], |e| e.comp(rb));
+        let mut pending = vec![EncodeFrame::Comp(c)];
+        while let Some(frame) = pending.pop() {
+            match frame {
+                EncodeFrame::Comp(comp) => {
+                    // The variant name uniquely tags the node, so distinct trees
+                    // that share a child shape cannot collide.
+                    let _ = write!(self.out, "<{}>", comp.kind());
+                    match comp {
+                        Comp::Return(value)
+                        | Comp::Force(value)
+                        | Comp::Error(value)
+                        | Comp::Dup(value)
+                        | Comp::Drop(value)
+                        | Comp::RefNew(value)
+                        | Comp::RefGet(value) => pending.push(EncodeFrame::Value(value)),
+                        // The node kind already distinguishes the IO operation;
+                        // preserving operand order reproduces its prior bytes.
+                        Comp::Io(_, arguments) => push_values(&mut pending, arguments),
+                        Comp::FloatBuiltin(op, value) => {
+                            self.tok(op.hash_tag());
+                            pending.push(EncodeFrame::Value(value));
+                        }
+                        Comp::Neg(lane, value) => {
+                            self.tok(lane.hash_tag());
+                            pending.push(EncodeFrame::Value(value));
+                        }
+                        Comp::UnboxedProject(value, field) => {
+                            pending.push(EncodeFrame::Token(field.as_str()));
+                            pending.push(EncodeFrame::Value(value));
+                        }
+                        Comp::Bind(head, binder, rest) => {
+                            push_scope_one(&mut pending, *binder, rest);
+                            pending.push(EncodeFrame::Comp(head));
+                        }
+                        Comp::Lam(parameters, body) => {
+                            let _ = write!(self.out, "{}{NUM_END}", parameters.len());
+                            push_scope_borrowed(&mut pending, parameters, body);
+                        }
+                        Comp::App(function, arguments) => {
+                            pending.push(EncodeFrame::DelimitedValues(arguments));
+                            pending.push(EncodeFrame::Comp(function));
+                        }
+                        Comp::If(condition, yes, no) => {
+                            pending.push(EncodeFrame::Comp(no));
+                            pending.push(EncodeFrame::Comp(yes));
+                            pending.push(EncodeFrame::Value(condition));
+                        }
+                        Comp::Prim(op, lhs, rhs) => {
+                            self.tok(op.hash_tag());
+                            pending.push(EncodeFrame::Value(rhs));
+                            pending.push(EncodeFrame::Value(lhs));
+                        }
+                        // The call head is a dependency reference, so substitution
+                        // applies before its ordered argument list.
+                        Comp::Call(name, arguments) => {
+                            self.refer(*name);
+                            pending.push(EncodeFrame::DelimitedValues(arguments));
+                        }
+                        // Effect operations are leaves committed by name; generated
+                        // variable operations are canonicalized before their values.
+                        Comp::Do(op, arguments) => {
+                            self.op_tok(op.as_str());
+                            pending.push(EncodeFrame::DelimitedValues(arguments));
+                        }
+                        Comp::Case(scrutinee, arms) => {
+                            pending.push(EncodeFrame::BeginCase(arms));
+                            pending.push(EncodeFrame::Value(scrutinee));
+                        }
+                        Comp::Handle {
+                            body,
+                            return_var,
+                            return_body,
+                            ops,
+                        } => {
+                            pending.push(EncodeFrame::AfterHandleBody {
+                                return_var: *return_var,
+                                return_body: return_body.as_deref(),
+                                ops: ops.arms(),
+                            });
+                            pending.push(EncodeFrame::Comp(body));
+                        }
+                        // Masked effect labels are a set, not binders.
+                        Comp::Mask(ops, body) => {
+                            let mut names: Vec<&str> =
+                                ops.iter().map(|name| name.as_str()).collect();
+                            names.sort_unstable();
+                            for name in names {
+                                self.tok(name);
+                            }
+                            pending.push(EncodeFrame::Comp(body));
+                        }
+                        Comp::StrBuiltin(builtin, arguments) => {
+                            self.tok(builtin.hash_tag());
+                            pending.push(EncodeFrame::DelimitedValues(arguments));
+                        }
+                        Comp::WithReuse { token, freed, body } => {
+                            push_scope_one(&mut pending, *token, body);
+                            pending.push(EncodeFrame::Value(freed));
+                        }
+                        Comp::Reuse(token, value) => {
+                            self.refer(*token);
+                            pending.push(EncodeFrame::Value(value));
+                        }
+                        Comp::RefSet(lhs, rhs) | Comp::InitAt(lhs, rhs) => {
+                            pending.push(EncodeFrame::Value(rhs));
+                            pending.push(EncodeFrame::Value(lhs));
+                        }
                     }
-                    _ => self.out.push('N'),
                 }
-                // Handler clauses form a set, so encode in name order. The sort
-                // key is the *canonical* op name, so a generated `var` handler
-                // orders and renumbers with its matching `do`: two revisions that
-                // differ only by a `var` rename or a definition reorder emit the
-                // clauses in the same order. The body was walked first, so every
-                // `var` op's id is already fixed by program order.
-                let mut ops: Vec<(String, &HandleOp)> = ops
-                    .iter()
-                    .map(|op| (self.op_name_canon(op.name.as_str()), op))
-                    .collect();
-                ops.sort_by(|a, b| a.0.cmp(&b.0));
-                self.out.push('{');
-                for (canon, op) in ops {
-                    self.tok(&canon);
+                EncodeFrame::Value(value) => match value {
+                    Value::Var(name) => {
+                        self.out.push('v');
+                        self.refer(*name);
+                    }
+                    Value::Int(number) => {
+                        let _ = write!(self.out, "i{number}{NUM_END}");
+                    }
+                    Value::I64(number) => {
+                        let _ = write!(self.out, "j{number}{NUM_END}");
+                    }
+                    Value::U64(number) => {
+                        let _ = write!(self.out, "u{number}{NUM_END}");
+                    }
+                    // Commit the bit pattern exactly, including NaN payloads and
+                    // the distinction between positive and negative zero.
+                    Value::Float(number) => {
+                        let _ = write!(self.out, "f{}{NUM_END}", number.to_bits());
+                    }
+                    Value::Bool(boolean) => {
+                        let _ = write!(self.out, "o{}{NUM_END}", u8::from(*boolean));
+                    }
+                    Value::Unit => self.out.push(UNIT_TAG),
+                    Value::Str(string) => {
+                        self.out.push('s');
+                        self.tok(string);
+                    }
+                    Value::Thunk(body) => {
+                        self.out.push('t');
+                        pending.push(EncodeFrame::Comp(body));
+                    }
+                    Value::Ctor(name, tag, arguments) => {
+                        self.out.push('c');
+                        self.tok(name.as_str());
+                        let _ = write!(self.out, "/{tag}{NUM_END}");
+                        pending.push(EncodeFrame::DelimitedValues(arguments));
+                    }
+                    Value::Tuple(arguments) => {
+                        self.out.push('p');
+                        pending.push(EncodeFrame::DelimitedValues(arguments));
+                    }
+                    // Unboxed products retain their distinct tags without a
+                    // scheme bump because existing boxed programs cannot contain
+                    // either node.
+                    Value::UnboxedTuple(arguments) => {
+                        self.out.push('P');
+                        pending.push(EncodeFrame::DelimitedValues(arguments));
+                    }
+                    Value::UnboxedRecord(fields) => {
+                        self.out.push_str("R{");
+                        pending.push(EncodeFrame::RecordField { fields, index: 0 });
+                    }
+                },
+                EncodeFrame::DelimitedValues(values) => {
+                    self.out.push('[');
+                    pending.push(EncodeFrame::Close(']'));
+                    push_values(&mut pending, values);
+                }
+                EncodeFrame::Token(token) => self.tok(token),
+                EncodeFrame::Close(delimiter) => self.out.push(delimiter),
+                EncodeFrame::EnterOne(binder) => self.env.push(binder),
+                EncodeFrame::EnterBorrowed(binders) => self.env.extend_from_slice(binders),
+                EncodeFrame::EnterOwned(binders) => self.env.extend(binders),
+                EncodeFrame::ExitOne => {
+                    self.env.pop().expect("a single-binder scope is active");
+                }
+                EncodeFrame::ExitScope(count) => {
+                    self.env.truncate(self.env.len() - count);
+                }
+                EncodeFrame::BeginCase(arms) => {
+                    self.out.push('{');
+                    pending.push(EncodeFrame::Close('}'));
+                    if !arms.is_empty() {
+                        pending.push(EncodeFrame::CaseArm { arms, index: 0 });
+                    }
+                }
+                EncodeFrame::CaseArm { arms, index } => {
+                    let (pattern, body) = &arms[index];
+                    let binders = self.pat(pattern);
+                    if index + 1 < arms.len() {
+                        pending.push(EncodeFrame::CaseArm {
+                            arms,
+                            index: index + 1,
+                        });
+                    }
+                    push_scope_owned(&mut pending, binders, body);
+                }
+                EncodeFrame::AfterHandleBody {
+                    return_var,
+                    return_body,
+                    ops,
+                } => {
+                    pending.push(EncodeFrame::HandlerOps(ops));
+                    if let (Some(binder), Some(body)) = (return_var, return_body) {
+                        self.out.push('R');
+                        push_scope_one(&mut pending, binder, body);
+                    } else {
+                        self.out.push('N');
+                    }
+                }
+                EncodeFrame::HandlerOps(ops) => {
+                    // Preserve the wire's two-phase order: canonicalize every
+                    // clause name in source order after the body and return clause
+                    // have fixed their generated-var ids, then encode bodies in
+                    // sorted canonical-name order.
+                    let mut ordered: Vec<(String, &HandleOp)> = ops
+                        .iter()
+                        .map(|op| (self.op_name_canon(op.name.as_str()), op))
+                        .collect();
+                    ordered.sort_by(|lhs, rhs| lhs.0.cmp(&rhs.0));
+                    self.out.push('{');
+                    pending.push(EncodeFrame::Close('}'));
+                    for (canonical_name, op) in ordered.into_iter().rev() {
+                        pending.push(EncodeFrame::HandlerClause { canonical_name, op });
+                    }
+                }
+                EncodeFrame::HandlerClause { canonical_name, op } => {
+                    self.tok(&canonical_name);
                     let mut binders = op.params.clone();
                     binders.push(op.resume);
-                    self.scoped(&binders, |e| e.comp(&op.body));
+                    push_scope_owned(&mut pending, binders, &op.body);
                 }
-                self.out.push('}');
-            }
-            // Masked effect labels are a set, not binders.
-            Comp::Mask(ops, b) => {
-                let mut names: Vec<&str> = ops.iter().map(|s| s.as_str()).collect();
-                names.sort_unstable();
-                for n in names {
-                    self.tok(n);
+                EncodeFrame::RecordField { fields, index } => {
+                    if let Some((name, value)) = fields.get(index) {
+                        self.tok(name.as_str());
+                        pending.push(EncodeFrame::RecordField {
+                            fields,
+                            index: index + 1,
+                        });
+                        pending.push(EncodeFrame::Value(value));
+                    } else {
+                        self.out.push('}');
+                    }
                 }
-                self.comp(b);
-            }
-            Comp::StrBuiltin(b, args) => {
-                self.tok(b.hash_tag());
-                self.vals(args);
-            }
-            Comp::WithReuse { token, freed, body } => {
-                self.val(freed);
-                self.scoped(&[*token], |e| e.comp(body));
-            }
-            Comp::Reuse(tok, v) => {
-                self.refer(*tok);
-                self.val(v);
-            }
-            Comp::RefSet(a, b) | Comp::InitAt(a, b) => {
-                self.val(a);
-                self.val(b);
             }
         }
     }
@@ -641,7 +736,7 @@ fn sccs(core: &Core, fnmap: &BTreeMap<Sym, &CoreFn>) -> Vec<Vec<Sym>> {
     // Merkle hashing needs, a cycle's dependencies hashed before it). hash.rs
     // canonicalizes the members within a component separately, so their order
     // here is not part of the hash contract.
-    prism_common::scc::tarjan_scc(&adj)
+    tarjan_scc(&adj)
         .into_iter()
         .map(|comp| comp.into_iter().map(|i| order[i]).collect())
         .collect()
@@ -650,6 +745,7 @@ fn sccs(core: &Core, fnmap: &BTreeMap<Sym, &CoreFn>) -> Vec<Vec<Sym>> {
 #[cfg(test)]
 mod tests {
     use prism_common::digest::SCHEME;
+    use prism_syntax::names;
 
     // The wire envelope's scheme tag is the one home of the hash scheme string
     // on the Prism side; it must match the compiler constant it mirrors, so a
@@ -664,9 +760,17 @@ mod tests {
         );
     }
 
-    use super::{hash_program, Digest, Sym};
-    use crate::core::{Comp, Core, CoreFn, Value};
-    use std::collections::BTreeMap;
+    use super::{
+        encode, hash_group, hash_program, scc_groups, shallow_hashes, Digest, Hashes, Sym,
+    };
+    use crate::core::{CheckedHandler, Comp, Core, CoreFn, CorePat, HandleOp, Value};
+    use std::{
+        collections::{BTreeMap, BTreeSet},
+        mem, panic, thread,
+    };
+
+    const DEEP_HASH_DEPTH: usize = 20_000;
+    const ORDINARY_TEST_STACK: usize = 2 * 1024 * 1024;
 
     fn sym(s: &str) -> Sym {
         Sym::new(s)
@@ -690,6 +794,10 @@ mod tests {
         }
     }
 
+    fn isolated_encoding(function: &CoreFn) -> String {
+        encode(function, &BTreeSet::new(), None, &Hashes::new())
+    }
+
     #[test]
     fn alpha_equivalent_bodies_hash_equally() {
         let m = BTreeMap::new();
@@ -699,11 +807,60 @@ mod tests {
         );
     }
 
+    #[test]
+    fn canonical_encoding_bytes_stay_fixed() {
+        let core = let_id("local");
+        assert_eq!(
+            isolated_encoding(&core.fns[0]),
+            "fn1d0;<Bind><Return>v%b0;<Return>v%b0;",
+        );
+    }
+
+    #[test]
+    fn handler_encoding_order_and_scopes_stay_fixed() {
+        let parameter = sym("x");
+        let return_var = sym("returned");
+        let early_resume = sym("early_resume");
+        let late_parameter = sym("argument");
+        let late_resume = sym("late_resume");
+        let ops = CheckedHandler::new(vec![
+            HandleOp {
+                name: sym("z"),
+                params: vec![late_parameter],
+                resume: late_resume,
+                body: Comp::Return(Value::Var(late_parameter)),
+            },
+            HandleOp {
+                name: sym("a"),
+                params: Vec::new(),
+                resume: early_resume,
+                body: Comp::Return(Value::Var(early_resume)),
+            },
+        ])
+        .expect("handler operation names are distinct");
+        let function = CoreFn {
+            name: sym("f"),
+            params: vec![parameter],
+            dict_arity: 0,
+            body: Comp::Handle {
+                body: Box::new(Comp::Return(Value::Var(parameter))),
+                return_var: Some(return_var),
+                return_body: Some(Box::new(Comp::Return(Value::Var(return_var)))),
+                ops,
+            },
+        };
+
+        assert_eq!(
+            isolated_encoding(&function),
+            "fn1d0;<Handle><Return>v%b0;R<Return>v%b0;{1:a<Return>v%b0;1:z<Return>v%b1;}",
+        );
+    }
+
     // `fn f() = do get@<var>@<idx>()`, a `var` read. The `var` name and the global
     // State index carried in the generated op name are not behavior, so a rename
     // (`n` -> `cur`) or a reorder (a different index) must not move the hash.
     fn var_read(var: &str, idx: u32) -> Core {
-        let op = prism_syntax::names::var_get(var, idx);
+        let op = names::var_get(var, idx);
         Core {
             fns: vec![CoreFn {
                 name: sym("f"),
@@ -909,6 +1066,54 @@ mod tests {
     fn hashing_is_deterministic() {
         let (core, m) = (let_id("y"), BTreeMap::new());
         assert_eq!(hash_program(&core, &m), hash_program(&core, &m));
+    }
+
+    #[test]
+    fn raw_hashing_handles_deep_scopes_and_values_on_an_ordinary_stack() {
+        let result = thread::Builder::new()
+            .name("deep-raw-hash".into())
+            .stack_size(ORDINARY_TEST_STACK)
+            .spawn(|| {
+                let name = sym("deep");
+                let local = sym("value");
+                let mut returned = Value::Var(local);
+                for _ in 0..DEEP_HASH_DEPTH {
+                    returned = Value::UnboxedTuple(vec![returned]);
+                }
+                let mut body = Comp::Case(
+                    Value::Var(local),
+                    vec![(CorePat::Var(local), Comp::Return(returned))],
+                );
+                for _ in 0..DEEP_HASH_DEPTH {
+                    body = Comp::Bind(
+                        Box::new(Comp::Return(Value::Var(local))),
+                        local,
+                        Box::new(body),
+                    );
+                }
+                let core = Core {
+                    fns: vec![CoreFn {
+                        name,
+                        params: vec![local],
+                        dict_arity: 0,
+                        body,
+                    }],
+                };
+                let meta = BTreeMap::new();
+                let whole = hash_program(&core, &meta);
+                assert_eq!(whole, hash_program(&core, &meta));
+                assert_eq!(whole, hash_group(&core.fns, &BTreeMap::new(), &meta));
+                assert_eq!(scc_groups(&core), [vec![name]]);
+                assert_eq!(shallow_hashes(&core, &meta), shallow_hashes(&core, &meta));
+
+                // Recursive destruction is outside the hashing boundary.
+                mem::forget(core);
+            })
+            .expect("spawning deep raw-hash test")
+            .join();
+        if let Err(payload) = result {
+            panic::resume_unwind(payload);
+        }
     }
 
     #[test]

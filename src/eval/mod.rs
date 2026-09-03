@@ -27,6 +27,8 @@ pub mod kont;
 mod runtime_oracle;
 
 mod builtin;
+mod mobility;
+mod net;
 mod node;
 mod tape;
 
@@ -37,8 +39,8 @@ pub use tape::{Obs, Tape};
 use builtin::{float_builtin, neg_rv, prim, str_builtin};
 use node::{lower, lower_runtime};
 use tape::{
-    capability_obs, event_args, event_value_of_rv, obs_label, obs_of_rv, rv_of_obs, write_obs,
-    ObsKind,
+    capability_obs, event_args, event_value_of_rv, net_obs, net_outcome, obs_label, obs_of_rv,
+    rv_of_obs, write_obs, ObsKind,
 };
 
 // How values that have no surface syntax render in `show`/`repr`. `print` goes
@@ -116,21 +118,97 @@ impl Drop for Fields {
         let Some(vs) = Rc::get_mut(&mut self.0) else {
             return;
         };
-        let mut work = mem::take(vs);
-        let mut i = 0;
-        while i < work.len() {
-            if let Rv::Data(_, fs) | Rv::Tuple(fs) = &mut work[i] {
-                if let Some(inner) = Rc::get_mut(&mut fs.0) {
-                    let mut inner = mem::take(inner);
-                    work.append(&mut inner);
-                }
-            }
-            i += 1;
+        if vs.is_empty() {
+            return;
         }
+        let mut work = mem::take(vs);
+        drain(&mut work);
     }
 }
 
-type Env = Rc<BTreeMap<Sym, Rv>>;
+// One worklist for every owned-value drop: children of a uniquely held
+// container are moved onto the list instead of freed by recursive drop glue, so
+// releasing a value or environment chain of any depth uses constant Rust stack.
+// A shared child is left in place; the decrement leaves it to its remaining
+// owner, whose own final drop re-enters here.
+fn drain(work: &mut Vec<Rv>) {
+    let mut i = 0;
+    while i < work.len() {
+        match mem::replace(&mut work[i], Rv::Unit) {
+            Rv::Data(_, mut fs) | Rv::Tuple(mut fs) | Rv::Array(mut fs) => {
+                if let Some(inner) = Rc::get_mut(&mut fs.0) {
+                    work.append(&mut mem::take(inner));
+                }
+            }
+            Rv::Closure(_, _, mut env) | Rv::Thunk(_, mut env) => {
+                if let Some(map) = Rc::get_mut(&mut env) {
+                    work.extend(mem::take(&mut map.0).into_values());
+                }
+            }
+            Rv::Ref(mut cell) => {
+                if let Some(cell) = Rc::get_mut(&mut cell) {
+                    work.push(mem::replace(cell.get_mut(), Rv::Unit));
+                }
+            }
+            Rv::Resume(mut frames) => {
+                if let Some(frames) = Rc::get_mut(&mut frames) {
+                    for f in frames {
+                        let (Frame::Bind(_, _, env) | Frame::Args(_, env) | Frame::Handle(_, env)) =
+                            f
+                        else {
+                            continue;
+                        };
+                        if let Some(map) = Rc::get_mut(env) {
+                            work.extend(mem::take(&mut map.0).into_values());
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+}
+
+type Env = Rc<EnvMap>;
+
+// A closure or thunk environment. The map lives behind a newtype so that the
+// final drop of a deep environment chain drains through the same worklist as
+// `Fields`; the bare `Rc<BTreeMap>` it replaced freed one recursive-glue level
+// per captured environment, which overflowed any fixed thread stack.
+#[derive(Clone, Debug, Default)]
+pub struct EnvMap(BTreeMap<Sym, Rv>);
+
+impl std::ops::Deref for EnvMap {
+    type Target = BTreeMap<Sym, Rv>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for EnvMap {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl From<BTreeMap<Sym, Rv>> for EnvMap {
+    fn from(map: BTreeMap<Sym, Rv>) -> Self {
+        Self(map)
+    }
+}
+
+impl Drop for EnvMap {
+    fn drop(&mut self) {
+        // The worklist has to collect the map's values into a Vec, so skip the
+        // allocation when no value can reach another `Rv` (the common case).
+        if self.0.values().all(Rv::shallow) {
+            return;
+        }
+        let mut work: Vec<Rv> = mem::take(&mut self.0).into_values().collect();
+        drain(&mut work);
+    }
+}
 
 // Pending work lives on a heap stack of frames, so object-program recursion
 // never grows the Rust call stack. A captured continuation is the slice of
@@ -185,6 +263,21 @@ impl Rv {
             Self::Resume(_) => "Resume",
             Self::Ref(_) => "Ref",
         }
+    }
+
+    // Whether dropping this value can reach another `Rv`. A container holding
+    // only shallow values frees without the `drain` worklist.
+    const fn shallow(&self) -> bool {
+        !matches!(
+            self,
+            Self::Closure(..)
+                | Self::Thunk(..)
+                | Self::Data(..)
+                | Self::Tuple(_)
+                | Self::Array(_)
+                | Self::Resume(_)
+                | Self::Ref(_)
+        )
     }
 
     #[must_use]
@@ -276,6 +369,30 @@ impl Rv {
     }
 }
 
+/// What a machine knows about the identity of the program it runs.
+enum Mobility<'a> {
+    /// A host that offers no mobility. Sealing and landing are classified
+    /// refusals, not failures: nobody could check the envelope either way.
+    Unarmed,
+    /// A host that can name this program, once something asks it to.
+    Deferred(Identity<'a>),
+    /// The answer, derived once. The failure side keeps why, because a host that
+    /// armed mobility and then could not name its own program is broken in a way
+    /// a program cannot be expected to handle.
+    Forced(Result<String, String>),
+}
+
+/// A host's ability to name the program it is running.
+///
+/// Deriving the digest hashes the whole namespace, so this is a thunk: a run
+/// that never moves a computation never forces it. Every entry point that
+/// executes a program takes one as `Option`, and `None` is a host that offers
+/// no mobility at all, where sealing and landing are classified refusals
+/// rather than envelopes bound to an identity nobody could check. Spelling it
+/// out at every entry keeps one program from succeeding through the CLI and
+/// refusing through the library.
+pub type Identity<'a> = &'a dyn Fn() -> Result<String, String>;
+
 // Stdout and stdin are host-supplied so the interpreter never picks them itself:
 // as the differential oracle and the wasm engine it must capture the transcript,
 // while the native CLI streams to a real terminal. `out_sink` receives
@@ -323,6 +440,9 @@ pub struct Machine<'a> {
     // provenance stream, and an unarmed run pays nothing (the preview is built
     // lazily). See `prism exec steps` and the suspend cut report.
     ruler: Option<Vec<StepMark>>,
+    // The program's execution identity: the digest a mobility envelope sealed
+    // here is stamped with, and the one a landing envelope is checked against.
+    identity: Mobility<'a>,
     // A named cut predicate (`--at-call` / `--at-op`): when armed, the machine
     // watches the deterministic step stream for the named program point and, on
     // reaching it, records the equivalent step budget plus the def stack and
@@ -462,6 +582,11 @@ impl<'a> Machine<'a> {
         args: Vec<String>,
         lowerer: fn(&Comp) -> Cmp,
     ) -> Self {
+        // A machine owns the socket table for as long as it runs. Handing it over
+        // here is what keeps handle numbering a property of the program rather
+        // than of what ran on this thread before it, and closes anything a run
+        // that ended abruptly left open.
+        net::reset();
         Self {
             fns: globals
                 .iter()
@@ -482,8 +607,50 @@ impl<'a> Machine<'a> {
             observations: None,
             step_budget: None,
             steps: 0,
+            identity: Mobility::Unarmed,
             ruler: None,
             cut: None,
+        }
+    }
+
+    /// Arm mobility: from here on the program may seal and land envelopes, each
+    /// stamped with the digest `identity` derives.
+    pub fn arm_mobility(&mut self, identity: Identity<'a>) {
+        self.identity = Mobility::Deferred(identity);
+    }
+
+    /// Arm mobility with a digest the host has already derived.
+    ///
+    /// The suspend/resume drivers compute the bundle eagerly because they stamp
+    /// it onto the checkpoint either way; handing it over here means a
+    /// continuation that teleports after a cut is bound to the same identity
+    /// its checkpoint carries.
+    pub fn arm_mobility_forced(&mut self, bundle: String) {
+        self.identity = Mobility::Forced(Ok(bundle));
+    }
+
+    // The execution identity, derived at most once.
+    //
+    // `Ok(None)` is an unarmed host, which is a fact about where the program is
+    // running and so an ordinary refusal. `Err` is a host that promised an
+    // identity and could not produce one, which is a broken host rather than a
+    // program-level answer, so the cause travels out as a fault instead of
+    // collapsing into the same code. Both outcomes are memoized: a failed
+    // derivation is as expensive as a successful one, and retrying it once per
+    // sealed envelope would hash the whole namespace again to reach the same
+    // answer.
+    fn execution_identity(&mut self) -> Result<Option<String>, String> {
+        if let Mobility::Deferred(f) = self.identity {
+            self.identity = Mobility::Forced(f());
+        }
+        match &self.identity {
+            Mobility::Unarmed => Ok(None),
+            Mobility::Forced(Ok(bundle)) => Ok(Some(bundle.clone())),
+            Mobility::Forced(Err(cause)) => Err(format!(
+                "this host cannot name the program it is running, so no mobility                  envelope can be stamped or checked: {cause}"
+            )),
+            // `Deferred` was replaced above.
+            Mobility::Deferred(_) => unreachable!(),
         }
     }
 
@@ -685,6 +852,22 @@ impl<'a> Machine<'a> {
             }
         }
         Ok(())
+    }
+
+    // Append one stream-socket event to the provenance stream, when armed. The
+    // frame is the operation's arguments in order, then the side its `Result`
+    // took, with that side's payload in the result slot (see `net_outcome`). It
+    // takes no tape frame and does not advance the observation count: the socket
+    // is the world, and a `Net` program is not replayable for the same reason a
+    // recorded conversation is not a conversation.
+    fn record_net_event(&mut self, op: CapOp, vals: &[Rv], out: &Rv) {
+        let Some(events) = &mut self.events else {
+            return;
+        };
+        let (ok, result) = net_outcome(out);
+        let mut args = event_args(vals);
+        args.push(EventValue::Bool(ok));
+        events.push(CapEvent { op, args, result });
     }
 
     fn record_output(&mut self, op: CapOp, text: String) {
@@ -997,7 +1180,7 @@ impl<'a> Machine<'a> {
                     State::Ret(Rv::Closure(
                         Rc::from(&params[avs.len()..]),
                         Rc::clone(body),
-                        Rc::new(cenv),
+                        Rc::new(cenv.into()),
                     ))
                 } else {
                     // ANF saturates every call, so over-application is a lowering
@@ -1028,7 +1211,7 @@ impl<'a> Machine<'a> {
                     if self.cut.is_some() {
                         self.note_call_entry(*name, stack);
                     }
-                    State::Eval(body, Rc::new(e2))
+                    State::Eval(body, Rc::new(e2.into()))
                 }
             }
             Node::Print(a) => {
@@ -1145,6 +1328,22 @@ impl<'a> Machine<'a> {
                     let v = str_builtin(*name, &vals, &self.args)?;
                     self.record_write_event(op, &vals)?;
                     State::Ret(v)
+                } else if let Some(op) = net_obs(*name) {
+                    // The stream-socket boundary: perform the operation, then log
+                    // its frame. Like a write it takes no tape frame, but for a
+                    // stronger reason: the socket's other end is not in the trace,
+                    // so there is nothing a replay could serve the read from.
+                    let v = str_builtin(*name, &vals, &self.args)?;
+                    self.record_net_event(op, &vals, &v);
+                    State::Ret(v)
+                } else if let (Builtin::KontEncode, [work]) = (*name, vals.as_slice()) {
+                    // The mobility envelope. Both halves need the machine
+                    // itself (one to stamp the run's identity onto the bytes,
+                    // the other to re-enter the loop on them), which is why
+                    // they are here and not among the value-returning builtins.
+                    State::Ret(mobility::seal(self, work)?)
+                } else if let (Builtin::KontResume, [envelope]) = (*name, vals.as_slice()) {
+                    State::Ret(mobility::land(self, envelope)?)
                 } else if let (Builtin::Eprint, [Rv::Str(s)]) = (*name, vals.as_slice()) {
                     // Program output on stderr, not a compiler diagnostic: it goes
                     // to the process's real fd 2 exactly as the native runtime's
@@ -1539,10 +1738,10 @@ pub fn globals(core: &Core) -> BTreeMap<Sym, CoreFn> {
 ///
 /// # Errors
 /// Fails when `main` is missing or evaluation faults.
-pub fn run(core: &Core) -> Result<Run, String> {
+pub fn run(core: &Core, identity: Option<Identity<'_>>) -> Result<Run, String> {
     let mut sink: Vec<u8> = Vec::new();
     let mut input = io::Cursor::new(Vec::new());
-    run_io(core, &mut sink, &mut input)
+    run_io(core, &mut sink, &mut input, identity)
 }
 
 /// Run `core` with a host-supplied output sink and input source.
@@ -1557,8 +1756,9 @@ pub fn run_io(
     core: &Core,
     out_sink: &mut dyn io::Write,
     input: &mut dyn io::BufRead,
+    identity: Option<Identity<'_>>,
 ) -> Result<Run, String> {
-    run_io_with_args(core, out_sink, input, Vec::new())
+    run_io_with_args(core, out_sink, input, Vec::new(), identity)
 }
 
 /// Like [`run_io`], with explicit host-provided program arguments for
@@ -1566,15 +1766,19 @@ pub fn run_io(
 ///
 /// # Errors
 /// Fails when `main` is missing or evaluation faults.
-pub fn run_io_with_args(
+pub fn run_io_with_args<'a>(
     core: &Core,
-    out_sink: &mut dyn io::Write,
-    input: &mut dyn io::BufRead,
+    out_sink: &'a mut dyn io::Write,
+    input: &'a mut dyn io::BufRead,
     args: Vec<String>,
+    identity: Option<Identity<'a>>,
 ) -> Result<Run, String> {
     let g = globals(core);
     let main = g.get(&Sym::new(ENTRY_POINT)).ok_or(NO_MAIN_FUNCTION)?;
     let mut m = Machine::new_with_args(&g, out_sink, input, args);
+    if let Some(identity) = identity {
+        m.arm_mobility(identity);
+    }
     let value = m.comp(&Env::default(), &main.body)?;
     Ok(Run {
         value,
@@ -1627,8 +1831,9 @@ pub fn run_traced(
     out_sink: &mut dyn io::Write,
     input: &mut dyn io::BufRead,
     tape: Tape,
+    identity: Option<Identity<'_>>,
 ) -> Result<TracedRun, String> {
-    run_traced_with_args(core, out_sink, input, tape, Vec::new())
+    run_traced_with_args(core, out_sink, input, tape, Vec::new(), identity)
 }
 
 /// Like [`run_traced`], with explicit host-provided program arguments.
@@ -1636,16 +1841,20 @@ pub fn run_traced(
 /// # Errors
 /// Fails when `main` is missing, evaluation faults, or a replayed trace does not
 /// match the program.
-pub fn run_traced_with_args(
+pub fn run_traced_with_args<'a>(
     core: &Core,
-    out_sink: &mut dyn io::Write,
-    input: &mut dyn io::BufRead,
+    out_sink: &'a mut dyn io::Write,
+    input: &'a mut dyn io::BufRead,
     tape: Tape,
     args: Vec<String>,
+    identity: Option<Identity<'a>>,
 ) -> Result<TracedRun, String> {
     let g = globals(core);
     let main = g.get(&Sym::new(ENTRY_POINT)).ok_or(NO_MAIN_FUNCTION)?;
     let mut m = Machine::new_with_args(&g, out_sink, input, args);
+    if let Some(identity) = identity {
+        m.arm_mobility(identity);
+    }
     m.set_tape(tape);
     let value = m.comp(&Env::default(), &main.body)?;
     if let Some(observations) = &mut m.observations {
@@ -1681,13 +1890,14 @@ pub fn run_traced_with_args(
 /// Unlike [`run_traced_with_args`], a language-level runtime fault is returned
 /// in the artifact rather than discarded through `Err`; frontend failures remain
 /// outside this Core-level entry point.
-pub fn run_observed_with_args(
+pub fn run_observed_with_args<'a>(
     core: &Core,
-    out_sink: &mut dyn io::Write,
-    input: &mut dyn io::BufRead,
+    out_sink: &'a mut dyn io::Write,
+    input: &'a mut dyn io::BufRead,
     args: Vec<String>,
+    identity: Option<Identity<'a>>,
 ) -> TracedRun {
-    run_observed_mode(core, out_sink, input, args, false)
+    run_observed_mode(core, out_sink, input, args, false, identity)
 }
 
 /// Verification-only observation entry for effect-lowered / RC / reuse Core.
@@ -1701,15 +1911,17 @@ pub(crate) fn run_observed_lowered_with_args(
     input: &mut dyn io::BufRead,
     args: Vec<String>,
 ) -> TracedRun {
-    run_observed_mode(core, out_sink, input, args, true)
+    // Lowered Core is a verification seam, never a host that moves computations.
+    run_observed_mode(core, out_sink, input, args, true, None)
 }
 
-fn run_observed_mode(
+fn run_observed_mode<'a>(
     core: &Core,
-    out_sink: &mut dyn io::Write,
-    input: &mut dyn io::BufRead,
+    out_sink: &'a mut dyn io::Write,
+    input: &'a mut dyn io::BufRead,
     args: Vec<String>,
     lowered: bool,
+    identity: Option<Identity<'a>>,
 ) -> TracedRun {
     let g = globals(core);
     let Some(main) = g.get(&Sym::new(ENTRY_POINT)) else {
@@ -1730,6 +1942,9 @@ fn run_observed_mode(
     } else {
         Machine::new_with_args(&g, out_sink, input, args)
     };
+    if let Some(identity) = identity {
+        m.arm_mobility(identity);
+    }
     m.set_tape(Tape::Record(Vec::new()));
     let result = if lowered {
         m.comp_lowered(&Env::default(), &main.body)
@@ -1799,6 +2014,12 @@ fn snapshot(m: Machine<'_>, bundle: String, stack: Vec<Frame>, state: State) -> 
     let observations = m.observations.unwrap_or_default();
     kont::Kont {
         bundle,
+        // A suspension is wherever the step budget ran out, so nothing has been
+        // proved about what it captured. Only a `teleport` seal, whose closure
+        // the compiler checked, claims otherwise.
+        portable: kont::Portability::Unchecked,
+        // Filled in by the encoder, which is the only place that knows what the
+        // capture graph serializes to.
         stack,
         state,
         rng: m.rng,
@@ -1876,6 +2097,7 @@ fn run_suspending_inner(
     let main = g.get(&Sym::new(ENTRY_POINT)).ok_or(NO_MAIN_FUNCTION)?;
     let root = lower(&main.body);
     let mut m = Machine::new(g, out_sink, input);
+    m.arm_mobility_forced(bundle.clone());
     m.set_tape(Tape::Record(Vec::new()));
     if ruler {
         m.arm_ruler();
@@ -1920,7 +2142,7 @@ fn op_label_of(node: &Node) -> Option<&'static str> {
         Node::StrBuiltin(Builtin::Eprint, _) => OP_CONSOLE_EPRINT,
         Node::StrBuiltin(name, _) => match capability_obs(*name) {
             Some((_, op)) => op,
-            None => write_obs(*name)?,
+            None => write_obs(*name).or_else(|| net_obs(*name))?,
         },
         _ => return None,
     };
@@ -2029,6 +2251,9 @@ pub fn resume_kont(
 ) -> Result<Run, String> {
     let g = globals(core);
     let mut m = Machine::new(&g, out_sink, input);
+    // The caller has already checked this digest against the program, so the
+    // resumed continuation may itself move a computation under the same identity.
+    m.arm_mobility_forced(kont.bundle.clone());
     m.set_tape(Tape::Record(kont.trace.clone()));
     m.observations = Some(kont.observations.clone());
     // Restore the registers the loop threads across the cut so the resumed run
@@ -2064,6 +2289,7 @@ pub fn resume_kont_observed(
 ) -> TracedRun {
     let g = globals(core);
     let mut m = Machine::new(&g, out_sink, input);
+    m.arm_mobility_forced(kont.bundle.clone());
     m.set_tape(Tape::Record(kont.trace.clone()));
     m.observations = Some(kont.observations.clone());
     m.rng = kont.rng;
@@ -2322,6 +2548,7 @@ mod tests {
             &mut output,
             &mut input,
             Vec::new(),
+            None,
         );
     }
 
@@ -2348,6 +2575,7 @@ mod tests {
                 cursor: 0,
                 budget: None,
             },
+            None,
         )
         .expect("system should replay from the trace");
 
@@ -2375,6 +2603,7 @@ mod tests {
                 cursor: 0,
                 budget: None,
             },
+            None,
         )
         .expect("eprint should consume an output frame under replay");
 

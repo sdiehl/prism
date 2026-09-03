@@ -7,6 +7,7 @@ use std::path::Path;
 
 use prism::core::{lint_core, pass_fingerprint, CorePass, OptLevel, PassSpec, PassStage};
 use prism::{default_roots, dump, dump_on, with_prelude, Config, DynFlags};
+use prism_core::core::opt::OptimizationPlan;
 
 fn core(src: &str) -> String {
     dump("core", &with_prelude(src)).expect("core dump")
@@ -118,19 +119,13 @@ fn core_lint_clean_on_corpus() {
 #[test]
 fn pass_spec_parse() {
     let spec = PassSpec::parse("pre:EraseNewtypes,Specialize;late:Simplify").expect("valid spec");
-    assert_eq!(
-        spec.pre,
-        vec![CorePass::EraseNewtypes, CorePass::Specialize]
-    );
-    assert_eq!(spec.late, vec![CorePass::Simplify]);
+    assert_eq!(spec.pre(), &[CorePass::EraseNewtypes, CorePass::Specialize]);
+    assert_eq!(spec.late(), &[CorePass::Simplify]);
 
     // A bare comma-list with no marker is the pre stage.
     let bare = PassSpec::parse("EraseNewtypes,Specialize").expect("valid bare spec");
-    assert_eq!(
-        bare.pre,
-        vec![CorePass::EraseNewtypes, CorePass::Specialize]
-    );
-    assert!(bare.late.is_empty());
+    assert_eq!(bare.pre(), &[CorePass::EraseNewtypes, CorePass::Specialize]);
+    assert!(bare.late().is_empty());
 
     assert!(PassSpec::parse("pre:Bogus").is_err());
     // A late-only pass placed in the pre section is rejected.
@@ -151,8 +146,10 @@ fn specialization_is_idempotent() {
     let roots = default_roots(Path::new("."));
     let dump_with = |spec: &str| {
         let mut cfg = Config::from_env();
-        cfg.flags.quiet = true;
-        cfg.passes = Some(PassSpec::parse(spec).expect("valid spec"));
+        cfg.update_flags(|flags| flags.quiet = true);
+        cfg.set_optimization_plan(OptimizationPlan::explicit(
+            PassSpec::parse(spec).expect("valid spec"),
+        ));
         dump_on("core", &full, &roots, &cfg).expect("core dump")
     };
     let once = dump_with("pre:EraseNewtypes,Specialize");

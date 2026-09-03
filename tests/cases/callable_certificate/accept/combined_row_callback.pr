@@ -1,0 +1,5 @@
+fip fn inc(x) = x + 1
+
+fn iterate(f : ((Int) -> Int) @ {many, noalloc}, x : Int) : Int = f(f(x))
+
+fn drive(x : Int) : Int = iterate(inc, x)

@@ -30,7 +30,7 @@ pub fn residual_effects(core: &Core) -> Result<(), String> {
 #[must_use]
 pub fn residual_effect_node(comp: &Comp) -> Option<&'static str> {
     let mut finder = EffectNodeFinder { found: None };
-    finder.visit_comp(comp);
+    finder.walk_comp(comp);
     finder.found
 }
 
@@ -39,15 +39,16 @@ struct EffectNodeFinder {
 }
 
 impl Visit for EffectNodeFinder {
-    fn visit_comp(&mut self, c: &Comp) {
+    fn comp(&mut self, c: &Comp) -> bool {
         if self.found.is_some() {
-            return;
+            return false;
         }
         match c {
             Comp::Do(..) => self.found = Some(DO_NODE),
             Comp::Handle { .. } => self.found = Some(HANDLE_NODE),
             Comp::Mask(..) => self.found = Some(MASK_NODE),
-            _ => self.descend_comp(c),
+            _ => {}
         }
+        self.found.is_none()
     }
 }

@@ -1,0 +1,14 @@
+-- Every member of a mutually recursive cycle must carry a stack certificate;
+-- here `odd` does not, so `even`'s claim is refused and the diagnostic names
+-- the uncertified partner.
+fn even(n : Int) : Bool @ bounded_stack =
+  if n == 0 then
+    true
+  else
+    odd(n - 1)
+
+fn odd(n : Int) : Bool =
+  if n == 0 then
+    false
+  else
+    even(n - 1)

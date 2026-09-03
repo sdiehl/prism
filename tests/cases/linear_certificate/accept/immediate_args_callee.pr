@@ -1,0 +1,5 @@
+-- Nothing owned crosses this call: `helper` takes only scalars, so it needs
+-- no linearity certificate for `top`'s claim to hold.
+fn helper(n : Int) : Int = n + n
+
+fn top(n : Int) : Int @ linear = helper(n)

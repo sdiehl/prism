@@ -1,0 +1,63 @@
+---
+source: tests/snapshots.rs
+expression: "normalize_pipeline_report(&prism::report(&src))"
+input_file: tests/cases/effect_preempt_reserved.pr
+---
+== tokens ==
+VOpen Effect UIdent("Preempt") VOpen Ident("yield_now") LParen RParen Colon KwUnit VClose VSemi Fn Ident("main") LParen RParen Colon KwInt Eq Int(IntLit { value: 0, suffix: None }) VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [
+        EffectDecl {
+            name: "Preempt",
+            params: [],
+            ops: [
+                EffOp {
+                    name: "yield_now",
+                    params: [],
+                    ret: Unit,
+                    grade: Many,
+                },
+            ],
+            span: 224..259,
+        },
+    ],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "main",
+            params: [],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Int(
+                    IntLit {
+                        value: 0,
+                        suffix: None,
+                    },
+                ),
+                span: 279..280,
+            },
+            wheres: [],
+            span: 261..280,
+        },
+    ],
+}
+
+== types ==
+[E6006] Type Error: effect `Preempt` is a reserved name (reserved for the concurrency preemption seam)
+   ╭─[ <source>:4:1 ]
+   │
+ 4 │ ╭─▶ effect Preempt
+ 5 │ ├─▶   yield_now() : Unit
+   │ │                          
+   │ ╰────────────────────────── effect `Preempt` is a reserved name (reserved for the concurrency preemption seam)
+───╯

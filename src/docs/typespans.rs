@@ -24,7 +24,7 @@ use crate::syntax::ast::{
 use crate::tc::is_builtin_effect;
 use crate::types::coeffect::CoeffectFact;
 use crate::types::ty::Kind;
-use crate::types::{Checked, CtorInfo, EffOpInfo, Type};
+use crate::types::{Checked, CtorInfo, DataInfo, EffOpInfo, Type};
 use crate::verify::check::Checker;
 
 /// Schema tag for the shared type-span payload.
@@ -1432,11 +1432,12 @@ fn function_result(mut ty: &Type) -> Option<&Type> {
 
 fn checked_decl_type<'a>(checked: &'a Checked, name: &str) -> Option<&'a Type> {
     checked
+        .defs
         .decls
         .iter()
         .find(|decl| decl.name == name)
         .map(|decl| &decl.ty)
-        .or_else(|| checked.env.get(&Sym::from(name)))
+        .or_else(|| checked.interface.env.get(&Sym::from(name)))
 }
 
 fn pattern_parameter_types(checked: &Checked, name: &str, arity: usize) -> Vec<String> {
@@ -1549,7 +1550,7 @@ fn resolve_stable_spans(
                     resolved.entry(range).or_insert(entry);
                 }
             }
-            let ctor = checked.ctors.get(&rung.canonical);
+            let ctor = checked.defs.ctors.get(&rung.canonical);
             for (range, field) in &rung.fields {
                 let ty = ctor.and_then(|info| {
                     info.fields
@@ -1648,10 +1649,11 @@ fn find_var_fact(e: &S<Expr<Core>>, name: &str, checked: &Checked) -> Option<Str
 // operations are canonicalized there, so a bare-name match is accepted only
 // when it is unique.
 fn operation_info<'a>(checked: &'a Checked, operation: &str) -> Option<&'a EffOpInfo> {
-    if let Some(info) = checked.eff_ops.get(operation) {
+    if let Some(info) = checked.defs.eff_ops.get(operation) {
         return Some(info);
     }
     let mut matches = checked
+        .defs
         .eff_ops
         .iter()
         .filter(|(name, _)| names::bare_name(name) == operation)
@@ -1837,6 +1839,7 @@ fn collect_typed_pattern(
         }
         Pattern::Ctor(name, patterns) => {
             let types = checked
+                .defs
                 .ctors
                 .get(name)
                 .map(|info| instantiated_ctor_args(info, expected))
@@ -1846,7 +1849,7 @@ fn collect_typed_pattern(
             }
         }
         Pattern::Record(name, fields, _) => {
-            let info = checked.ctors.get(name);
+            let info = checked.defs.ctors.get(name);
             let types = info
                 .map(|info| instantiated_ctor_args(info, expected))
                 .unwrap_or_default();
@@ -1912,11 +1915,46 @@ fn into_document(src: &str, resolved: BTreeMap<ByteRange, (String, Level)>) -> T
 /// Join surface expression ranges to the checker facts recorded on the
 /// desugared tree. Only root-file nodes with a unique mapping survive; imported,
 /// synthesized, zero-width, and ambiguously desugared nodes are filtered out.
+// An effect reference renders the effect and its operation names (each
+// prefixed by its resumption grade when narrower than the default),
+// recovered by grouping the checked op table by declaring effect.
+fn effect_hover(checked: &Checked, name: &str) -> Option<(String, Level)> {
+    let eff_ops = &checked.defs.eff_ops;
+    if is_builtin_effect(name)
+        && !eff_ops
+            .values()
+            .any(|info| info.effect_name.to_string() == name)
+    {
+        return Some((format!("{name}; builtin effect"), Level::Effect));
+    }
+    let ops = eff_ops
+        .iter()
+        .filter(|(_, info)| info.effect_name.to_string() == name)
+        .map(|(op, info)| {
+            if info.grade.is_default() {
+                op.clone()
+            } else {
+                format!("{} {op}", info.grade.word())
+            }
+        })
+        .collect::<Vec<_>>();
+    if ops.is_empty() {
+        return None;
+    }
+    Some((
+        format!("{name}; operations: {}", ops.join(", ")),
+        Level::Effect,
+    ))
+}
+
 pub(crate) fn extract(
     src: &str,
     program: &Program<Core>,
     checked: &Checked,
 ) -> Result<TypeSpans, Error> {
+    let defs = &checked.defs;
+    let env = &checked.interface.env;
+    let classes = &checked.dispatch.classes;
     let surface = surface_nodes(src)?;
     let hir = build(checked);
     let mut found: BTreeMap<(usize, usize), BTreeSet<String>> = BTreeMap::new();
@@ -1958,12 +1996,12 @@ pub(crate) fn extract(
     // the class-method scheme in the environment). A declaration name denotes
     // the function value; a parameter denotes the corresponding arrow domain.
     for binder in &surface.binders {
-        let scheme = checked
+        let scheme = defs
             .decls
             .iter()
             .find(|info| info.name == binder.decl)
             .map(|info| &info.ty)
-            .or_else(|| checked.env.get(&Sym::from(&binder.decl)));
+            .or_else(|| env.get(&Sym::from(&binder.decl)));
         let Some(scheme) = scheme else {
             continue;
         };
@@ -2014,10 +2052,9 @@ pub(crate) fn extract(
         if PRIM_TYPES.contains(&name) {
             return Some(Kind::Type.show());
         }
-        checked
-            .data
+        defs.data
             .get(name)
-            .map(|info| Kind::arrow(&info.param_kinds).show())
+            .map(|info| Kind::arrow(&info.param_kinds()).show())
     };
     let typelevel =
         |name: &str| kind_of(name).map(|kind| (format!("{name} : {kind}"), Level::Typelevel));
@@ -2025,7 +2062,7 @@ pub(crate) fn extract(
     // higher-kinded, derived from the parameter's widest application across the
     // method schemes), its superclasses, and its method names.
     let class_of = |name: &str| {
-        checked.classes.get(&Sym::from(name)).map(|info| {
+        classes.get(&Sym::from(name)).map(|info| {
             let kind = info
                 .methods
                 .iter()
@@ -2060,38 +2097,7 @@ pub(crate) fn extract(
             (rendered, Level::Class)
         })
     };
-    // An effect reference renders the effect and its operation names (each
-    // prefixed by its resumption grade when narrower than the default),
-    // recovered by grouping the checked op table by declaring effect.
-    let effect_of = |name: &str| {
-        if is_builtin_effect(name)
-            && !checked
-                .eff_ops
-                .values()
-                .any(|info| info.effect_name.to_string() == name)
-        {
-            return Some((format!("{name}; builtin effect"), Level::Effect));
-        }
-        let ops = checked
-            .eff_ops
-            .iter()
-            .filter(|(_, info)| info.effect_name.to_string() == name)
-            .map(|(op, info)| {
-                if info.grade.is_default() {
-                    op.clone()
-                } else {
-                    format!("{} {op}", info.grade.word())
-                }
-            })
-            .collect::<Vec<_>>();
-        if ops.is_empty() {
-            return None;
-        }
-        Some((
-            format!("{name}; operations: {}", ops.join(", ")),
-            Level::Effect,
-        ))
-    };
+    let effect_of = |name: &str| effect_hover(checked, name);
     for decl in &surface.type_decls {
         if let (Some(range), Some(entry)) = (decl.name_range, typelevel(&decl.name)) {
             resolved.entry(range).or_insert(entry);
@@ -2099,7 +2105,7 @@ pub(crate) fn extract(
         // A constructor name in its declaration denotes the constructor
         // function: its arguments to the declared type.
         for (range, ctor_name) in &decl.ctors {
-            let Some(info) = checked.ctors.get(ctor_name) else {
+            let Some(info) = defs.ctors.get(ctor_name) else {
                 continue;
             };
             let result = if decl.params.is_empty() {
@@ -2122,6 +2128,7 @@ pub(crate) fn extract(
         }
         for (range, ctor_name, index) in &decl.fields {
             let Some(ty) = checked
+                .defs
                 .ctors
                 .get(ctor_name)
                 .and_then(|info| info.args.get(*index))
@@ -2140,13 +2147,13 @@ pub(crate) fn extract(
         // Type parameters: bindings and references alike render the parameter
         // with its declared kind (`Type` unless annotated `Row`/`Nat`, or an
         // arrow for a higher-kinded parameter).
-        let param_kinds = checked.data.get(&decl.name).map(|info| &info.param_kinds);
+        let param_kinds = checked.defs.data.get(&decl.name).map(DataInfo::param_kinds);
         for (range, name) in &decl.vars {
             let kind = decl
                 .params
                 .iter()
                 .position(|p| p == name)
-                .and_then(|at| param_kinds.and_then(|kinds| kinds.get(at)))
+                .and_then(|at| param_kinds.as_ref().and_then(|kinds| kinds.get(at)))
                 .cloned()
                 .unwrap_or_default();
             resolved
@@ -2160,7 +2167,7 @@ pub(crate) fn extract(
     // types (the class parameter across all methods, a method-local variable
     // within its own method), exactly as the class hover kinds the parameter.
     for decl in &surface.class_decls {
-        let info = checked.classes.get(&Sym::from(&decl.name));
+        let info = classes.get(&Sym::from(&decl.name));
         let param_kind = info
             .map(|info| {
                 info.methods
@@ -2220,12 +2227,12 @@ pub(crate) fn extract(
             ))
         } else {
             let name = Sym::from(reference.name.as_str());
-            let scheme = checked
+            let scheme = defs
                 .decls
                 .iter()
                 .find(|info| info.name == reference.decl)
                 .map(|info| &info.ty)
-                .or_else(|| checked.env.get(&Sym::from(&reference.decl)));
+                .or_else(|| env.get(&Sym::from(&reference.decl)));
             scheme
                 .filter(|scheme| scheme_binds(&name, scheme))
                 .map(|scheme| {
@@ -2252,7 +2259,7 @@ pub(crate) fn extract(
 
     // A typed hole's inferred type wins over any expression fact on the same
     // range: the hole is the thing the reader is asking about.
-    for hole in &checked.holes {
+    for hole in &checked.reports.holes {
         let rendered = if hole.effects == "{}" {
             hole.expected.clone()
         } else {

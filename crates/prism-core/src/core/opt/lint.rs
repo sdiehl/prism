@@ -28,11 +28,13 @@
 
 use std::collections::BTreeSet;
 
-use super::super::cbpv::{Comp, Core, CoreFn, ElaboratedCore, LoweredCore, Value};
-use super::super::fv;
-use super::super::traverse::Visit;
-use super::PassStage;
 use prism_common::sym::Sym;
+
+use crate::core::cbpv::{Comp, Core, CoreFn, ElaboratedCore, LoweredCore, Value};
+use crate::core::fv;
+use crate::core::traverse::Visit;
+
+use super::PassStage;
 
 impl ElaboratedCore {
     /// Validate a pre-effect-lowering program and mint its stage claim.
@@ -163,14 +165,14 @@ pub fn lint(core: &Core, stage: PassStage) -> Result<(), Vec<String>> {
             fname: f.name,
             errs: Vec::new(),
         };
-        rl.visit_comp(&f.body);
+        rl.walk_comp(&f.body);
         errs.append(&mut rl.errs);
         let mut sl = StageLint {
             fname: f.name,
             stage,
             errs: Vec::new(),
         };
-        sl.visit_comp(&f.body);
+        sl.walk_comp(&f.body);
         errs.append(&mut sl.errs);
     }
     if errs.is_empty() {
@@ -191,7 +193,7 @@ struct StageLint {
 }
 
 impl Visit for StageLint {
-    fn visit_comp(&mut self, c: &Comp) {
+    fn comp(&mut self, c: &Comp) -> bool {
         let forbidden = match self.stage {
             PassStage::PreLowering => c.is_runtime_node(),
             PassStage::Late => c.is_effect_node(),
@@ -207,7 +209,7 @@ impl Visit for StageLint {
                 c.kind()
             ));
         }
-        self.descend_comp(c);
+        true
     }
 }
 
@@ -219,7 +221,7 @@ struct ReuseLint {
 }
 
 impl Visit for ReuseLint {
-    fn visit_comp(&mut self, c: &Comp) {
+    fn comp(&mut self, c: &Comp) -> bool {
         if let Comp::WithReuse { token, body, .. } = c {
             let n = spends(*token, body);
             if n > 1 {
@@ -230,7 +232,7 @@ impl Visit for ReuseLint {
                 ));
             }
         }
-        self.descend_comp(c);
+        true
     }
 }
 
@@ -238,71 +240,232 @@ impl Visit for ReuseLint {
 // composition adds (both run), branches take the max (one arm runs). A nested
 // `WithReuse` rebinding the same name shadows it, so its body is not counted.
 fn spends(token: Sym, c: &Comp) -> usize {
-    match c {
-        Comp::Reuse(t, v) => usize::from(*t == token) + spends_val(token, v),
-        // A post-lowering (arena) node, unreachable in this pre-lowering reuse
-        // lint; it spends no reuse token, but stay total over its value positions.
-        Comp::InitAt(cell, v) => spends_val(token, cell) + spends_val(token, v),
-        Comp::Bind(m, _, n) => spends(token, m) + spends(token, n),
-        Comp::If(v, t, e) => spends_val(token, v) + spends(token, t).max(spends(token, e)),
-        Comp::Case(v, arms) => {
-            spends_val(token, v)
-                + arms
-                    .iter()
-                    .map(|(_, b)| spends(token, b))
-                    .max()
-                    .unwrap_or(0)
+    let mut work = vec![SpendFrame::Comp(c)];
+    let mut results = Vec::new();
+    while let Some(frame) = work.pop() {
+        match frame {
+            SpendFrame::Comp(comp) => push_spend_comp(&mut work, token, comp),
+            SpendFrame::Value(value) => push_spend_value(&mut work, value),
+            SpendFrame::Sum { children, base } => {
+                let children = pop_sum(&mut results, children);
+                results.push(base + children);
+            }
+            SpendFrame::Branch { arms } => {
+                let worst_arm = pop_max(&mut results, arms);
+                let scrutinee = results.pop().expect("branch scrutinee result");
+                results.push(scrutinee + worst_arm);
+            }
         }
-        Comp::App(f, args) => {
-            spends(token, f) + args.iter().map(|a| spends_val(token, a)).sum::<usize>()
+    }
+    results.pop().expect("reuse-spend result")
+}
+
+enum SpendFrame<'a> {
+    Comp(&'a Comp),
+    Value(&'a Value),
+    Sum { children: usize, base: usize },
+    Branch { arms: usize },
+}
+
+fn push_sum<'a>(
+    work: &mut Vec<SpendFrame<'a>>,
+    values: impl DoubleEndedIterator<Item = &'a Value> + ExactSizeIterator,
+) {
+    work.push(SpendFrame::Sum {
+        children: values.len(),
+        base: 0,
+    });
+    work.extend(values.rev().map(SpendFrame::Value));
+}
+
+fn push_spend_comp<'a>(work: &mut Vec<SpendFrame<'a>>, token: Sym, comp: &'a Comp) {
+    match comp {
+        Comp::Reuse(spent, value) => {
+            work.push(SpendFrame::Sum {
+                children: 1,
+                base: usize::from(*spent == token),
+            });
+            work.push(SpendFrame::Value(value));
         }
-        Comp::Prim(_, a, b) | Comp::RefSet(a, b) => spends_val(token, a) + spends_val(token, b),
+        Comp::InitAt(cell, value) | Comp::Prim(_, cell, value) | Comp::RefSet(cell, value) => {
+            work.push(SpendFrame::Sum {
+                children: 2,
+                base: 0,
+            });
+            work.push(SpendFrame::Value(value));
+            work.push(SpendFrame::Value(cell));
+        }
+        Comp::Bind(first, _, rest) => {
+            work.push(SpendFrame::Sum {
+                children: 2,
+                base: 0,
+            });
+            work.push(SpendFrame::Comp(rest));
+            work.push(SpendFrame::Comp(first));
+        }
+        Comp::If(condition, yes, no) => {
+            work.push(SpendFrame::Branch { arms: 2 });
+            work.push(SpendFrame::Comp(no));
+            work.push(SpendFrame::Comp(yes));
+            work.push(SpendFrame::Value(condition));
+        }
+        Comp::Case(scrutinee, arms) => {
+            work.push(SpendFrame::Branch { arms: arms.len() });
+            for (_, body) in arms.iter().rev() {
+                work.push(SpendFrame::Comp(body));
+            }
+            work.push(SpendFrame::Value(scrutinee));
+        }
+        Comp::App(callee, args) => {
+            work.push(SpendFrame::Sum {
+                children: args.len() + 1,
+                base: 0,
+            });
+            for argument in args.iter().rev() {
+                work.push(SpendFrame::Value(argument));
+            }
+            work.push(SpendFrame::Comp(callee));
+        }
         Comp::Call(_, args) | Comp::Do(_, args) | Comp::StrBuiltin(_, args) | Comp::Io(_, args) => {
-            args.iter().map(|a| spends_val(token, a)).sum()
+            push_sum(work, args.iter());
         }
-        Comp::Return(v)
-        | Comp::Force(v)
-        | Comp::Error(v)
-        | Comp::FloatBuiltin(_, v)
-        | Comp::Neg(_, v)
-        | Comp::UnboxedProject(v, _)
-        | Comp::Dup(v)
-        | Comp::Drop(v)
-        | Comp::RefNew(v)
-        | Comp::RefGet(v) => spends_val(token, v),
-        Comp::Lam(_, b) | Comp::Mask(_, b) => spends(token, b),
+        Comp::Return(value)
+        | Comp::Force(value)
+        | Comp::Error(value)
+        | Comp::FloatBuiltin(_, value)
+        | Comp::Neg(_, value)
+        | Comp::UnboxedProject(value, _)
+        | Comp::Dup(value)
+        | Comp::Drop(value)
+        | Comp::RefNew(value)
+        | Comp::RefGet(value) => work.push(SpendFrame::Value(value)),
+        Comp::Lam(_, body) | Comp::Mask(_, body) => work.push(SpendFrame::Comp(body)),
         Comp::WithReuse {
-            token: t2,
+            token: inner,
             freed,
             body,
-        } => spends_val(token, freed) + if *t2 == token { 0 } else { spends(token, body) },
+        } => {
+            work.push(SpendFrame::Sum {
+                children: usize::from(*inner != token) + 1,
+                base: 0,
+            });
+            if *inner != token {
+                work.push(SpendFrame::Comp(body));
+            }
+            work.push(SpendFrame::Value(freed));
+        }
         Comp::Handle {
             body,
             return_body,
             ops,
             ..
         } => {
-            spends(token, body)
-                + return_body.as_ref().map_or(0, |b| spends(token, b))
-                + ops.iter().map(|op| spends(token, &op.body)).sum::<usize>()
+            work.push(SpendFrame::Sum {
+                children: 1 + usize::from(return_body.is_some()) + ops.len(),
+                base: 0,
+            });
+            for operation in ops.iter().rev() {
+                work.push(SpendFrame::Comp(&operation.body));
+            }
+            if let Some(return_body) = return_body {
+                work.push(SpendFrame::Comp(return_body));
+            }
+            work.push(SpendFrame::Comp(body));
         }
     }
 }
 
-fn spends_val(token: Sym, v: &Value) -> usize {
-    match v {
-        Value::Thunk(c) => spends(token, c),
-        Value::Ctor(_, _, fs) | Value::Tuple(fs) | Value::UnboxedTuple(fs) => {
-            fs.iter().map(|f| spends_val(token, f)).sum()
+fn push_spend_value<'a>(work: &mut Vec<SpendFrame<'a>>, value: &'a Value) {
+    match value {
+        Value::Thunk(body) => work.push(SpendFrame::Comp(body)),
+        Value::Ctor(_, _, fields) | Value::Tuple(fields) | Value::UnboxedTuple(fields) => {
+            push_sum(work, fields.iter());
         }
-        Value::UnboxedRecord(fs) => fs.iter().map(|(_, f)| spends_val(token, f)).sum(),
-        _ => 0,
+        Value::UnboxedRecord(fields) => push_sum(work, fields.iter().map(|(_, field)| field)),
+        Value::Var(_)
+        | Value::Int(_)
+        | Value::I64(_)
+        | Value::U64(_)
+        | Value::Float(_)
+        | Value::Bool(_)
+        | Value::Unit
+        | Value::Str(_) => work.push(SpendFrame::Sum {
+            children: 0,
+            base: 0,
+        }),
     }
+}
+
+fn pop_sum(results: &mut Vec<usize>, count: usize) -> usize {
+    (0..count)
+        .map(|_| results.pop().expect("reuse-spend child result"))
+        .sum()
+}
+
+fn pop_max(results: &mut Vec<usize>, count: usize) -> usize {
+    (0..count)
+        .map(|_| results.pop().expect("reuse-spend branch result"))
+        .max()
+        .unwrap_or(0)
 }
 
 #[cfg(test)]
 mod tests {
+    use std::{mem, thread};
+
     use super::*;
+
+    const DEEP_BIND_COUNT: usize = 20_000;
+    const ORDINARY_TEST_STACK: usize = 2 * 1024 * 1024;
+
+    #[test]
+    fn lint_handles_deep_reuse_spines_on_an_ordinary_stack() {
+        thread::Builder::new()
+            .name("deep-core-lint".into())
+            .stack_size(ORDINARY_TEST_STACK)
+            .spawn(|| {
+                let token = Sym::new("reuse_token");
+                let mut body = Comp::Reuse(token, Value::Ctor("Cell".into(), 0, Vec::new()));
+                for _ in 0..DEEP_BIND_COUNT {
+                    body = Comp::Bind(
+                        Box::new(Comp::Return(Value::Int(0))),
+                        Sym::new("_"),
+                        Box::new(body),
+                    );
+                }
+                let core = program(Comp::WithReuse {
+                    token,
+                    freed: Value::Int(0),
+                    body: Box::new(body),
+                });
+
+                assert_eq!(lint(&core, PassStage::Late), Ok(()));
+                mem::forget(core);
+            })
+            .expect("spawn deep Core Lint test")
+            .join()
+            .expect("deep Core Lint test panicked");
+    }
+
+    #[test]
+    fn reuse_spends_add_sequences_take_branch_maxima_and_respect_shadowing() {
+        let token = Sym::new("token");
+        let spend = || Comp::Reuse(token, Value::Unit);
+        let sequence = Comp::Bind(Box::new(spend()), Sym::new("_"), Box::new(spend()));
+        let branch = Comp::If(
+            Value::Thunk(Box::new(spend())),
+            Box::new(sequence),
+            Box::new(spend()),
+        );
+        assert_eq!(spends(token, &branch), 3);
+
+        let shadow = Comp::WithReuse {
+            token,
+            freed: Value::Thunk(Box::new(spend())),
+            body: Box::new(spend()),
+        };
+        assert_eq!(spends(token, &shadow), 1);
+    }
 
     fn program(body: Comp) -> Core {
         Core {

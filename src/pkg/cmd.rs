@@ -121,7 +121,7 @@ pub fn add(arg: &str, cfg: &Config) -> Result<String, Error> {
     let edited = set_dependency(&text, &name, &render_source(&source));
     fs::write(&manifest_path, &edited)?;
 
-    let store = Store::open_or_create(resolve_store_path(cfg.flags.store_path.as_deref()))?;
+    let store = Store::open_or_create(resolve_store_path(cfg.flags().store_path.as_deref()))?;
     let mut report = format!("added dependency `{name}` to {MANIFEST}");
 
     if let Some(pin) = lockable_pin(&name, &source, cfg)? {
@@ -166,7 +166,7 @@ pub fn why(target: &str, cfg: &Config) -> Result<String, Error> {
     // Local-store-only resolution: a disk transport over the configured store.
     // The git-backed transport is a drop-in here when a build must reach a
     // remote; the resolver does not change.
-    let transport = DiskTransport::open(resolve_store_path(cfg.flags.store_path.as_deref()))?;
+    let transport = DiskTransport::open(resolve_store_path(cfg.flags().store_path.as_deref()))?;
     let roots: Vec<String> = lock.entries.iter().map(|e| e.hash.to_string()).collect();
     let closure =
         resolve_closure(&transport, &roots).map_err(|e| Error::ResolvePackage(e.to_string()))?;
@@ -271,8 +271,8 @@ fn lockable_pin(
         })),
         DepSource::Path(_) => Ok(None),
         DepSource::Git { url, version } => {
-            let store_root = resolve_store_path(cfg.flags.store_path.as_deref());
-            let pointer = signed_index_pointer(url, name, version, &store_root, &cfg.flags)?;
+            let store_root = resolve_store_path(cfg.flags().store_path.as_deref());
+            let pointer = signed_index_pointer(url, name, version, &store_root, cfg.flags())?;
             Ok(Some(ResolvedPin {
                 scheme: pointer.scheme,
                 hash: pointer.root.into_string(),

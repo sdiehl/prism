@@ -67,7 +67,7 @@ pub(crate) fn signatures_from(
         .map(|d| d.name.as_str())
         .collect();
     let mut out = Vec::new();
-    for decl in &checked.decls {
+    for decl in &checked.defs.decls {
         if !test_names.contains(decl.name.as_str()) {
             continue;
         }

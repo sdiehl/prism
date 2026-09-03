@@ -46,14 +46,6 @@ regen_diff() {
 quiet() { "$@" >/dev/null; }
 gen_fixtures() { (cd models && ./gen_fixtures.sh); }
 gen_figures() { PRISM_BIN="$PRISM" bash docs/scripts/gen-core.sh; }
-check_generated_type() {
-    python3 experiments/parser_generator_phase1/generate.py check &&
-    python3 experiments/parser_generator_phase1/generate.py self-test &&
-    (cd experiments/parser_generator_phase1 &&
-        python3 -m unittest test_generate.py) &&
-    target/debug/prism test --no-run --fail-if-no-tests \
-        experiments/parser_generator_phase1/generated/type_leaf
-}
 
 # The release binary generates the docs; the fixture manifest pins the debug
 # binary's output, as its CI job does.
@@ -70,16 +62,12 @@ check "stdlib reference (docs/src/stdlib)" \
 check "stdlib doctests" "run 'just bless --stdlib'" \
     quiet "$PRISM" docs --stdlib --test
 
+check "sentinel corpus (tests/sentinel_corpus.txt)" "run 'just sentinel'" \
+    ./scripts/sentinel_select.py --check
+
 check "parser-compaction frozen corpus" "run 'just parser-corpus check'" \
     ./scripts/parser-compaction-corpus.py check \
     --oracle 46886c1fa7064e4809020c1b788b3ee3531d6a63
-
-check "parser production manifest" "run 'just parser-production-manifest'" \
-    ./scripts/parser-production-manifest.py check
-
-check "generated Type parser" \
-    "run 'python3 experiments/parser_generator_phase1/generate.py generate'" \
-    check_generated_type
 
 check "fixture manifest (models/fixtures/core-hashes.tsv)" \
     "regenerated in place, review the diff and commit" \

@@ -1,5 +1,7 @@
 //! Fixtures for reference-count insertion.
 
+use std::{mem, thread};
+
 use crate::core::{Comp, Value};
 use crate::types::ty::{EffRow, Label};
 use crate::types::Type;
@@ -9,9 +11,13 @@ use super::super::specialize_support::{binder_occurrence, count_free_comp_var_vi
 use super::super::verify::{OperationSig, VerifyEnv};
 use super::super::{
     verify, CompSig, CoreFnSig, CoreInstantiation, CoreQuantifier, CoreType, LoweredType,
-    TypedHandler, TypedValue, TypedValueKind, UncheckedTypedCore,
+    TypedComp, TypedCompKind, TypedCoreFn, TypedHandler, TypedValue, TypedValueKind,
+    UncheckedTypedCore,
 };
 use super::*;
+
+const DEEP_RC_NESTING: usize = 20_000;
+const ORDINARY_STACK_BYTES: usize = 2 * 1024 * 1024;
 
 fn sym(name: &str) -> Sym {
     Sym::new(name)
@@ -731,4 +737,58 @@ fn bind_spine_free_variable_work_scales_linearly() {
         "free-variable work must stay linear in bind-spine length: \
          {LARGE} bindings visited {large} nodes"
     );
+}
+
+#[test]
+fn deep_mixed_terms_fit_on_an_ordinary_stack() {
+    thread::Builder::new()
+        .name("typed-rc-deep".into())
+        .stack_size(ORDINARY_STACK_BYTES)
+        .spawn(|| {
+            let unit = source(Type::Unit);
+            let mut body = ret(TypedValue::new(unit.clone(), TypedValueKind::Unit));
+            for _ in 0..DEEP_RC_NESTING {
+                body = TypedComp::new(
+                    pure(unit.clone()),
+                    TypedCompKind::If(
+                        TypedValue::new(source(Type::Bool), TypedValueKind::Bool(true)),
+                        Box::new(body),
+                        Box::new(ret(TypedValue::new(unit.clone(), TypedValueKind::Unit))),
+                    ),
+                );
+            }
+
+            let thunk_ty = CoreType::Thunk(Box::new(pure(unit)));
+            let thunk = TypedValue::new(thunk_ty.clone(), TypedValueKind::Thunk(Box::new(body)));
+
+            // Values nest as deeply as computations: alternate the two legal
+            // scalar reinterpretations so every link is representation-preserving.
+            let int = source(Type::Int);
+            let chr = source(Type::Char);
+            let mut value = TypedValue::new(int.clone(), TypedValueKind::Int(7));
+            for depth in 0..DEEP_RC_NESTING {
+                let ty = if depth % 2 == 0 {
+                    chr.clone()
+                } else {
+                    int.clone()
+                };
+                value = TypedValue::new(ty, TypedValueKind::Reinterpret(Box::new(value)));
+            }
+            let main_body = TypedComp::new(
+                pure(value.ty.clone()),
+                TypedCompKind::Bind(
+                    Box::new(ret(thunk)),
+                    TypedBinder::new(sym("deep_thunk"), thunk_ty),
+                    Box::new(ret(value)),
+                ),
+            );
+            let input = UncheckedTypedCore::new(vec![function("main", Vec::new(), main_body)]);
+            let input = verify(input, &VerifyEnv::new()).expect("deep RC input must verify");
+            let owned = insert_rc(input, &Sigs::new());
+            let owned = verify(owned, &VerifyEnv::new()).expect("deep RC output must verify");
+            mem::forget(owned);
+        })
+        .expect("deep RC test thread must start")
+        .join()
+        .expect("deep RC insertion must fit on an ordinary stack");
 }

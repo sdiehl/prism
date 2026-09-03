@@ -146,6 +146,7 @@ pub fn synth_cmd(
     let map = SourceMap::new(&full);
     let requested = at_hole.strip_prefix('?').unwrap_or(at_hole);
     let holes = checked
+        .reports
         .holes
         .iter()
         .filter(|hole| hole.name == requested)
@@ -263,7 +264,7 @@ fn search_universe(
 
 fn add_root_hits(hits: &mut Vec<SearchHit>, entry: &Program, checked: &Checked) {
     for decl in &entry.fns {
-        if let Some(ty) = checked.env.get(&Sym::from(decl.name.as_str())) {
+        if let Some(ty) = checked.interface.env.get(&Sym::from(decl.name.as_str())) {
             hits.push(SearchHit {
                 name: decl.name.clone(),
                 ty: ty.show(),
@@ -279,7 +280,7 @@ fn add_dependency_env_hits(
     checked: &Checked,
     origins: &BTreeMap<String, SearchSource>,
 ) {
-    for (name, ty) in checked.env.iter() {
+    for (name, ty) in checked.interface.env.iter() {
         let shown = name.to_string();
         let module = origins
             .keys()

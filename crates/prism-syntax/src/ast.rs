@@ -190,30 +190,50 @@ pub enum Total {
     Assume,
 }
 
-// The FP^2 in-place discipline a `fn` is annotated with. `Fbip` proves the body
-// allocates nothing fresh (every constructor reuses a dropped cell); `Fip` adds
-// linearity (no dup, no borrowed params). Checked over the reuse-lowered core.
+// The FP^2 in-place discipline a `fn` is annotated with, graded by an
+// allocation budget: the number of fresh heap cells one call may allocate,
+// where every call site (recursive calls included) charges the callee's full
+// declared budget, so a recursive path must itself allocate nothing.
+// `Fbip(0)` proves the body allocates nothing fresh (every constructor reuses
+// a dropped cell); `Fip` adds linearity (no dup, no borrowed params) and
+// bounded stack. Checked over the reuse-lowered core.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Fip {
     No,
-    Fbip,
-    Fip,
+    Fbip(u32),
+    Fip(u32),
 }
 
 impl Fip {
-    /// The canonical certificate keyword (`fip`/`fbip`), or `None` when the
-    /// definition carries no discipline. The one home for the spelling: the
-    /// content hash (`hash_meta`), the `dump usage` discipline column, and the
-    /// module interface's usage summary all render through this, so the three
-    /// can never drift. Callers choose how to render `None` (an empty cell, a
-    /// `-`, or an omitted field).
+    /// The declared allocation budget: fresh heap cells one call may allocate.
+    /// An undisciplined function has no budget claim; zero keeps it uniform.
     #[must_use]
-    pub const fn keyword(self) -> Option<&'static str> {
+    pub const fn budget(self) -> u32 {
         match self {
-            Self::No => None,
-            Self::Fbip => Some("fbip"),
-            Self::Fip => Some("fip"),
+            Self::No => 0,
+            Self::Fbip(n) | Self::Fip(n) => n,
         }
+    }
+
+    /// The canonical certificate spelling (`fip`, `fbip`, `fip(2)`), or `None`
+    /// when the definition carries no discipline. The one home for the
+    /// spelling: the content hash (`hash_meta`), the `dump usage` discipline
+    /// column, the formatter, and the module interface's usage summary all
+    /// render through this, so none can drift. A zero budget renders bare, so
+    /// every pre-budget encoding is byte-identical. Callers choose how to
+    /// render `None` (an empty cell, a `-`, or an omitted field).
+    #[must_use]
+    pub fn render(self) -> Option<String> {
+        let (word, budget) = match self {
+            Self::No => return None,
+            Self::Fbip(n) => (kw::FBIP, n),
+            Self::Fip(n) => (kw::FIP, n),
+        };
+        Some(if budget == 0 {
+            word.to_string()
+        } else {
+            format!("{word}({budget})")
+        })
     }
 }
 
@@ -858,6 +878,16 @@ pub struct Decl<P: Phase = Surface> {
     // call tree must allocate no fresh heap cell. Checked over the reuse-lowered
     // core with `fbip` semantics (no linearity or bounded-stack requirement).
     pub no_alloc: bool,
+    // The `@ bounded_stack` certificate, lifted like `no_alloc`: the function
+    // and its whole certified direct call tree run in bounded stack (every
+    // recursive call lowers as a real tail or supported modulo-cons/addition
+    // loop). Allocation and linearity are unconstrained.
+    pub bounded_stack: bool,
+    // The `@ linear` certificate, lifted like `no_alloc`: every owned
+    // non-immediate binder in the function is consumed at most once per path,
+    // and owned values flow only to linearity-certified direct callees.
+    // Allocation and stack growth are unconstrained.
+    pub linear: bool,
     pub span: Span,
 }
 
@@ -904,6 +934,12 @@ impl<P: Phase + fmt::Debug> fmt::Debug for Decl<P> {
         }
         if self.no_alloc {
             d.field("no_alloc", &self.no_alloc);
+        }
+        if self.bounded_stack {
+            d.field(CoeffectFact::BoundedStack.name(), &self.bounded_stack);
+        }
+        if self.linear {
+            d.field(CoeffectFact::Linear.name(), &self.linear);
         }
         d.field("span", &self.span).finish()
     }
@@ -1177,7 +1213,7 @@ impl BinOp {
 // downstream passes need no arm for it. `Phase` threads through `Expr`/
 // `HandlerArm` (and the structs holding them) so one set of definitions serves
 // both phases.
-pub trait Phase: Sized {
+pub trait Phase: Sized + 'static {
     // Payload of `Expr::Sugar` (the surface-only expression forms).
     type Sugar: Clone + fmt::Debug;
     // Payload of `HandlerArm::Sugar` (the three surface-only handler clauses).
@@ -1185,11 +1221,14 @@ pub trait Phase: Sized {
     // Payload of `Expr::Marker` (the parse-time markers).
     type Marker: Clone + fmt::Debug;
 
+    // The immutable walks hand the callback children at the visited node's own
+    // lifetime, so an iterative walker can park them on a worklist instead of
+    // recursing.
     #[doc(hidden)]
-    fn each_sugar_child<F: FnMut(&S<Expr<Self>>)>(s: &Self::Sugar, f: &mut F);
+    fn each_sugar_child<'a, F: FnMut(&'a S<Expr<Self>>)>(s: &'a Self::Sugar, f: &mut F);
 
     #[doc(hidden)]
-    fn each_arm_child<F: FnMut(&S<Expr<Self>>)>(a: &Self::Arm, f: &mut F);
+    fn each_arm_child<'a, F: FnMut(&'a S<Expr<Self>>)>(a: &'a Self::Arm, f: &mut F);
 
     #[doc(hidden)]
     fn each_sugar_child_mut<F: FnMut(&mut S<Expr<Self>>)>(s: &mut Self::Sugar, f: &mut F);
@@ -1213,7 +1252,7 @@ impl Phase for Surface {
     type Arm = SugarArm<Self>;
     type Marker = Marker;
 
-    fn each_sugar_child<F: FnMut(&S<Expr<Self>>)>(s: &Self::Sugar, f: &mut F) {
+    fn each_sugar_child<'a, F: FnMut(&'a S<Expr<Self>>)>(s: &'a Self::Sugar, f: &mut F) {
         match s {
             Sugar::NamedHandle(_, body, arms) => {
                 f(body);
@@ -1286,7 +1325,7 @@ impl Phase for Surface {
         }
     }
 
-    fn each_arm_child<F: FnMut(&S<Expr<Self>>)>(a: &Self::Arm, f: &mut F) {
+    fn each_arm_child<'a, F: FnMut(&'a S<Expr<Self>>)>(a: &'a Self::Arm, f: &mut F) {
         match a {
             SugarArm::Once(_, _, body) | SugarArm::Val(_, body) | SugarArm::Never(_, _, body) => {
                 f(body);
@@ -1384,7 +1423,7 @@ impl Phase for Core {
         clippy::uninhabited_references,
         reason = "a `&Never` cannot be constructed; the empty match documents vacuity"
     )]
-    fn each_sugar_child<F: FnMut(&S<Expr<Self>>)>(s: &Self::Sugar, _f: &mut F) {
+    fn each_sugar_child<'a, F: FnMut(&'a S<Expr<Self>>)>(s: &'a Self::Sugar, _f: &mut F) {
         match *s {}
     }
 
@@ -1392,7 +1431,7 @@ impl Phase for Core {
         clippy::uninhabited_references,
         reason = "a `&Never` cannot be constructed; the empty match documents vacuity"
     )]
-    fn each_arm_child<F: FnMut(&S<Expr<Self>>)>(a: &Self::Arm, _f: &mut F) {
+    fn each_arm_child<'a, F: FnMut(&'a S<Expr<Self>>)>(a: &'a Self::Arm, _f: &mut F) {
         match *a {}
     }
 
@@ -1446,7 +1485,7 @@ pub enum HandlerMode {
 }
 
 impl<P: Phase> HandlerArm<P> {
-    pub fn each_child(&self, f: &mut impl FnMut(&S<Expr<P>>)) {
+    pub fn each_child<'a>(&'a self, f: &mut impl FnMut(&'a S<Expr<P>>)) {
         match self {
             Self::Return(_, body) | Self::Op(_, _, _, body) => f(body),
             Self::Sugar(a) => P::each_arm_child(a, f),
@@ -1678,7 +1717,7 @@ impl<P: Phase> Expr<P> {
     /// walkers that recurse through it cannot silently drop a new expression
     /// variant, and adding a variant forces an update here rather than a quiet
     /// miss at every hand-written `match`.
-    pub fn each_child(&self, f: &mut impl FnMut(&S<Self>)) {
+    pub fn each_child<'a>(&'a self, f: &mut impl FnMut(&'a S<Self>)) {
         match self {
             Self::Bin(_, a, b) | Self::Let(_, a, b) | Self::Pipe(a, b) | Self::Index(a, b) => {
                 f(a);
@@ -1839,6 +1878,65 @@ impl<P: Phase> Expr<P> {
     }
 }
 
+/// The deepest expression nesting under `root`, the root counting as one level.
+///
+/// The walk is an explicit worklist, so measuring a hostile tree is never
+/// itself a stack hazard, and children come from [`Expr::each_child`], so a new
+/// variant cannot be silently missed. This is the depth figure the driver's
+/// phase rows quote for the surface and core trees.
+#[must_use]
+pub fn expr_depth<P: Phase>(root: &S<Expr<P>>) -> usize {
+    let mut deepest = 0;
+    let mut work = vec![(root, 1_usize)];
+    while let Some((expr, depth)) = work.pop() {
+        deepest = deepest.max(depth);
+        expr.node
+            .each_child(&mut |child| work.push((child, depth + 1)));
+    }
+    deepest
+}
+
+/// The deepest expression nesting in any declaration of `program`.
+///
+/// Covers function and logic-function bodies with their `where` and contract
+/// clauses, instance methods, and pattern-synonym views. Zero for a program
+/// with no expressions.
+#[must_use]
+pub fn program_depth<P: Phase>(program: &Program<P>) -> usize {
+    let decl_depth = |decl: &Decl<P>| {
+        let mut deepest = expr_depth(&decl.body);
+        for (_, body) in &decl.wheres {
+            deepest = deepest.max(expr_depth(body));
+        }
+        for clause in &decl.requires {
+            deepest = deepest.max(expr_depth(clause));
+        }
+        for (_, clause) in &decl.ensures {
+            deepest = deepest.max(expr_depth(clause));
+        }
+        if let Some(measure) = &decl.decreases {
+            deepest = deepest.max(expr_depth(measure));
+        }
+        deepest
+    };
+    let mut deepest = 0;
+    for decl in program.fns.iter().chain(&program.logic_fns) {
+        deepest = deepest.max(decl_depth(decl));
+    }
+    for instance in &program.instances {
+        for method in &instance.methods {
+            deepest = deepest.max(decl_depth(method));
+        }
+    }
+    for pattern in &program.patterns {
+        deepest = deepest.max(expr_depth(&pattern.view));
+        if let Some(make) = &pattern.make {
+            deepest = deepest.max(expr_depth(make));
+        }
+    }
+    deepest
+}
+
 // Parse-time markers stuffed into the expression tree, all removed by desugar.
 // `With` is a standalone placeholder for a trailing `with` (rejected). `Try`
 // and `Interp` are call heads: `Try` marks `e?`, `Interp` marks an interpolated
@@ -1859,7 +1957,7 @@ pub enum Qualifier<P: Phase = Surface> {
 }
 
 impl<P: Phase> Qualifier<P> {
-    pub fn each_child(&self, f: &mut impl FnMut(&S<Expr<P>>)) {
+    pub fn each_child<'a>(&'a self, f: &mut impl FnMut(&'a S<Expr<P>>)) {
         match self {
             Self::Guard(e) | Self::Bind(_, e) => f(e),
         }

@@ -98,11 +98,6 @@ parser-baseline *ARGS:
 parser-corpus COMMAND="check" *ARGS:
     ./scripts/parser-compaction-corpus.py {{ COMMAND }} --oracle 46886c1fa7064e4809020c1b788b3ee3531d6a63 {{ ARGS }}
 
-# Validate the parser production manifest.
-[group('generated artifacts')]
-parser-production-manifest COMMAND="check":
-    ./scripts/parser-production-manifest.py {{ COMMAND }}
-
 # Regenerate Core and lowering dumps used by the book.
 [group('docs')]
 docs-core:
@@ -135,6 +130,16 @@ fixtures: build
 [group('tests')]
 lean-fuzz: build
     python3 scripts/dev_tasks.py lean-fuzz
+
+# Reseat every golden family from one cold run and print a categorized diff.
+[group('generated artifacts')]
+accept:
+    python3 scripts/accept.py
+
+# Reselect the sentinel corpus the fast gate runs; pass `--check` to verify it.
+[group('generated artifacts')]
+sentinel *ARGS:
+    python3 scripts/sentinel_select.py {{ ARGS }}
 
 # Accept a reviewed effect-lowering tier manifest.
 [group('generated artifacts')]

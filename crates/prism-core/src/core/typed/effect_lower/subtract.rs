@@ -13,7 +13,7 @@ use crate::types::ty::EffRow;
 use prism_common::sym::Sym;
 
 use super::super::specialize_support::Rewrite;
-use super::super::{CompSig, CoreFnSig, CoreInstantiation, CoreType, LoweredType};
+use super::super::{CompSig, CoreFnSig, CoreInstantiation, CoreType, LoweredType, TypedCoreFn};
 
 pub(crate) fn subtract_row(row: &EffRow, label: Sym) -> EffRow {
     // Rows are multisets: `mask` adds one copy of a label, so discharging one
@@ -76,6 +76,10 @@ impl SubtractEffect {
 
 impl Rewrite for SubtractEffect {
     type Ctx = ();
+
+    fn function(&mut self, function: &TypedCoreFn, cx: &Self::Ctx) -> TypedCoreFn {
+        self.rewrite_function_from_hooks(function, cx)
+    }
 
     fn fn_sig(&mut self, sig: &CoreFnSig, (): &()) -> CoreFnSig {
         CoreFnSig::new(

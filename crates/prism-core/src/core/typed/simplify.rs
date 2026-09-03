@@ -1,18 +1,24 @@
 //! The gentle simplifier for typed Core: fixed-point local rewrites that
 //! preserve every result/effect witness through each reduction.
 //!
-//! The rule set is case-of-known-constructor, trivial copy-propagation,
-//! dead-let elimination, constant folding, used-once-thunk inlining, and
-//! bounded case-of-case. Typed Core adds representation transparency: a
+//! The rule set is case-of-known-constructor (including an unconditionally
+//! matching first arm and a scrutinee an enclosing arm refined), trivial
+//! copy-propagation, dead-let elimination, constant folding, branch
+//! selection and refinement on `if`, projection from a known unboxed record,
+//! used-once-thunk inlining, and bounded case-of-case. Typed Core adds representation transparency: a
 //! [`TypedValueKind::Reinterpret`], [`TypedValueKind::LoweredRepr`], or
 //! [`TypedValueKind::NewtypeRepr`] wrapper still surrounds its inner value at
 //! this phase (it erases away only at [`TypedCore::erase`]). Every
 //! classification decision below therefore looks through such a wrapper via
-//! [`peel`] before deciding whether a value is known, trivial, or
+//! [`peel`] before deciding whether a value is known, copyable, or
 //! pattern-matchable, while every rewrite still carries forward the original
 //! (possibly wrapped) value unchanged.
+//!
+//! Value classification and the binder environment live in the shared
+//! optimizer fact domain (`facts`); this pass owns only the rewrites that
+//! consume those facts.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use crate::core::builtins::Builtin;
 use crate::core::CoreOp;
@@ -20,11 +26,12 @@ use crate::types::ty::EffRow;
 use prism_common::sym::Sym;
 use prism_syntax::error::TypedCoreSimplifyFailure;
 
+use super::facts::{classify, discriminable, peel, FactEnv, FactKind, RefinedCtor};
 use super::specialize_support::{free_comp_vars, free_value_vars, Rewrite};
-use super::verify::instantiate_value_scheme;
+use super::verify::{instantiate_value_scheme, union_rows};
 use super::{
-    CompSig, TypedBinder, TypedComp, TypedCompKind, TypedHandleOp, TypedHandler, TypedPattern,
-    TypedValue, TypedValueKind, UncheckedTypedCore,
+    on_core_stack, CompSig, TypedBinder, TypedComp, TypedCompKind, TypedHandleOp, TypedHandler,
+    TypedPattern, TypedValue, TypedValueKind, UncheckedTypedCore,
 };
 
 // A runaway guard: a correct fixed point converges far below this, so exceeding
@@ -53,6 +60,12 @@ impl SimplifyStats {
 pub fn simplify<P>(
     core: UncheckedTypedCore<P>,
 ) -> Result<(UncheckedTypedCore<P>, SimplifyStats), TypedCoreSimplifyFailure> {
+    on_core_stack(|| simplify_on_core_stack(core))
+}
+
+fn simplify_on_core_stack<P>(
+    core: UncheckedTypedCore<P>,
+) -> Result<(UncheckedTypedCore<P>, SimplifyStats), TypedCoreSimplifyFailure> {
     let mut current = core;
     let mut total = 0u64;
     loop {
@@ -75,70 +88,11 @@ pub fn simplify<P>(
     Ok((current, SimplifyStats { ticks: total }))
 }
 
-// Maps a let binder to the value it is known to hold, for the region where
-// that is still true.
-type Env = BTreeMap<Sym, TypedValue>;
+// The binder facts live for the region where they are still true.
+type Env = FactEnv;
 
 struct Simplifier {
     ticks: u64,
-}
-
-// Look through representation-only wrappers to classify the value they carry.
-// Every caller keeps the original (wrapped) `TypedValue` for reconstruction;
-// only classification consults the peeled shape.
-fn peel(value: &TypedValue) -> &TypedValue {
-    match &value.kind {
-        TypedValueKind::Reinterpret(inner)
-        | TypedValueKind::LoweredRepr {
-            value: inner,
-            proof: _,
-        }
-        | TypedValueKind::NewtypeRepr { value: inner, .. } => peel(inner),
-        _ => value,
-    }
-}
-
-// A value worth remembering for a binder: a constructor or tuple (enables
-// case-of-known-constructor) or a trivial value (enables copy-propagation). A
-// thunk is not tracked, since inlining it could duplicate work.
-fn known(v: &TypedValue) -> bool {
-    matches!(
-        peel(v).kind,
-        TypedValueKind::Ctor { .. } | TypedValueKind::Tuple(_) | TypedValueKind::UnboxedTuple(_)
-    ) || trivial(v)
-}
-
-// A value whose head PROVES what it can and cannot match: a constructor,
-// tuple, or literal. A bare variable is deliberately not discriminable; its
-// runtime shape is unknown, so pattern mismatch against it is never a proof.
-fn discriminable(v: &TypedValue) -> bool {
-    matches!(
-        peel(v).kind,
-        TypedValueKind::Ctor { .. }
-            | TypedValueKind::Tuple(_)
-            | TypedValueKind::UnboxedTuple(_)
-            | TypedValueKind::Int(_)
-            | TypedValueKind::I64(_)
-            | TypedValueKind::U64(_)
-            | TypedValueKind::Float(_)
-            | TypedValueKind::Bool(_)
-            | TypedValueKind::Unit
-            | TypedValueKind::Str(_)
-    )
-}
-
-fn trivial(v: &TypedValue) -> bool {
-    matches!(
-        peel(v).kind,
-        TypedValueKind::Var { .. }
-            | TypedValueKind::Int(_)
-            | TypedValueKind::I64(_)
-            | TypedValueKind::U64(_)
-            | TypedValueKind::Float(_)
-            | TypedValueKind::Bool(_)
-            | TypedValueKind::Unit
-            | TypedValueKind::Str(_)
-    )
 }
 
 // Rebuild a remembered trivial alias at one local occurrence. A higher-rank
@@ -181,19 +135,6 @@ fn alias_at(alias: &TypedValue, occurrence: &TypedValue) -> Option<TypedValue> {
     })
 }
 
-// Drop env entries a binder invalidates: those whose key it shadows, and those
-// whose remembered value mentions a shadowed name (inlining which would capture).
-fn narrow(env: &Env, bs: &[Sym]) -> Env {
-    if bs.is_empty() {
-        return env.clone();
-    }
-    let set: BTreeSet<Sym> = bs.iter().copied().collect();
-    env.iter()
-        .filter(|(k, v)| !set.contains(k) && free_value_vars(v).is_disjoint(&set))
-        .map(|(k, v)| (*k, v.clone()))
-        .collect()
-}
-
 fn pattern_binder_names(pattern: &TypedPattern) -> Vec<Sym> {
     match pattern {
         TypedPattern::Wild => Vec::new(),
@@ -230,23 +171,6 @@ fn pat_match(pat: &TypedPattern, kv: &TypedValue) -> Option<Vec<(TypedBinder, Ty
             TypedPattern::Tuple(fields),
             TypedValueKind::Tuple(vfields) | TypedValueKind::UnboxedTuple(vfields),
         ) if fields.len() == vfields.len() => Some(fields_binds(fields, vfields)),
-        _ => None,
-    }
-}
-
-// Resolve a scrutinee to a known constructor/tuple/literal, through one env
-// hop. A variable bound to another variable is not chased here; copy-prop
-// rewrites it first.
-fn resolve(scrut: &TypedValue, env: &Env) -> Option<TypedValue> {
-    match &peel(scrut).kind {
-        TypedValueKind::Ctor { .. }
-        | TypedValueKind::Tuple(_)
-        | TypedValueKind::UnboxedTuple(_) => Some(scrut.clone()),
-        TypedValueKind::Var { name, .. } => match env.get(name) {
-            Some(v) if !matches!(&peel(v).kind, TypedValueKind::Var { .. }) => Some(v.clone()),
-            _ => None,
-        },
-        _ if trivial(scrut) => Some(scrut.clone()),
         _ => None,
     }
 }
@@ -359,6 +283,28 @@ fn const_fold_str_builtin(op: Builtin, args: &[TypedValue]) -> Option<TypedValue
     }
 }
 
+// The stored effect row of a branching computation is derived data: the
+// verifier demands it EQUAL the canonical union of its branch rows, while a
+// collapse inside one branch may legitimately narrow that branch (a selected
+// arm carries only its own effects). Recompute the union from the rebuilt
+// branches so the stamp stays the derivation rather than a stale clone. A
+// pair the canonical union cannot combine keeps the original stamp and
+// leaves the judgment to the verifier.
+fn branch_row<'a>(original: &EffRow, branches: impl IntoIterator<Item = &'a TypedComp>) -> EffRow {
+    let mut branches = branches.into_iter();
+    let Some(first) = branches.next() else {
+        return original.clone();
+    };
+    let mut row = first.sig.effects().clone();
+    for branch in branches {
+        match union_rows(&row, branch.sig.effects()) {
+            Ok(union) => row = union,
+            Err(_) => return original.clone(),
+        }
+    }
+    row
+}
+
 // The selected arm: bind each matched field with its declared type, then the
 // original body. `Return(v)` is always effect-`Empty`, so the verified
 // `Bind` sig-construction rule collapses to exactly `out`'s existing sig.
@@ -394,6 +340,68 @@ fn build_arm(binds: Vec<(TypedBinder, TypedValue)>, body: &TypedComp) -> TypedCo
         );
     }
     out
+}
+
+// The arm a constructor-refined scrutinee provably selects, built by
+// rebinding the enclosing arm's field binders (never by substituting a
+// fabricated constructor value). Scanning arms in order is sound here because
+// typed patterns have no literal form: a constructor arm with a different
+// name is a PROOF of mismatch, and a wildcard or variable arm matches
+// unconditionally. `None` when the proof is incomplete: a needed field the
+// enclosing pattern left unbound, a field binder whose type differs from the
+// enclosing one's (a differing instantiation), a tuple pattern that cannot
+// co-occur with a refined constructor, or a rebinding that would misbind
+// under `build_arm`'s sequential lowering.
+fn select_refined(
+    refined: &RefinedCtor,
+    scrut: &TypedValue,
+    arms: &[(TypedPattern, TypedComp)],
+) -> Option<TypedComp> {
+    for (pat, body) in arms {
+        match pat {
+            TypedPattern::Wild => return Some(body.clone()),
+            TypedPattern::Var(binder) => {
+                return Some(build_arm(vec![(binder.clone(), scrut.clone())], body));
+            }
+            TypedPattern::Ctor { name, fields, .. } if *name == refined.name => {
+                if fields.len() != refined.fields.len() {
+                    return None;
+                }
+                let mut binds = Vec::new();
+                for (inner, outer) in fields.iter().zip(&refined.fields) {
+                    let Some(inner) = inner else { continue };
+                    let outer = outer.as_ref()?;
+                    if inner.ty() != outer.ty() {
+                        return None;
+                    }
+                    binds.push((
+                        inner.clone(),
+                        TypedValue::new(
+                            outer.ty().clone(),
+                            TypedValueKind::Var {
+                                name: outer.name(),
+                                instantiation: Vec::new(),
+                            },
+                        ),
+                    ));
+                }
+                // Decline (rather than let `build_arm` assert) if hygiene
+                // ever produced an inner binder spelled like an enclosing
+                // field binder; the sequential lowering would misbind it.
+                let group: BTreeSet<Sym> = binds.iter().map(|(binder, _)| binder.name()).collect();
+                if binds
+                    .iter()
+                    .any(|(_, value)| !free_value_vars(value).is_disjoint(&group))
+                {
+                    return None;
+                }
+                return Some(build_arm(binds, body));
+            }
+            TypedPattern::Ctor { .. } => {}
+            TypedPattern::Tuple(_) => return None,
+        }
+    }
+    None
 }
 
 // The node budget a case-of-case continuation may have. The bound is what
@@ -495,7 +503,7 @@ impl Cont<'_> {
 // case-of-case scrutinee must have.
 fn ret_known(c: &TypedComp) -> Option<TypedValue> {
     if let TypedCompKind::Return(v) = &c.kind {
-        known(v).then(|| v.clone())
+        classify(v).is_some().then(|| v.clone())
     } else {
         None
     }
@@ -533,16 +541,18 @@ fn case_of_case(x: &TypedBinder, rhs: &TypedComp, body: &TypedComp) -> Option<Ty
                 }
                 out.push((pat.clone(), cont.select(&ret_known(abody)?)?));
             }
+            let row = branch_row(body.sig.effects(), out.iter().map(|(_, arm)| arm));
             Some(TypedComp::new(
-                body.sig.clone(),
+                CompSig::new(body.sig.result.clone(), row),
                 TypedCompKind::Case(scrut.clone(), out),
             ))
         }
         TypedCompKind::If(scrut, t, e) => {
             let tb = cont.select(&ret_known(t)?)?;
             let eb = cont.select(&ret_known(e)?)?;
+            let row = branch_row(body.sig.effects(), [&tb, &eb]);
             Some(TypedComp::new(
-                body.sig.clone(),
+                CompSig::new(body.sig.result.clone(), row),
                 TypedCompKind::If(scrut.clone(), Box::new(tb), Box::new(eb)),
             ))
         }
@@ -555,28 +565,44 @@ impl Rewrite for Simplifier {
 
     fn value(&mut self, v: &TypedValue, env: &Env) -> TypedValue {
         if let TypedValueKind::Var { name, .. } = &v.kind {
-            if let Some(t) = env.get(name) {
-                if trivial(t) {
-                    if let Some(alias) = alias_at(t, v) {
+            if let Some(fact) = env.fact(*name) {
+                if matches!(fact.kind, FactKind::Constant | FactKind::Alias) {
+                    if let Some(alias) = alias_at(fact.value, v) {
                         self.ticks += 1;
                         return alias;
                     }
                 }
             }
         }
+        if let TypedValueKind::Thunk(body) = &v.kind {
+            // The thunk witness ties the value's stored type to the body's
+            // root sig exactly, so a rewrite that changes that sig (a
+            // collapse narrowing the root's row) would falsify the type of
+            // every binder naming this thunk. Keep such a body unrewritten
+            // instead: failing closed on the rare root-narrowing rewrite
+            // beats restamping a type that has already propagated.
+            let ticks = self.ticks;
+            let body2 = self.comp(body, env);
+            if body2.sig == body.sig {
+                return TypedValue::new(v.ty.clone(), TypedValueKind::Thunk(Box::new(body2)));
+            }
+            self.ticks = ticks;
+            return v.clone();
+        }
         self.descend_value(v, env)
     }
 
     #[allow(clippy::too_many_lines)]
     fn comp(&mut self, comp: &TypedComp, env: &Env) -> TypedComp {
-        match &comp.kind {
+        // Bind spines recurse per node ahead of the shared descent; grow
+        // stack segments inside the recursion, same discipline as
+        // `descend_comp`.
+        on_core_stack(|| match &comp.kind {
             TypedCompKind::Bind(rhs, x, body) => {
                 let rhs2 = self.comp(rhs, env);
-                let mut benv = narrow(env, &[x.name]);
+                let mut benv = env.narrow(&[x.name]);
                 if let TypedCompKind::Return(v) = &rhs2.kind {
-                    if known(v) {
-                        benv.insert(x.name, v.clone());
-                    }
+                    benv.bind(x.name, v);
                 }
                 let body2 = self.comp(body, &benv);
                 // Case-of-case (terminating-by-construction): when `rhs` is a
@@ -624,13 +650,25 @@ impl Rewrite for Simplifier {
                 }
             }
             TypedCompKind::Case(scrut, arms) => {
+                // A first arm that matches unconditionally selects itself
+                // whatever the scrutinee holds; every later arm is
+                // unreachable. `pat_match` on a wildcard or variable pattern
+                // never fails, so this needs no shape knowledge at all.
+                if let Some((pat @ (TypedPattern::Wild | TypedPattern::Var(_)), body)) =
+                    arms.first()
+                {
+                    if let Some(binds) = pat_match(pat, scrut) {
+                        self.ticks += 1;
+                        return build_arm(binds, body);
+                    }
+                }
                 // The same soundness rule `Cont::select` carries: selecting an
                 // arm by scanning in order treats every earlier arm's failed
                 // match as a proof of mismatch, which only a discriminable
-                // head provides. `resolve` returns only such values today; the
-                // guard makes that obligation this rule's own rather than an
-                // invariant inherited from what the env happens to store.
-                if let Some(kv) = resolve(scrut, env).filter(discriminable) {
+                // head provides. `known_shape` returns only such values today;
+                // the guard makes that obligation this rule's own rather than
+                // an invariant inherited from what the env happens to store.
+                if let Some(kv) = env.known_shape(scrut).filter(discriminable) {
                     for (pat, body) in arms {
                         if let Some(binds) = pat_match(pat, &kv) {
                             self.ticks += 1; // case-of-known-constructor
@@ -638,19 +676,120 @@ impl Rewrite for Simplifier {
                         }
                     }
                 }
+                // A scrutinee an enclosing arm already refined collapses
+                // without a known value: the refinement proves the
+                // constructor, and the enclosing arm's field binders stand in
+                // for the fields.
+                if let TypedValueKind::Var { name, .. } = &peel(scrut).kind {
+                    if let Some(selected) = env
+                        .refinement(*name)
+                        .and_then(|refined| select_refined(refined, scrut, arms))
+                    {
+                        self.ticks += 1;
+                        return selected;
+                    }
+                }
                 let scrut2 = self.value(scrut, env);
-                let arms2 = arms
+                let arms2: Vec<(TypedPattern, TypedComp)> = arms
                     .iter()
                     .map(|(p, b)| {
-                        let e = narrow(env, &pattern_binder_names(p));
+                        let binders = pattern_binder_names(p);
+                        let mut e = env.narrow(&binders);
+                        // Inside a constructor arm the scrutinee variable is
+                        // provably that constructor with these field binders;
+                        // record the refinement for nested scrutinies of the
+                        // same variable.
+                        if let TypedPattern::Ctor {
+                            name: ctor, fields, ..
+                        } = p
+                        {
+                            if let TypedValueKind::Var { name, .. } = &peel(&scrut2).kind {
+                                if !binders.contains(name) {
+                                    e.refine_ctor(
+                                        *name,
+                                        RefinedCtor {
+                                            name: *ctor,
+                                            fields: fields.clone(),
+                                        },
+                                    );
+                                }
+                            }
+                        }
                         (p.clone(), self.comp(b, &e))
                     })
                     .collect();
-                TypedComp::new(comp.sig.clone(), TypedCompKind::Case(scrut2, arms2))
+                let row = branch_row(comp.sig.effects(), arms2.iter().map(|(_, body)| body));
+                TypedComp::new(
+                    CompSig::new(comp.sig.result.clone(), row),
+                    TypedCompKind::Case(scrut2, arms2),
+                )
+            }
+            TypedCompKind::If(scrut, t, e) => {
+                let scrut2 = self.value(scrut, env);
+                // A literal condition selects its branch outright. The
+                // condition is a value, so discarding the untaken branch
+                // drops no effect.
+                if let TypedValueKind::Bool(b) = &peel(&scrut2).kind {
+                    self.ticks += 1;
+                    return if *b { (**t).clone() } else { (**e).clone() };
+                }
+                // A bare monomorphic variable condition is provably `true` in
+                // the then branch and `false` in the else branch; recording
+                // that as a constant fact lets later uses and nested
+                // conditions on the same variable fold. A wrapped or
+                // instantiated occurrence declines: the fabricated literal
+                // would not carry the variable's own type.
+                let refined = |b: bool| {
+                    let mut branch_env = env.clone();
+                    if let TypedValueKind::Var {
+                        name,
+                        instantiation,
+                    } = &scrut2.kind
+                    {
+                        if instantiation.is_empty() {
+                            branch_env.bind(
+                                *name,
+                                &TypedValue::new(scrut2.ty.clone(), TypedValueKind::Bool(b)),
+                            );
+                        }
+                    }
+                    branch_env
+                };
+                let t2 = self.comp(t, &refined(true));
+                let e2 = self.comp(e, &refined(false));
+                let row = branch_row(comp.sig.effects(), [&t2, &e2]);
+                TypedComp::new(
+                    CompSig::new(comp.sig.result.clone(), row),
+                    TypedCompKind::If(scrut2, Box::new(t2), Box::new(e2)),
+                )
+            }
+            TypedCompKind::UnboxedProject(value, field) => {
+                let value2 = self.value(value, env);
+                // Projecting from a record whose construction is in view
+                // returns the stored field value directly. The type guard
+                // declines a projection whose result type differs from the
+                // stored field's (a differing instantiation), failing closed.
+                if let Some(kv) = env.known_shape(&value2) {
+                    if let TypedValueKind::UnboxedRecord(fields) = &peel(&kv).kind {
+                        if let Some((_, fv)) = fields.iter().find(|(name, _)| name == field) {
+                            if fv.ty == comp.sig.result {
+                                self.ticks += 1;
+                                return TypedComp::new(
+                                    comp.sig.clone(),
+                                    TypedCompKind::Return(fv.clone()),
+                                );
+                            }
+                        }
+                    }
+                }
+                TypedComp::new(
+                    comp.sig.clone(),
+                    TypedCompKind::UnboxedProject(value2, *field),
+                )
             }
             TypedCompKind::Lam(ps, b) => {
                 let names: Vec<Sym> = ps.iter().map(|p| p.name).collect();
-                let e = narrow(env, &names);
+                let e = env.narrow(&names);
                 TypedComp::new(
                     comp.sig.clone(),
                     TypedCompKind::Lam(ps.clone(), Box::new(self.comp(b, &e))),
@@ -665,7 +804,7 @@ impl Rewrite for Simplifier {
                 let body2 = Box::new(self.comp(body, env));
                 let return_body2 = return_body.as_ref().map(|b| {
                     let names: Vec<Sym> = return_binder.iter().map(|rb| rb.name).collect();
-                    let e = narrow(env, &names);
+                    let e = env.narrow(&names);
                     Box::new(self.comp(b, &e))
                 });
                 let ops2 = TypedHandler {
@@ -675,7 +814,7 @@ impl Rewrite for Simplifier {
                         .map(|o| {
                             let mut bs: Vec<Sym> = o.params.iter().map(|p| p.name).collect();
                             bs.push(o.resume.name);
-                            let e = narrow(env, &bs);
+                            let e = env.narrow(&bs);
                             TypedHandleOp {
                                 name: o.name,
                                 instantiation: o.instantiation.clone(),
@@ -699,13 +838,17 @@ impl Rewrite for Simplifier {
             }
             TypedCompKind::WithReuse { token, freed, body } => {
                 let freed2 = self.value(freed, env);
-                let e = narrow(env, &[token.name]);
+                let e = env.narrow(&[token.name]);
+                let body2 = Box::new(self.comp(body, &e));
+                // The stored sig here is derived data: the verifier demands
+                // it EQUAL the body's, which a collapse inside the body may
+                // have narrowed. Restamp from the rebuilt body.
                 TypedComp::new(
-                    comp.sig.clone(),
+                    body2.sig.clone(),
                     TypedCompKind::WithReuse {
                         token: token.clone(),
                         freed: freed2,
-                        body: Box::new(self.comp(body, &e)),
+                        body: body2,
                     },
                 )
             }
@@ -749,7 +892,7 @@ impl Rewrite for Simplifier {
                 }
             }
             _ => self.descend_comp(comp, env),
-        }
+        })
     }
 }
 
@@ -764,10 +907,10 @@ mod tests {
     use crate::types::Type;
 
     use super::super::effect_lower::lower_effects;
-    use super::super::verify::{OperationSig, VerifyEnv};
+    use super::super::verify::{ConstructorSig, OperationSig, VerifyEnv};
     use super::super::{
         verify, CoreFnSig, CoreQuantifier, CoreType, EffectLowered, Elaborated, TypedCore,
-        TypedCoreFn, TypedLowering, UncheckedTypedCore,
+        TypedCoreFn, UncheckedTypedCore,
     };
     use super::*;
 
@@ -865,18 +1008,13 @@ mod tests {
             quiet: true,
             ..DynFlags::default()
         };
-        let TypedLowering {
-            core: lowered,
-            env,
-            ctors,
-            warning: _,
-            strategy,
-            confined_decline: _,
-        } = lower_effects(input, &env, &BTreeMap::new(), &flags, &OpGrades::new())
+        let lowering = lower_effects(input, &env, &BTreeMap::new(), &flags, &OpGrades::new())
             .expect("fixture lowers through the production effect ABI");
-        assert_eq!(strategy, EffectStrategy::SelectiveFreeMonad);
-        assert!(ctors.contains_key("EPure"));
-        assert!(ctors.contains_key("EOp"));
+        assert_eq!(lowering.strategy(), EffectStrategy::SelectiveFreeMonad);
+        assert!(lowering.constructors().contains_key("EPure"));
+        assert!(lowering.constructors().contains_key("EOp"));
+        let env = lowering.env().clone();
+        let lowered = lowering.core().clone();
         assert!(
             crate::core::pretty::pp_core(&lowered.clone().erase()).contains("EOp"),
             "the production-origin fixture must contain a reified operation"
@@ -1040,16 +1178,11 @@ mod tests {
         let mut env = VerifyEnv::new();
         env.insert_constructor(
             sym("Some"),
-            super::super::verify::ConstructorSig::new(
-                Vec::new(),
-                0,
-                vec![source(Type::Int)],
-                source(Type::Int),
-            ),
+            ConstructorSig::new(Vec::new(), 0, vec![source(Type::Int)], source(Type::Int)),
         );
         env.insert_constructor(
             sym("None"),
-            super::super::verify::ConstructorSig::new(Vec::new(), 1, Vec::new(), source(Type::Int)),
+            ConstructorSig::new(Vec::new(), 1, Vec::new(), source(Type::Int)),
         );
         let some_v = TypedValue::new(
             source(Type::Int),
@@ -1565,12 +1698,7 @@ mod tests {
         let mut env = VerifyEnv::new();
         env.insert_constructor(
             sym("Some"),
-            super::super::verify::ConstructorSig::new(
-                Vec::new(),
-                0,
-                vec![source(Type::Int)],
-                source(Type::Int),
-            ),
+            ConstructorSig::new(Vec::new(), 0, vec![source(Type::Int)], source(Type::Int)),
         );
         let folded_prim = TypedComp::new(
             pure(source(Type::Int)),
@@ -1686,6 +1814,192 @@ mod tests {
                 (b, var("a", source(Type::Int))),
             ],
             &body,
+        );
+    }
+
+    fn boolean(b: bool) -> TypedValue {
+        TypedValue::new(source(Type::Bool), TypedValueKind::Bool(b))
+    }
+
+    // `let c = true in if c then 1 else 2` selects the then branch outright:
+    // copy-propagation makes the condition literal, and the literal condition
+    // discards the untaken branch.
+    #[test]
+    fn if_of_known_bool_selects_the_branch() {
+        let env = VerifyEnv::new();
+        let body = TypedComp::new(
+            pure(source(Type::Int)),
+            TypedCompKind::Bind(
+                Box::new(ret(boolean(true))),
+                TypedBinder::new(sym("c"), source(Type::Bool)),
+                Box::new(TypedComp::new(
+                    pure(source(Type::Int)),
+                    TypedCompKind::If(
+                        var("c", source(Type::Bool)),
+                        Box::new(ret(int(1))),
+                        Box::new(ret(int(2))),
+                    ),
+                )),
+            ),
+        );
+        let (actual, _) = run_simplify(one_fn(body), &env);
+        assert_eq!(
+            actual.functions()[0].body().kind(),
+            &TypedCompKind::Return(int(1))
+        );
+    }
+
+    // `if c then (if c then 1 else 2) else 3` folds the nested condition:
+    // inside the then branch `c` is provably `true`, so the inner `if`
+    // collapses to its then branch.
+    #[test]
+    fn branch_refinement_folds_a_nested_condition() {
+        let env = VerifyEnv::new();
+        let inner = TypedComp::new(
+            pure(source(Type::Int)),
+            TypedCompKind::If(
+                var("c", source(Type::Bool)),
+                Box::new(ret(int(1))),
+                Box::new(ret(int(2))),
+            ),
+        );
+        let body = TypedComp::new(
+            pure(source(Type::Int)),
+            TypedCompKind::If(
+                var("c", source(Type::Bool)),
+                Box::new(inner),
+                Box::new(ret(int(3))),
+            ),
+        );
+        let functions = vec![TypedCoreFn::new(
+            sym("f"),
+            vec![TypedBinder::new(sym("c"), source(Type::Bool))],
+            body.clone(),
+            CoreFnSig::new(Vec::new(), vec![source(Type::Bool)], body.sig),
+            0,
+        )];
+        let (actual, _) = run_simplify(functions, &env);
+        let TypedCompKind::If(_, then_branch, else_branch) = actual.functions()[0].body().kind()
+        else {
+            panic!("the outer conditional on the unknown parameter survives");
+        };
+        assert_eq!(then_branch.kind(), &TypedCompKind::Return(int(1)));
+        assert_eq!(else_branch.kind(), &TypedCompKind::Return(int(3)));
+    }
+
+    // `match s { y => y }` selects the variable arm without any shape
+    // knowledge: a first arm that matches unconditionally makes every later
+    // arm unreachable and the match itself a rebinding.
+    #[test]
+    fn unconditional_first_arm_selects_immediately() {
+        let env = VerifyEnv::new();
+        let body = TypedComp::new(
+            pure(source(Type::Int)),
+            TypedCompKind::Case(
+                var("s", source(Type::Int)),
+                vec![(
+                    TypedPattern::Var(TypedBinder::new(sym("y"), source(Type::Int))),
+                    ret(var("y", source(Type::Int))),
+                )],
+            ),
+        );
+        let functions = vec![TypedCoreFn::new(
+            sym("f"),
+            vec![TypedBinder::new(sym("s"), source(Type::Int))],
+            body.clone(),
+            CoreFnSig::new(Vec::new(), vec![source(Type::Int)], body.sig),
+            0,
+        )];
+        let (actual, _) = run_simplify(functions, &env);
+        assert_eq!(
+            actual.functions()[0].body().kind(),
+            &TypedCompKind::Return(var("s", source(Type::Int)))
+        );
+    }
+
+    // A rematch of a scrutinee inside its own constructor arm collapses via
+    // the recorded refinement: the inner `match s` rebinds the outer arm's
+    // field binder instead of re-discriminating.
+    #[test]
+    fn refined_scrutinee_collapses_a_nested_rematch() {
+        let mut env = VerifyEnv::new();
+        env.insert_constructor(
+            sym("Some"),
+            ConstructorSig::new(Vec::new(), 0, vec![source(Type::Int)], source(Type::Int)),
+        );
+        env.insert_constructor(
+            sym("None"),
+            ConstructorSig::new(Vec::new(), 1, Vec::new(), source(Type::Int)),
+        );
+        let some_pat = |binder: &str| TypedPattern::Ctor {
+            name: sym("Some"),
+            instantiation: Vec::new(),
+            fields: vec![Some(TypedBinder::new(sym(binder), source(Type::Int)))],
+        };
+        let none_pat = TypedPattern::Ctor {
+            name: sym("None"),
+            instantiation: Vec::new(),
+            fields: Vec::new(),
+        };
+        let inner = TypedComp::new(
+            pure(source(Type::Int)),
+            TypedCompKind::Case(
+                var("s", source(Type::Int)),
+                vec![
+                    (some_pat("b"), ret(var("b", source(Type::Int)))),
+                    (none_pat.clone(), ret(int(0))),
+                ],
+            ),
+        );
+        let body = TypedComp::new(
+            pure(source(Type::Int)),
+            TypedCompKind::Case(
+                var("s", source(Type::Int)),
+                vec![(some_pat("a"), inner), (none_pat, ret(int(1)))],
+            ),
+        );
+        let functions = vec![TypedCoreFn::new(
+            sym("f"),
+            vec![TypedBinder::new(sym("s"), source(Type::Int))],
+            body.clone(),
+            CoreFnSig::new(Vec::new(), vec![source(Type::Int)], body.sig),
+            0,
+        )];
+        let (actual, _) = run_simplify(functions, &env);
+        let TypedCompKind::Case(_, arms) = actual.functions()[0].body().kind() else {
+            panic!("the outer match on the unknown parameter survives");
+        };
+        assert_eq!(
+            arms[0].1.kind(),
+            &TypedCompKind::Return(var("a", source(Type::Int)))
+        );
+    }
+
+    // `let r = (x = 7) in r.x` returns the stored field: projection from a
+    // record whose construction is in view needs no runtime load.
+    #[test]
+    fn projection_of_known_record_returns_the_field() {
+        let env = VerifyEnv::new();
+        let record_ty = source(Type::UnboxedRecord(vec![(sym("x"), Type::Int)]));
+        let record = TypedValue::new(
+            record_ty.clone(),
+            TypedValueKind::UnboxedRecord(vec![(sym("x"), int(7))]),
+        );
+        let body = TypedComp::new(
+            pure(source(Type::Int)),
+            TypedCompKind::Bind(
+                Box::new(ret(record)),
+                TypedBinder::new(sym("r"), record_ty.clone()),
+                Box::new(TypedComp::new(
+                    pure(source(Type::Int)),
+                    TypedCompKind::UnboxedProject(var("r", record_ty), sym("x")),
+                )),
+            ),
+        );
+        let (actual, _) = run_simplify(one_fn(body), &env);
+        assert_eq!(
+            actual.functions()[0].body().kind(),
+            &TypedCompKind::Return(int(7))
         );
     }
 }

@@ -143,6 +143,21 @@ impl RungExclude {
         self.0[Self::index(rung)]
     }
 
+    /// Canonical ladder-ordered spelling for artifact identity.
+    ///
+    /// Parsing accepts either commas or whitespace and ignores duplicates;
+    /// rendering always emits one comma-separated label per effective exclusion.
+    #[must_use]
+    pub fn label(self) -> String {
+        EFFECT_TIERS
+            .iter()
+            .copied()
+            .filter(|rung| self.excludes(*rung))
+            .map(EffectStrategy::label)
+            .collect::<Vec<_>>()
+            .join(",")
+    }
+
     /// Parse a `PRISM_EFFECT_EXCLUDE` list: strategy [`label`](EffectStrategy::label)
     /// spellings separated by commas or whitespace (`state-fusion, local-partial`).
     /// An empty or unset value excludes nothing. A token that names no rung, or
@@ -167,6 +182,89 @@ impl RungExclude {
             }
         }
         Self(set)
+    }
+}
+
+/// The complete behavior and diagnostic policy observable by typed effect
+/// lowering.
+///
+/// Fields are private so adding an unrelated compiler flag never makes it
+/// reachable from a lowering pass. The driver projects this value once after
+/// CLI/environment precedence has been resolved.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// These are independent lowering switches, not states of one machine.
+#[allow(clippy::struct_excessive_bools)]
+pub struct EffectLowerOptions {
+    native_effects: bool,
+    trampoline: bool,
+    quiet: bool,
+    tier: EffectTier,
+    excluded: RungExclude,
+    erasures: bool,
+}
+
+impl Default for EffectLowerOptions {
+    fn default() -> Self {
+        Self {
+            native_effects: true,
+            trampoline: true,
+            quiet: false,
+            tier: EffectTier::default(),
+            excluded: RungExclude::default(),
+            erasures: true,
+        }
+    }
+}
+
+impl EffectLowerOptions {
+    /// Whether native closed-handler lowering is enabled.
+    #[must_use]
+    pub const fn native_effects(self) -> bool {
+        self.native_effects
+    }
+
+    /// Whether whole-program monadic hops use the trampoline.
+    #[must_use]
+    pub const fn trampoline(self) -> bool {
+        self.trampoline
+    }
+
+    /// Whether diagnostic-only matcher-drift reports are suppressed.
+    #[must_use]
+    pub const fn quiet(self) -> bool {
+        self.quiet
+    }
+
+    /// Whether the normalized tier floor and exclusion set admit `rung`.
+    #[must_use]
+    pub fn rung_enabled(self, rung: EffectStrategy) -> bool {
+        self.tier.admits(rung) && !self.excluded.excludes(rung)
+    }
+
+    /// Whether local-var and loop-control erasure precede classification.
+    #[must_use]
+    pub const fn erasures(self) -> bool {
+        self.erasures
+    }
+
+    /// Return the same lowering policy with presentation noise suppressed.
+    #[must_use]
+    pub const fn silently(mut self) -> Self {
+        self.quiet = true;
+        self
+    }
+}
+
+impl From<&DynFlags> for EffectLowerOptions {
+    fn from(flags: &DynFlags) -> Self {
+        Self {
+            native_effects: flags.native_effects,
+            trampoline: flags.trampoline,
+            quiet: flags.quiet,
+            tier: flags.effect_tier,
+            excluded: flags.effect_exclude,
+            erasures: flags.erasures,
+        }
     }
 }
 
@@ -375,6 +473,13 @@ pub struct DynFlags {
     /// change to dictionary specialization or to higher-order specialization
     /// individually. Presence-flagged, resolved into `Config::disabled`.
     pub no_ho_spec: bool,
+    /// `PRISM_NO_EXACT_SIZE` (default off): turn off the `ExactSize` Core pass
+    /// (sized destination allocation for growable builder chains with a proven
+    /// element count). The pass is a pure cost decision, so on and off must be
+    /// observationally identical; this toggle is the lever the equivalence
+    /// sweep pulls to prove it. Presence-flagged, resolved into
+    /// `Config::disabled`.
+    pub no_exact_size: bool,
     /// `PRISM_FUSE` (default off): force the whole-program stream-fusion pass
     /// (`core/opt/fuse`) to run first in the pre-lowering stage, collapsing
     /// recognized pull-`Sequence` pipelines into allocation-free loops. Off by
@@ -506,6 +611,7 @@ impl Default for DynFlags {
             direct_object: false,
             no_specialize: false,
             no_ho_spec: false,
+            no_exact_size: false,
             fuse: false,
             borrow_infer: true,
             scheduler: Scheduler::default(),
@@ -581,6 +687,7 @@ impl DynFlags {
             direct_object: env_bool("PRISM_DIRECT_OBJECT", base.direct_object),
             no_specialize: base.no_specialize || env_present("PRISM_NO_SPECIALIZE"),
             no_ho_spec: base.no_ho_spec || env_present("PRISM_NO_HO_SPEC"),
+            no_exact_size: base.no_exact_size || env_present("PRISM_NO_EXACT_SIZE"),
             fuse: env_bool("PRISM_FUSE", base.fuse),
             borrow_infer: env_bool("PRISM_BORROW_INFER", base.borrow_infer),
             scheduler: env::var("PRISM_SCHEDULER")
@@ -659,6 +766,7 @@ impl DynFlags {
             "verbose" => self.verbose = toml_bool(key, val)?,
             "no-specialize" => self.no_specialize = toml_bool(key, val)?,
             "no-ho-spec" => self.no_ho_spec = toml_bool(key, val)?,
+            "no-exact-size" => self.no_exact_size = toml_bool(key, val)?,
             "fuse" => self.fuse = toml_bool(key, val)?,
             "borrow-infer" => self.borrow_infer = toml_bool(key, val)?,
             "compiler-cache" => self.compiler_cache = toml_bool(key, val)?,

@@ -14,10 +14,10 @@ fn effect_plan(full: &str, roots: &[Root], cfg: &Config) -> Result<String, Error
 
 fn forced(tier: EffectTier, erasures: bool) -> Config {
     let mut cfg = Config::from_env();
-    cfg.flags.effect_tier = tier;
-    cfg.flags.erasures = erasures;
-    cfg.flags.compiler_cache = false;
-    cfg.flags.quiet = true;
+    cfg.update_flags(|flags| flags.effect_tier = tier);
+    cfg.update_flags(|flags| flags.erasures = erasures);
+    cfg.update_flags(|flags| flags.compiler_cache = false);
+    cfg.update_flags(|flags| flags.quiet = true);
     cfg
 }
 
@@ -33,6 +33,10 @@ mod float_math_conformance;
 mod fuse_parity;
 #[path = "native/gate_cache_identity.rs"]
 mod gate_cache_identity;
+#[path = "native/net_parity.rs"]
+mod net_parity;
+#[path = "native/optimizer_baseline.rs"]
+mod optimizer_baseline;
 #[path = "native/parity.rs"]
 mod parity;
 #[path = "native/partial_handler_fuzz.rs"]

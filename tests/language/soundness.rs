@@ -430,6 +430,60 @@ fn once_delegation_to_many_context_is_rejected() {
     );
 }
 
+// `@ many` is the spelled form of the unrestricted default. It admits repeated
+// direct use, sits at the bottom of the multiplicity relation (a `@ many` value
+// fits a `@ once` slot, never the reverse), conflicts with `once` on the
+// multiplicity axis, and adds no runtime behavior.
+
+const MANY_REPEATED_USE: &str = r"fn use2(g : ((Int) -> Int) @ many, x : Int) : Int = g(x) + g(x + 1)
+fn main() = println(use2(\(n) -> n * 2, 3))
+";
+
+const MANY_INTO_ONCE_SLOT: &str = r"fn apply1(g : ((Int) -> Int) @ once, x : Int) : Int = g(x)
+fn f(g : ((Int) -> Int) @ many) : Int = apply1(g, 3)
+fn main() = println(f(\(n) -> n))
+";
+
+const ONCE_INTO_EXPLICIT_MANY_SLOT: &str = r"fn use2(g : ((Int) -> Int) @ many) : Int = g(1) + g(2)
+fn f(g : ((Int) -> Int) @ once) : Int = use2(g)
+fn main() = println(f(\(n) -> n))
+";
+
+const MANY_ON_NON_FUNCTION: &str = r"fn f(x : Int @ many) : Int = x
+fn main() = println(f(1))
+";
+
+#[test]
+fn explicit_many_admits_repeated_use_and_weakens_to_once() {
+    assert!(
+        prism::check(&prism::with_prelude(MANY_REPEATED_USE)).is_ok(),
+        "an explicitly `@ many` closure must admit repeated direct use"
+    );
+    assert!(
+        prism::check(&prism::with_prelude(MANY_INTO_ONCE_SLOT)).is_ok(),
+        "a `@ many` closure must fit a `@ once` slot"
+    );
+}
+
+#[test]
+fn once_into_explicit_many_slot_is_rejected() {
+    let err = prism::check(&prism::with_prelude(ONCE_INTO_EXPLICIT_MANY_SLOT))
+        .expect_err("handing a `@ once` closure to an explicit `@ many` slot must be rejected");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("`@ once`") && msg.contains("more than once"),
+        "delegation error must name the multiplicity contract, got: {msg}"
+    );
+}
+
+#[test]
+fn usage_row_on_non_function_type_is_rejected() {
+    assert_eq!(
+        once_code(MANY_ON_NON_FUNCTION, "@ many on a non-function type"),
+        "E6085"
+    );
+}
+
 // `@ portable` on a closure parameter is a mobility contract: the closure may
 // capture only names that travel to a fresh runtime (a top-level function or
 // constructor, another `@ portable` parameter, or a portable-typed parameter).
@@ -482,6 +536,90 @@ fn portable_rejects_nonportable_captures() {
     );
 }
 
+// A datatype-typed capture is judged by what the datatype holds, not by what its
+// name looks like: the arguments are substituted into the declaration and every
+// constructor field asked the same question. A wrapper takes no type arguments
+// and can still carry a closure, and a type whose definition is not visible here
+// (opaque, or declared elsewhere) carries no evidence at all, so both are
+// refused. Without this a nullary wrapper would carry any unportable value,
+// including a live resource handle, across the boundary.
+
+const PORTABLE_DATA_PARAM_OK: &str = "type Point = Point(Int, Int)\n\
+                                      fn run(f : (() -> Int) @ portable) : Int = f()\n\
+                                      fn fst(p : Point) : Int =\n  \
+                                      match p of\n    \
+                                      Point(x, _) => x\n\
+                                      fn mk(p : Point) : Int = run(\\() -> fst(p))\n\
+                                      fn main() = println(mk(Point(1, 2)))\n";
+
+const PORTABLE_RECURSIVE_DATA_OK: &str = "type Nums = Nil | Cons(Int, Nums)\n\
+                                          fn run(f : (() -> Int) @ portable) : Int = f()\n\
+                                          fn head(ns : Nums) : Int =\n  \
+                                          match ns of\n    \
+                                          Nil => 0\n    \
+                                          Cons(n, _) => n\n\
+                                          fn mk(ns : Nums) : Int = run(\\() -> head(ns))\n\
+                                          fn main() = println(mk(Cons(1, Nil)))\n";
+
+const PORTABLE_CAPTURE_WRAPPED_CLOSURE: &str = "type Box = Box(() -> Int)\n\
+                                                fn run(f : (() -> Int) @ portable) : Int = f()\n\
+                                                fn open(b : Box) : Int =\n  \
+                                                match b of\n    \
+                                                Box(g) => g()\n\
+                                                fn mk(b : Box) : Int = run(\\() -> open(b))\n\
+                                                fn main() = println(mk(Box(\\() -> 1)))\n";
+
+const PORTABLE_CAPTURE_OPAQUE: &str = "opaque newtype Tok = Tok(Int)\n\
+                                       fn run(f : (() -> Int) @ portable) : Int = f()\n\
+                                       fn open(t : Tok) : Int =\n  \
+                                       match t of\n    \
+                                       Tok(n) => n\n\
+                                       fn mk(t : Tok) : Int = run(\\() -> open(t))\n\
+                                       fn main() = println(mk(Tok(7)))\n";
+
+// The live-resource case the mobility boundary exists to refuse: a socket token
+// is an imported opaque type, so its representation is not evidence a caller may
+// use, and sealing a closure that holds one must not typecheck.
+const PORTABLE_CAPTURE_SOCKET: &str = "import Net (..)\n\
+     import Teleport (..)\n\
+     fn hold(s : Stream) : Unit ! {IO} = println(1)\n\
+     fn seal_it(s : Stream) : Result(Unit, MoveError) ! {Placement, IO | e} =\n\
+     \x20 teleport(\\() -> hold(s))\n\
+     fn main() : Unit ! {IO} =\n\
+     \x20 println(show(run_net(\\() ->\n\
+     \x20   run_here(\\() -> with_tcp_connection(\"127.0.0.1:9\", seal_it)))))\n";
+
+#[test]
+fn portable_admits_data_whose_fields_are_portable() {
+    assert!(
+        prism::check(&prism::with_prelude(PORTABLE_DATA_PARAM_OK)).is_ok(),
+        "a `@ portable` closure capturing a scalar datatype must check"
+    );
+    assert!(
+        prism::check(&prism::with_prelude(PORTABLE_RECURSIVE_DATA_OK)).is_ok(),
+        "a `@ portable` closure capturing a recursive scalar datatype must check"
+    );
+}
+
+#[test]
+fn portable_rejects_data_that_only_looks_portable() {
+    assert_eq!(
+        once_code(
+            PORTABLE_CAPTURE_WRAPPED_CLOSURE,
+            "portable captures a datatype holding a closure"
+        ),
+        "E6060"
+    );
+    assert_eq!(
+        once_code(PORTABLE_CAPTURE_OPAQUE, "portable captures an opaque value"),
+        "E6060"
+    );
+    assert_eq!(
+        once_code(PORTABLE_CAPTURE_SOCKET, "teleport a live socket token"),
+        "E6060"
+    );
+}
+
 #[test]
 fn teleport_once_portable_composes_both_contracts() {
     // `@ {once, portable}` enforces the multiplicity check too: two calls exceed
@@ -492,18 +630,19 @@ fn teleport_once_portable_composes_both_contracts() {
     );
 }
 
-// The stdlib `teleport` (Replay module) is the checked mobility boundary: its
+// The stdlib `teleport` (Teleport module) is the checked mobility boundary: its
 // `@ {once, portable}` parameter makes every call enforce the portability and
 // single-use contract on the closure handed to it. A closure that captures a
 // nonportable local is rejected (E6060) exactly as a hand-written `@ portable`
 // parameter would be.
 const STDLIB_TELEPORT_OK: &str = "import Teleport (..)\n\
-                                  fn work() : Int = 42\n\
-                                  fn main() = println(teleport(\\() -> work()))\n";
+                                  fn work() : Unit ! {IO} = println(42)\n\
+                                  fn main() = println(show(run_here(\\() -> teleport(work))))\n";
 
 const STDLIB_TELEPORT_NONPORTABLE: &str = "import Teleport (..)\n\
-                                           fn o(g : (Int) -> Int) : Int = teleport(\\() -> g(1))\n\
-                                           fn main() = println(o(\\(n) -> n))\n";
+     fn o(g : (Int) -> Int) : Result(Unit, MoveError) ! {Placement, IO | e} =\n\
+     \x20 teleport(\\() -> println(g(1)))\n\
+     fn main() = println(show(run_here(\\() -> o(\\(n) -> n))))\n";
 
 #[test]
 fn stdlib_teleport_enforces_the_mobility_contract() {

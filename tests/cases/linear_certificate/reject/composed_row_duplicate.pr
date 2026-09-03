@@ -1,0 +1,8 @@
+-- The composed row is checked by the same drives as zero-budget `fip`: an
+-- owned value consumed twice fails its `linear` fact with the same witness a
+-- `fip` claim would draw, differing only in the claim the diagnostic names.
+type List = Nil | Cons(Int, List)
+
+type Pair = Pair(List, List)
+
+fn twin(xs : List) : Pair @ {bounded_stack, linear, noalloc} = Pair(xs, xs)

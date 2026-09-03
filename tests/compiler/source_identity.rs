@@ -122,10 +122,10 @@ fn cache_configs() -> (Config, Config, PathBuf) {
     let store = std::env::temp_dir().join(format!("{WARM_STORE_PREFIX}{}", std::process::id()));
     let _ = fs::remove_dir_all(&store);
     let mut cold = Config::from_env();
-    cold.flags.compiler_cache = false;
+    cold.update_flags(|flags| flags.compiler_cache = false);
     let mut warm = Config::from_env();
-    warm.flags.compiler_cache = true;
-    warm.flags.store_path = Some(store.clone());
+    warm.update_flags(|flags| flags.compiler_cache = true);
+    warm.update_flags(|flags| flags.store_path = Some(store.clone()));
     (cold, warm, store)
 }
 
@@ -163,11 +163,13 @@ fn decl_heads(report: &str) -> Vec<String> {
 }
 
 // The consumer's report is a function of the artifact bytes, not of compiler
-// cache state. The seams themselves only lex and parse and never reach the
-// content-addressed store, but the consumer runs the checker over the harness
-// and does, so this is where cold-versus-warm can be observed at all. The store
-// is asserted non-empty afterwards: a cache that silently never engaged would
-// otherwise make the equality vacuous.
+// cache state. The interpreter pipeline neither reads nor writes the
+// content-addressed store (its one former write, the per-pass optimization
+// marker, is gone), so cache-enabled and cache-disabled runs must agree by
+// construction, and the store is asserted untouched afterwards: it pins that
+// independence. A pass that starts consulting the store on this path must
+// re-point this gate at real cache engagement, restoring the old guard that
+// the warm store is actually populated.
 #[test]
 fn consumer_report_is_identical_cold_and_warm() {
     let (cold, warm, store) = cache_configs();
@@ -176,9 +178,11 @@ fn consumer_report_is_identical_cold_and_warm() {
     let primed = query_report_on(BASE, "cache_prime", &warm);
     let served = query_report_on(BASE, "cache_warm", &warm);
 
-    assert!(
-        store_entries(&store) > 0,
-        "the warm run never populated {}; the comparison would be vacuous",
+    assert_eq!(
+        store_entries(&store),
+        0,
+        "the interpreter pipeline touched the store at {}; if that is now \
+         intentional, re-point this gate at the new cache engagement",
         store.display()
     );
     assert_eq!(

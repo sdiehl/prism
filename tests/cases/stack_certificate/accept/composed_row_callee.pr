@@ -1,0 +1,6 @@
+-- The composed row claims exactly what the `fip` keyword bundles at budget
+-- zero, so a `fip` caller may lean on a callee certified this way: each of
+-- its claimed facts closes the caller's corresponding discipline.
+fn bump(n : Int) : Int @ {bounded_stack, linear, noalloc} = n + 1
+
+fip fn top(n : Int) : Int = bump(n)

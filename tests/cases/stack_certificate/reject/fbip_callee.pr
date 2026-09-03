@@ -1,0 +1,5 @@
+-- `fbip` certifies zero allocation but permits unbounded recursion depth, so
+-- it is not a stack certificate a claimed caller may rely on.
+fbip fn helper(x) = x
+
+fn top(x : Int) : Int @ bounded_stack = helper(x)

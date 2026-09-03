@@ -12,6 +12,7 @@ use prism_common::fresh::Fresh;
 use prism_common::sym::Sym;
 use prism_syntax::names;
 
+use super::super::verify::{clone_comp_sig, clone_core_type};
 use super::super::{
     CompSig, CoreType, TypedBinder, TypedComp, TypedCompKind, TypedValue, TypedValueKind,
 };
@@ -24,7 +25,7 @@ pub(super) const fn pure_unit() -> CompSig {
 
 pub(super) fn seq(op: TypedComp, continuation: TypedComp) -> TypedComp {
     TypedComp::new(
-        continuation.sig.clone(),
+        clone_comp_sig(&continuation.sig),
         TypedCompKind::Bind(
             Box::new(op),
             TypedBinder::rc_sequence(),
@@ -45,10 +46,10 @@ pub(super) fn dup(witness: TypedValue, continuation: TypedComp) -> TypedComp {
 }
 
 /// One retain per occurrence, each against the occurrence that needs it.
-pub(super) fn dup_each(witnesses: &[TypedValue], continuation: TypedComp) -> TypedComp {
+pub(super) fn dup_each(witnesses: Vec<TypedValue>, continuation: TypedComp) -> TypedComp {
     witnesses
-        .iter()
-        .fold(continuation, |out, witness| dup(witness.clone(), out))
+        .into_iter()
+        .fold(continuation, |out, witness| dup(witness, out))
 }
 
 pub(super) fn drop_(name: Sym, continuation: TypedComp, scope: &Scope) -> TypedComp {
@@ -66,24 +67,24 @@ pub(super) fn defer_call_drops(
 ) -> TypedComp {
     let result = TypedBinder::new(
         Sym::from(names::fresh_binder(names::FRESH_RC, fresh.bump())),
-        call.sig.result.clone(),
+        clone_core_type(&call.sig.result),
     );
     let returned = TypedValue::new(
-        result.ty.clone(),
+        clone_core_type(&result.ty),
         TypedValueKind::Var {
             name: result.name,
             instantiation: Vec::new(),
         },
     );
     let mut post = TypedComp::new(
-        CompSig::new(result.ty.clone(), EffRow::Empty),
+        CompSig::new(clone_core_type(&result.ty), EffRow::Empty),
         TypedCompKind::Return(returned),
     );
     for name in by_name(deferred.iter().copied()) {
         post = drop_(name, post, scope);
     }
     TypedComp::new(
-        call.sig.clone(),
+        clone_comp_sig(&call.sig),
         TypedCompKind::Bind(Box::new(call), result, Box::new(post)),
     )
 }

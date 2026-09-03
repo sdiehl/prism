@@ -14,41 +14,17 @@ use prism::error::{
     TYPED_CORE_SPECIALIZATION, TYPED_CORE_VERIFICATION,
 };
 
-// The production CLI compiles on an 8 MiB main-thread stack. Debug builds of
-// this whole-corpus gate can exceed libtest's smaller worker stack after many
-// sequential compilations even though the same corpus passes in release and
-// each case passes in isolation. Match the public compiler's finite budget for
-// the two corpus gates; focused tests stay on libtest's normal stack so a real
-// recursion regression remains visible.
-const COMPILER_STACK: usize = 8 * 1024 * 1024;
-
-fn on_compiler_stack(gate: fn()) {
-    let result = std::thread::Builder::new()
-        .name("typed-spine-corpus".into())
-        .stack_size(COMPILER_STACK)
-        .spawn(gate)
-        .expect("spawning typed-spine corpus gate")
-        .join();
-    if let Err(payload) = result {
-        std::panic::resume_unwind(payload);
-    }
-}
-
 #[test]
 fn typed_erasure_preserves_corpus_core_identity() {
     if support::heavy_corpus_delegated() {
         return;
     }
-    on_compiler_stack(typed_erasure_preserves_corpus_core_identity_on_compiler_stack);
-}
-
-fn typed_erasure_preserves_corpus_core_identity_on_compiler_stack() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let roots = prism::default_roots(root);
     let mut linted_cfg = prism::Config::default().with_opt(prism::OptLevel::O1);
-    linted_cfg.flags.warn_dupes = prism::WarnDupes::Off;
-    linted_cfg.flags.warn_stdlib_dupes = prism::WarnDupes::Off;
-    linted_cfg.flags.core_lint = true;
+    linted_cfg.update_flags(|flags| flags.warn_dupes = prism::WarnDupes::Off);
+    linted_cfg.update_flags(|flags| flags.warn_stdlib_dupes = prism::WarnDupes::Off);
+    linted_cfg.update_flags(|flags| flags.core_lint = true);
     let mut crossed = 0usize;
     let mut crossed_newtypes = 0usize;
 
@@ -158,20 +134,16 @@ fn full_front_crosses_typed_newtype_prefix_across_corpus() {
     if support::heavy_corpus_delegated() {
         return;
     }
-    on_compiler_stack(full_front_crosses_typed_newtype_prefix_across_corpus_on_compiler_stack);
-}
-
-fn full_front_crosses_typed_newtype_prefix_across_corpus_on_compiler_stack() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let roots = prism::default_roots(root);
     let mut cfg = prism::Config::default().with_opt(prism::OptLevel::O1);
-    cfg.flags.warn_dupes = prism::WarnDupes::Off;
-    cfg.flags.warn_stdlib_dupes = prism::WarnDupes::Off;
+    cfg.update_flags(|flags| flags.warn_dupes = prism::WarnDupes::Off);
+    cfg.update_flags(|flags| flags.warn_stdlib_dupes = prism::WarnDupes::Off);
     let mut linted_cfg = cfg.clone();
     // Core lint gives this gate an independent checker over the same typed
     // route: accepted sources must emit identical Core, while expected
     // negatives must fail under the same canonical diagnostic identity.
-    linted_cfg.flags.core_lint = true;
+    linted_cfg.update_flags(|flags| flags.core_lint = true);
     let mut crossed = 0usize;
     let mut crossed_newtypes = 0usize;
     let mut crossed_specialization = 0usize;
@@ -277,7 +249,7 @@ fn main() : Int = ints() + bool_score()
     let full = prism::with_prelude(source);
     let typed_cfg = prism::Config::default().with_opt(prism::OptLevel::O1);
     let mut linted_cfg = typed_cfg.clone();
-    linted_cfg.flags.core_lint = true;
+    linted_cfg.update_flags(|flags| flags.core_lint = true);
 
     let typed = prism::dump_on("core", &full, &roots, &typed_cfg)
         .expect("typed O1 polymorphic-builder front");
@@ -302,10 +274,7 @@ fn main() : Int = ints() + bool_score()
     );
 
     let mut disabled_cfg = typed_cfg;
-    disabled_cfg.flags.no_specialize = true;
-    disabled_cfg
-        .disabled
-        .push(prism::core::CorePass::Specialize);
+    disabled_cfg.update_flags(|flags| flags.no_specialize = true);
     let disabled = prism::dump_on("core", &full, &roots, &disabled_cfg)
         .expect("typed O1 front with specialization disabled");
     assert!(
@@ -329,7 +298,7 @@ fn main() : Int = scan(0, \(x) -> x < 2)
     let full = prism::with_prelude(source);
     let typed_cfg = prism::Config::default().with_opt(prism::OptLevel::O1);
     let mut linted_cfg = typed_cfg.clone();
-    linted_cfg.flags.core_lint = true;
+    linted_cfg.update_flags(|flags| flags.core_lint = true);
 
     let typed = prism::dump_on("core", &full, &roots, &typed_cfg)
         .expect("typed higher-order local-var front");
@@ -347,7 +316,7 @@ fn effect_polymorphic_traverse_stays_compatibility_exact() {
     let full = prism::with_prelude(&source);
     let typed_cfg = prism::Config::default().with_opt(prism::OptLevel::O1);
     let mut linted_cfg = typed_cfg.clone();
-    linted_cfg.flags.core_lint = true;
+    linted_cfg.update_flags(|flags| flags.core_lint = true);
     let typed = prism::dump_on("core", &full, &roots, &typed_cfg)
         .expect("typed effect-polymorphic traverse front");
     let linted = prism::dump_on("core", &full, &roots, &linted_cfg)

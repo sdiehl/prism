@@ -16,14 +16,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use crate::core::Digest;
-use crate::driver::{stdlib_driver_src, stdlib_hash, with_prelude, PRELUDE};
+use crate::driver::{check_docs_on, stdlib_driver_src, stdlib_hash, with_prelude, PRELUDE};
 use crate::error::Error;
 use crate::parse::{parse, ParseResult};
-use crate::resolve::{resolve_modules_in, Root};
+use crate::resolve::Root;
 use crate::stdlib::STDLIB;
-use crate::syntax::desugar::desugar;
-use crate::syntax::reflect::parse_unit;
-use crate::types::{check_allow_holes, Checked};
+use crate::types::Checked;
 
 mod accept;
 mod doctest;
@@ -122,17 +120,15 @@ fn slug_of(dotted: &str) -> String {
     dotted.to_lowercase().replace('.', "-")
 }
 
-// Bypass the driver's warning emission so a docs run stays quiet, and skip the
-// surface lints (they target user source, not a whole library).
+// The documentation verdict: quiet (no lints, no warning emission, since doc
+// blocks are library-like source) but validated to the same depth as
+// `prism check`, so an example that claims `fip`, `noalloc`, or `replayable`
+// is judged, and a `compile_fail` block relying on those checks really fails.
+// Hole-tolerant on purpose: an example may carry a typed hole (`?name`) to
+// teach the hole report itself; running it is the author's problem, which is
+// what `no_run` is for.
 fn check_quiet(src: &str, roots: &[Root]) -> Result<Checked, Error> {
-    // Hole-tolerant on purpose: a documentation example may carry a typed hole
-    // (`?name`) to teach the hole report itself. It type-checks with the hole
-    // retained (and its tooltip shows the inferred type); running it is the
-    // author's problem, which is what `no_run` is for.
-    let program = parse_unit(src)?;
-    let program = resolve_modules_in(program, roots)?;
-    let program = desugar(program)?;
-    Ok(check_allow_holes(&program)?)
+    check_docs_on(src, roots)
 }
 
 // Render a set of modules into pages plus their harvested doctests, prepending an
@@ -279,6 +275,7 @@ fn stdlib_sigs() -> Result<BTreeMap<String, String>, Error> {
     let driver = stdlib_driver_src();
     let checked = check_quiet(&driver, &[Root::Embedded(STDLIB)])?;
     Ok(checked
+        .defs
         .decls
         .iter()
         .map(|d| (d.name.clone(), checked.show_sig(d)))
@@ -351,7 +348,7 @@ fn project_sigs(
         let ParseResult { program, .. } = parse(&m.source)?;
         let own: BTreeSet<String> = program.fns.iter().map(|d| d.name.clone()).collect();
         let checked = check_quiet(&with_prelude(&m.source), roots)?;
-        for d in &checked.decls {
+        for d in &checked.defs.decls {
             if own.contains(&d.name) {
                 // Key by the qualified name the renderer looks up first, so two
                 // modules that share a bare name never collide in the map.

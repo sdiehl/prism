@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 fn sigs(src: &str) -> BTreeMap<String, String> {
     let checked = prism::check(&prism::with_prelude(src)).expect("program should type check");
     checked
+        .defs
         .decls
         .iter()
         .map(|d| (d.name.clone(), d.ty.show()))

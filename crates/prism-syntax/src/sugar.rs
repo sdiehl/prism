@@ -3,10 +3,11 @@
 use marginalia::Span;
 
 use crate::ast::{
-    call, evar, sp, sp_sugar, Arm, BinOp, Converter, Expr, Marker, Migration, MigrationDir, NodeId,
-    Param, PathOp, PathStep, Pattern, PatternDecl, ReflectKind, Rung, Spanned, StableDecl, Sugar,
-    Total, Ty, S,
+    call, evar, sp, sp_sugar, Arm, BinOp, Converter, Expr, IntLit, Marker, Migration, MigrationDir,
+    NodeId, Param, PathOp, PathStep, Pattern, PatternDecl, ReflectKind, Rung, Spanned, StableDecl,
+    Suffix, Sugar, Total, Ty, S,
 };
+use crate::coeffect::CoeffectFact;
 use crate::kw;
 use crate::names;
 
@@ -199,17 +200,60 @@ pub fn with_rest(rest: Option<S<Expr>>, l: usize, r: usize) -> S<Expr> {
     rest.unwrap_or_else(|| with_sentinel(l, r))
 }
 
-// A usage row spelling exactly `@ noalloc` at the root of a `fn` return
-// annotation is the declaration's allocation certificate, not part of the
-// type: strip it onto the flag at parse. Any other row (reserved facts, or
-// `noalloc` mixed with them) stays in the `Ty` so the checker rejects it with
-// the reserved-fact diagnostic at its own span.
+/// The declaration claims a `fn` return annotation may carry at its root,
+/// lifted off the type at parse.
+///
+/// Each flag mirrors a wired past fact ([`CoeffectFact::is_decl_claim`]);
+/// the flags are independent and compose.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DeclClaims {
+    pub no_alloc: bool,
+    pub bounded_stack: bool,
+    pub linear: bool,
+}
+
+// A usage row of declaration claims (`@ noalloc`, `@ bounded_stack`,
+// `@ linear`, or their composition) at the root of a `fn` return annotation
+// is the declaration's
+// certificate, not part of the type: strip it onto the flags at parse. Any
+// other row (reserved facts, or a claim mixed with a non-claim) stays in the
+// `Ty` so the checker rejects it with its own diagnostic at its own span.
 #[must_use]
-pub fn lift_noalloc(ret: Option<Ty>) -> (Option<Ty>, bool) {
+pub fn lift_decl_claims(ret: Option<Ty>) -> (Option<Ty>, DeclClaims) {
     match ret {
-        Some(Ty::Coeffect(inner, row)) if row.is_noalloc_only() => (Some(*inner), true),
-        other => (other, false),
+        Some(Ty::Coeffect(inner, row)) if row.is_decl_claims_only() => {
+            let claims = DeclClaims {
+                no_alloc: row.facts().contains(&CoeffectFact::Noalloc),
+                bounded_stack: row.facts().contains(&CoeffectFact::BoundedStack),
+                linear: row.facts().contains(&CoeffectFact::Linear),
+            };
+            (Some(*inner), claims)
+        }
+        other => (other, DeclClaims::default()),
     }
+}
+
+/// Parse a declared `fip`/`fbip` allocation budget from its surface literal.
+///
+/// The budget counts fresh heap cells per call, so it must be a plain
+/// (unsuffixed) integer that fits the grade's width; anything else fails
+/// closed at parse rather than silently truncating the claim.
+///
+/// # Errors
+/// A spanned message when the literal carries a width suffix or overflows.
+pub fn alloc_budget(n: &IntLit, span: Span) -> Result<u32, (Span, String)> {
+    if n.suffix != Suffix::None {
+        return Err((
+            span,
+            "an allocation budget is a plain integer; drop the width suffix".to_string(),
+        ));
+    }
+    u32::try_from(&n.value).map_err(|_| {
+        (
+            span,
+            format!("allocation budget `{}` is out of range", n.value),
+        )
+    })
 }
 
 /// Classify the contextual leading declaration modifiers before a `fn`.

@@ -1,0 +1,342 @@
+---
+source: tests/snapshots.rs
+expression: "normalize_pipeline_report(&prism::report(&src))"
+input_file: tests/cases/coeffect_many.pr
+---
+== tokens ==
+VOpen Fn Ident("use2") LParen Ident("g") Colon LParen LParen KwInt RParen Arrow KwInt RParen At Ident("many") Comma Ident("x") Colon KwInt RParen Colon KwInt Eq Ident("g") LParen Ident("x") RParen Plus Ident("g") LParen Ident("x") Plus Int(IntLit { value: 1, suffix: None }) RParen VSemi Fn Ident("main") LParen RParen Colon KwInt Eq Ident("use2") LParen Lambda LParen Ident("n") RParen Arrow Ident("n") Star Int(IntLit { value: 2, suffix: None }) Comma Int(IntLit { value: 3, suffix: None }) RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "use2",
+            params: [
+                Param {
+                    name: "g",
+                    ty: Some(
+                        Coeffect(
+                            Fun(
+                                [
+                                    Int,
+                                ],
+                                Empty,
+                                Int,
+                            ),
+                            CoeffectRow {
+                                facts: [
+                                    Many,
+                                ],
+                            },
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+                Param {
+                    name: "x",
+                    ty: Some(
+                        Int,
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Bin(
+                    Add,
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "g",
+                                ),
+                                span: 289..290,
+                            },
+                            [
+                                Spanned {
+                                    node: Var(
+                                        "x",
+                                    ),
+                                    span: 291..292,
+                                },
+                            ],
+                        ),
+                        span: 289..293,
+                    },
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "g",
+                                ),
+                                span: 296..297,
+                            },
+                            [
+                                Spanned {
+                                    node: Bin(
+                                        Add,
+                                        Spanned {
+                                            node: Var(
+                                                "x",
+                                            ),
+                                            span: 298..299,
+                                        },
+                                        Spanned {
+                                            node: Int(
+                                                IntLit {
+                                                    value: 1,
+                                                    suffix: None,
+                                                },
+                                            ),
+                                            span: 302..303,
+                                        },
+                                    ),
+                                    span: 298..303,
+                                },
+                            ],
+                        ),
+                        span: 296..304,
+                    },
+                ),
+                span: 289..304,
+            },
+            wheres: [],
+            span: 237..304,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "use2",
+                        ),
+                        span: 324..328,
+                    },
+                    [
+                        Spanned {
+                            node: Lam(
+                                [
+                                    Param {
+                                        name: "n",
+                                        ty: None,
+                                        borrow: false,
+                                        default: None,
+                                    },
+                                ],
+                                Spanned {
+                                    node: Bin(
+                                        Mul,
+                                        Spanned {
+                                            node: Var(
+                                                "n",
+                                            ),
+                                            span: 337..338,
+                                        },
+                                        Spanned {
+                                            node: Int(
+                                                IntLit {
+                                                    value: 2,
+                                                    suffix: None,
+                                                },
+                                            ),
+                                            span: 341..342,
+                                        },
+                                    ),
+                                    span: 337..342,
+                                },
+                            ),
+                            span: 329..342,
+                        },
+                        Spanned {
+                            node: Int(
+                                IntLit {
+                                    value: 3,
+                                    suffix: None,
+                                },
+                            ),
+                            span: 344..345,
+                        },
+                    ],
+                ),
+                span: 324..346,
+            },
+            wheres: [],
+            span: 306..346,
+        },
+    ],
+}
+
+== types ==
+use2 : (((Int) -> Int) @ many, Int) -> Int
+main : () -> Int
+
+== core (cbpv) ==
+fn use2(g, x) =
+  return x to t@0
+  return g to t@1
+  (force t@1)(t@0) to t@6
+  return x to t@2
+  return 1 to t@3
+  t@2 + t@3 to t@4
+  return g to t@5
+  (force t@5)(t@4) to t@7
+  t@6 + t@7
+fn main() =
+  thunk { \n.
+    return n to t@8
+    return 2 to t@9
+    t@8 * t@9
+  } to t@10
+  return 3 to t@11
+  use2(t@10, t@11)
+
+== fbip (rc) ==
+fn use2(g, x) =
+  dup x
+  dup g
+  return x to t@0
+  return g to t@1
+  (force t@1)(t@0) to t@6
+  return x to t@2
+  return 1 to t@3
+  t@2 + t@3 to t@4
+  return g to t@5
+  (force t@5)(t@4) to t@7
+  t@6 + t@7
+fn main() =
+  thunk { \n.
+    return n to t@8
+    return 2 to t@9
+    t@8 * t@9
+  } to t@10
+  return 3 to t@11
+  use2(t@10, t@11)
+
+== llvm ==
+; ModuleID = 'prism'
+source_filename = "prism"
+
+@prism_native_kont_table = constant [780 x i8] c"scheme  prism-core-hash-v2\0Abundle  e4889c0420135f0a2812b7e1cb4cfa3489eb172d98e07b3d1dbd516a791983a6\0Acompiler  <version>\0Atarget  <target>\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v2:e4889c0420135f0a2812b7e1cb4cfa3489eb172d98e07b3d1dbd516a791983a6\0Aflag  stdlib-root  <stdlib-root>\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  erasures  true\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  borrow-infer  true\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prismfn_main  bba538728919cdcbaafb293f77edd9bb47536a3a582f39cc1fc6462def224eca  main\0Afn      prismfn_use2  239c0017e0d0911be0cab9006e37053841904c240f182013655334e0e977df6b  use2\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_state_map = constant [898 x i8] c"state-map 1\0Ascheme  prism-core-hash-v2\0Abundle  e4889c0420135f0a2812b7e1cb4cfa3489eb172d98e07b3d1dbd516a791983a6\0Acompiler  <version>\0Atarget  <target>\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v2:e4889c0420135f0a2812b7e1cb4cfa3489eb172d98e07b3d1dbd516a791983a6\0Aflag  stdlib-root  <stdlib-root>\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  erasures  true\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  borrow-infer  true\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prismfn_main bba538728919cdcbaafb293f77edd9bb47536a3a582f39cc1fc6462def224eca main arity 0 slots abi-word[]\0Astate prismfn_use2 239c0017e0d0911be0cab9006e37053841904c240f182013655334e0e977df6b use2 arity 2 slots abi-word[arg0=%a0:word,arg1=%a1:word]\0A\00", section ",.prism_kont", align 1
+@.kont_symbol0 = private constant [13 x i8] c"prismfn_main\00"
+@.kont_hash0 = private constant [65 x i8] c"bba538728919cdcbaafb293f77edd9bb47536a3a582f39cc1fc6462def224eca\00"
+@.kont_name0 = private constant [5 x i8] c"main\00"
+@prism_native_kont_ptrs = constant [1 x { ptr, ptr, ptr, ptr }] [{ ptr, ptr, ptr, ptr } { ptr @prismfn_main, ptr @.kont_symbol0, ptr @.kont_hash0, ptr @.kont_name0 }], section ",.prism_kont", align 8
+@prism_native_kont_ptrs_len = constant i64 1, section ",.prism_kont", align 8
+@llvm.used = appending global [4 x ptr] [ptr @prism_native_kont_table, ptr @prism_native_kont_state_map, ptr @prism_native_kont_ptrs, ptr @prism_native_kont_ptrs_len], section ",llvm.metadata"
+
+; Function Attrs: nounwind
+define i64 @prismfn_main() #0 {
+entry:
+  %t1 = call ptr @prism_alloc(i64 0)
+  %t2 = getelementptr inbounds i8, ptr %t1, i64 8
+  store i64 4180332117194187166, ptr %t2, align 8
+  %t4 = ptrtoint ptr %t1 to i64
+  call void @prism_rc_inc(i64 %t4)
+  %t7 = call i64 @prismap_1(i64 %t4, i64 7)
+  call void @prism_rc_dec(i64 %t4)
+  %t9 = call i64 @prismap_1(i64 %t4, i64 9)
+  call void @prism_rc_dec(i64 %t4)
+  %t10 = and i64 %t7, %t9
+  %t12 = and i64 %t10, 1
+  %t13 = icmp eq i64 %t12, 1
+  br i1 %t13, label %b0, label %b1
+
+b0:                                               ; preds = %entry
+  %t15 = ashr i64 %t7, 1
+  %t17 = ashr i64 %t9, 1
+  %t18 = add i64 %t15, %t17
+  %t20 = shl i64 %t18, 1
+  %t21 = ashr i64 %t20, 1
+  %t22 = icmp eq i64 %t21, %t18
+  br i1 %t22, label %b3, label %b1
+
+b1:                                               ; preds = %b0, %entry
+  %t24 = call i64 @prism_rt_int_add(i64 %t7, i64 %t9)
+  br label %b2
+
+b3:                                               ; preds = %b0
+  %t23 = or i64 %t20, 1
+  br label %b2
+
+b2:                                               ; preds = %b1, %b3
+  %t25 = phi i64 [ %t23, %b3 ], [ %t24, %b1 ]
+  call void @prism_rc_dec(i64 %t7)
+  call void @prism_rc_dec(i64 %t9)
+  ret i64 %t25
+}
+
+; Function Attrs: nounwind
+declare ptr @prism_alloc(i64) #0
+
+; Function Attrs: nounwind
+declare void @prism_rc_inc(i64) #0
+
+; Function Attrs: nounwind
+define i64 @prismap_1(i64 %_clos, i64 %_a0) #0 {
+entry:
+  %_cp = inttoptr i64 %_clos to ptr
+  %_tp = getelementptr inbounds i8, ptr %_cp, i64 8
+  %_tag = load i64, ptr %_tp, align 8
+  switch i64 %_tag, label %_dead [
+    i64 4180332117194187166, label %_lam4180332117194187166
+  ]
+
+_lam4180332117194187166:                          ; preds = %entry
+  %_r4180332117194187166 = call i64 @prismlam_4180332117194187166(i64 %_a0)
+  br label %_merge
+
+_dead:                                            ; preds = %entry
+  call void @prism_apply_error()
+  unreachable
+
+_merge:                                           ; preds = %_lam4180332117194187166
+  %_result = phi i64 [ %_r4180332117194187166, %_lam4180332117194187166 ]
+  ret i64 %_result
+}
+
+; Function Attrs: nounwind
+declare void @prism_rc_dec(i64) #0
+
+; Function Attrs: nounwind
+declare i64 @prism_rt_int_add(i64, i64) #0
+
+; Function Attrs: nounwind
+define i64 @prismlam_4180332117194187166(i64 %_p0) #0 {
+entry:
+  %t1 = call i64 @prism_rt_int_mul(i64 %_p0, i64 5)
+  call void @prism_rc_dec(i64 %_p0)
+  call void @prism_rc_dec(i64 5)
+  ret i64 %t1
+}
+
+; Function Attrs: nounwind
+declare i64 @prism_rt_int_mul(i64, i64) #0
+
+; Function Attrs: nounwind
+declare void @prism_apply_error() #0
+
+attributes #0 = { nounwind }
+
+== run ==
+output: []
+result: 14

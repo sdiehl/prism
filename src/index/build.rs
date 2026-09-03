@@ -83,10 +83,7 @@ pub fn build(input: IndexInput<'_>) -> Result<Index, Error> {
             .is_ok_and(|module| module.decls.iter().any(|d| d.kind == Kind::Test))
     });
     let (tests, test_surface) = if declares_tests {
-        let cfg = Config {
-            mode: BuildMode::Test,
-            ..Config::default()
-        };
+        let cfg = Config::default().with_mode(BuildMode::Test);
         match addressable_surface_in(input.source, input.roots, &cfg) {
             Ok(surface) => (TestLayer::Included, Some(surface)),
             // The message is the front-end diagnostic, unrendered: the artifact
@@ -729,12 +726,13 @@ impl<'a> Addresses<'a> {
     fn of(production: &'a AddressableSurface, test: Option<&'a AddressableSurface>) -> Self {
         let mut terms: BTreeMap<&'a str, &'a DeclInfo> = test
             .into_iter()
-            .flat_map(|s| s.checked.decls.iter())
+            .flat_map(|s| s.checked.defs.decls.iter())
             .map(|d| (d.name.as_str(), d))
             .collect();
         terms.extend(
             production
                 .checked
+                .defs
                 .decls
                 .iter()
                 .map(|d| (d.name.as_str(), d)),

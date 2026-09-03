@@ -1,0 +1,12 @@
+-- `@ linear` constrains consumption alone: a doubly recursive builder that
+-- allocates a fresh cell every step still certifies, which is exactly what
+-- `@ noalloc` and `@ bounded_stack` would reject. The first recursive call
+-- sits under a pending second call and construction, so no tail-call or
+-- constructor-tail rewrite can flatten the stack it consumes.
+type Tree = Leaf | Node(Tree, Tree)
+
+fn full(n : Int) : Tree @ linear =
+  if n == 0 then
+    Leaf
+  else
+    Node(full(n - 1), full(n - 1))

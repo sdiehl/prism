@@ -16,17 +16,16 @@
 //! transformation without comparing input to output, which would cost more than
 //! the pass being measured.
 //!
-//! **What is counted, exactly.** Three shared descents, and only those: the
-//! untyped [`Rewrite`](super::traverse::Rewrite) and
-//! [`Visit`](super::traverse::Visit), plus the typed-Core rewrite the optimizer
-//! and effect lowering are built on. That leaves real work uncounted, and the
+//! **What is counted, exactly.** Four shared descents, and only those: the
+//! untyped and typed-Core read-only visitors and rewrites. The optimizer and
+//! effect lowering build on the typed rewrite. That leaves real work uncounted, and the
 //! omissions are not a rounding error:
 //!
 //! - a pass that overrides a variant and handles it without recursing charges
 //!   nothing for that node;
-//! - a hand-rolled walk charges nothing at all, which covers the typed analyses
-//!   (there is no shared typed read-only discipline to instrument) and the
-//!   frame-local `tailrec` recursion;
+//! - a hand-rolled walk charges nothing at all, which still covers analyses not
+//!   migrated to the typed or untyped shared visitors and the frame-local
+//!   `tailrec` recursion;
 //! - the front end works on the AST, which has no instrumented descent, so
 //!   parsing, resolution, and typechecking charge nothing however hard they
 //!   worked.
@@ -52,8 +51,18 @@
 //! Counting is off unless [`enable`] is called, and off is the default: with the
 //! flag clear every entry point is one relaxed load and a predicted branch.
 
-use std::cell::Cell;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::{
+    cell::Cell,
+    sync::atomic::{AtomicBool, AtomicU64, Ordering},
+};
+
+const MEBIBYTE: usize = 1024 * 1024;
+const CORE_MIN_STACK: usize = 8 * MEBIBYTE;
+const CORE_GROW_STACK: usize = 16 * MEBIBYTE;
+
+pub(crate) fn on_core_stack<T>(run: impl FnOnce() -> T) -> T {
+    stacker::maybe_grow(CORE_MIN_STACK, CORE_GROW_STACK, run)
+}
 
 // Counting is opt-in, so the hot descent pays one relaxed load when it is off.
 static ENABLED: AtomicBool = AtomicBool::new(false);
@@ -134,6 +143,27 @@ pub fn take() -> WorkCounts {
 pub fn visit() {
     if enabled() {
         VISITS.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+/// Charge one visited node at an explicit logical tree depth.
+///
+/// Iterative descents cannot use [`frame`] to mirror host call-stack depth, so
+/// they report the depth carried by their worklist. This keeps receipts
+/// comparable while removing recursion as an implementation requirement.
+pub(crate) fn visit_at_depth(depth: u64) {
+    if enabled() {
+        VISITS.fetch_add(1, Ordering::Relaxed);
+        MAX_DEPTH.fetch_max(depth, Ordering::Relaxed);
+    }
+}
+
+/// Charge one reconstructed node at an explicit logical tree depth.
+pub(crate) fn rebuild_at_depth(depth: u64) {
+    if enabled() {
+        VISITS.fetch_add(1, Ordering::Relaxed);
+        REBUILT.fetch_add(1, Ordering::Relaxed);
+        MAX_DEPTH.fetch_max(depth, Ordering::Relaxed);
     }
 }
 

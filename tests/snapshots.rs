@@ -7,16 +7,21 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::{env, fs};
 
-// Whole-corpus gates repeatedly invoke the in-process compiler. Debug builds
-// can exceed libtest's smaller worker stack even though the same corpus passes
-// in release and on the public compiler's 8 MiB main-thread stack. Match that
-// finite production budget so genuine recursion regressions still fail.
-const COMPILER_STACK: usize = 8 * 1024 * 1024;
+#[path = "support/seam.rs"]
+mod seam;
 
+// Whole-corpus gates repeatedly invoke the in-process compiler. In release
+// the corpus runs on the ordinary libtest worker stack now that traversals
+// are iterative, so a recursion regression deep enough to need more stack
+// fails here first. Debug frames are several times release size and overflow
+// that budget at legal depths, so debug gates get the public compiler's
+// 8 MiB main-thread budget instead.
 fn on_compiler_stack(name: &'static str, gate: fn()) {
-    let result = std::thread::Builder::new()
-        .name(name.into())
-        .stack_size(COMPILER_STACK)
+    let mut builder = std::thread::Builder::new().name(name.into());
+    if cfg!(debug_assertions) {
+        builder = builder.stack_size(8 * 1024 * 1024);
+    }
+    let result = builder
         .spawn(gate)
         .unwrap_or_else(|error| panic!("spawning {name}: {error}"))
         .join();
@@ -33,11 +38,13 @@ fn pipeline() {
     });
 }
 
+// The build stamps come out first (`seam::report`), leaving only the two
+// section spellings that differ by object format, which are folded onto a
+// single canonical form so one snapshot serves every host.
 fn normalize_pipeline_report(report: &str) -> String {
-    let mut out = String::with_capacity(report.len());
-    for line in report.lines() {
-        let line = line.replace(env!("PRISM_TARGET"), "aarch64-apple-darwin");
-        let line = normalize_native_kont_global_len(&line);
+    let neutral = seam::report(report);
+    let mut out = String::with_capacity(neutral.len());
+    for line in neutral.lines() {
         let line = line.replace("section \".prism_kont\"", "section \",.prism_kont\"");
         let line = line.replace(
             "section \"__DATA,__prism_kont\"",
@@ -48,34 +55,6 @@ fn normalize_pipeline_report(report: &str) -> String {
         out.push('\n');
     }
     out
-}
-
-fn normalize_native_kont_global_len(line: &str) -> String {
-    const CANONICAL_TARGET: &str = "aarch64-apple-darwin";
-    const PREFIXES: [&str; 2] = [
-        "@prism_native_kont_table = constant [",
-        "@prism_native_kont_state_map = constant [",
-    ];
-
-    if !PREFIXES.iter().any(|prefix| line.starts_with(prefix)) {
-        return line.to_string();
-    }
-
-    let Some(start) = line.find('[').map(|index| index + 1) else {
-        return line.to_string();
-    };
-    let Some(relative_end) = line[start..].find(" x i8]") else {
-        return line.to_string();
-    };
-    let end = start + relative_end;
-    let Ok(len) = line[start..end].parse::<isize>() else {
-        return line.to_string();
-    };
-    let target_delta =
-        env!("PRISM_TARGET").len().cast_signed() - CANONICAL_TARGET.len().cast_signed();
-    let normalized = len - target_delta;
-
-    format!("{}{}{}", &line[..start], normalized, &line[end..])
 }
 
 // Golden shape digests for the standard library's structural surface: datatype
@@ -134,6 +113,7 @@ effect Log
 fn prelude_type_checks() {
     let checked = prism::check(prism::with_prelude("").as_str()).unwrap();
     let mut lines: Vec<String> = checked
+        .defs
         .decls
         .iter()
         .map(|d| {
@@ -156,9 +136,10 @@ fn nontight_effect_annotation_warns() {
     let warns = |src: &str| -> Vec<String> {
         prism::check(prism::with_prelude(src).as_str())
             .unwrap()
+            .reports
             .warnings
-            .into_iter()
-            .map(|w| w.msg)
+            .iter()
+            .map(|warning| warning.msg.clone())
             .collect()
     };
     let loose = warns("effect Eff\n  op(Unit) : Int\nfn f() : Int ! {Eff} = 1\n");
@@ -184,9 +165,10 @@ fn deprecated_annotation_warns() {
     );
     let msgs: Vec<String> = prism::check(&src)
         .unwrap()
+        .reports
         .warnings
-        .into_iter()
-        .map(|w| w.msg)
+        .iter()
+        .map(|warning| warning.msg.clone())
         .filter(|m| m.contains("deprecated"))
         .collect();
     assert_eq!(msgs, vec!["`old_add` is deprecated: use `+` on Float"]);
@@ -229,7 +211,12 @@ fn var_stays_pure() {
     let root = env!("CARGO_MANIFEST_DIR");
     let src = fs::read_to_string(format!("{root}/tests/cases/run/fib_var.pr")).unwrap();
     let checked = prism::check(prism::with_prelude(&src).as_str()).unwrap();
-    let d = checked.decls.iter().find(|d| d.name == "fib2").unwrap();
+    let d = checked
+        .defs
+        .decls
+        .iter()
+        .find(|d| d.name == "fib2")
+        .unwrap();
     assert_eq!(d.ty.show(), "(Int) -> Int");
     assert_eq!(prism::types::show_effects(&d.effects), "{}");
 }
@@ -254,10 +241,11 @@ fn bounded_stack_rule_is_fip_only() {
     );
 }
 
-// The promise/codegen handshake: every tail-recursive function the new
-// `check_fip` accepts must be lowered to a loop by the backend, never a
-// self-call frame. Both read `core::tailrec`, so an accepted `fip` self-call
-// becomes a `musttail` jump and no plain self-call survives.
+// The promise/codegen handshake: every tail-recursive function the
+// bounded-stack drive (`check_bounded_stack`) accepts must be lowered to a
+// loop by the backend, never a self-call frame. Both read `core::tailrec`, so
+// an accepted `fip` self-call becomes a `musttail` jump and no plain self-call
+// survives.
 #[cfg(feature = "native")]
 #[test]
 fn fip_tail_recursion_lowers_to_a_loop() {
@@ -366,14 +354,19 @@ fn higher_order_effects_propagate() {
                fn boom(n) : Int ! {Exn} = raise(n)\n\
                fn go(n) = apply(boom, n)\n";
     let checked = prism::check(prism::with_prelude(src).as_str()).unwrap();
-    let apply = checked.decls.iter().find(|d| d.name == "apply").unwrap();
+    let apply = checked
+        .defs
+        .decls
+        .iter()
+        .find(|d| d.name == "apply")
+        .unwrap();
     assert_eq!(
         apply.ty.show(),
         "forall e0 a b. ((b) -> a ! {e0}, b) -> a ! {e0}"
     );
     // The effect launders through `apply` (a function value) yet still lands in
     // `go`'s row and reported effects, which the syntactic set pass missed.
-    let go = checked.decls.iter().find(|d| d.name == "go").unwrap();
+    let go = checked.defs.decls.iter().find(|d| d.name == "go").unwrap();
     assert_eq!(go.ty.show(), "(Int) -> Int ! {Exn}");
     assert_eq!(prism::types::show_effects(&go.effects), "{Exn}");
 }
@@ -387,7 +380,12 @@ fn handler_discharges_higher_order_effect() {
                fn boom(n) : Int ! {Exn} = raise(n)\n\
                fn attempt(n) =\n  handle apply(boom, n) with\n    raise(c) resume k => c\n    return r => r\n";
     let checked = prism::check(prism::with_prelude(src).as_str()).unwrap();
-    let attempt = checked.decls.iter().find(|d| d.name == "attempt").unwrap();
+    let attempt = checked
+        .defs
+        .decls
+        .iter()
+        .find(|d| d.name == "attempt")
+        .unwrap();
     assert_eq!(attempt.ty.show(), "(Int) -> Int");
     assert_eq!(prism::types::show_effects(&attempt.effects), "{}");
 }
@@ -414,7 +412,7 @@ fn mask_reports_effect_in_both_engines() {
     // The inferred row carries the masked effect.
     let ok = "effect Ask\n  ask() : Int\nfn m() = mask<Ask>(5)\n";
     let checked = prism::check(prism::with_prelude(ok).as_str()).unwrap();
-    let m = checked.decls.iter().find(|d| d.name == "m").unwrap();
+    let m = checked.defs.decls.iter().find(|d| d.name == "m").unwrap();
     assert_eq!(prism::types::show_effects(&m.effects), "{Ask}");
     // And the purity gate (which reads that row) rejects a masked effect under a
     // `borrow` parameter, just as it does an ordinary one.
@@ -765,7 +763,12 @@ fn var_pure_example() {
     insta::assert_snapshot!("interpreter@var_pure.pr", out);
     let src = fs::read_to_string(&path).unwrap();
     let checked = prism::check(prism::with_prelude(&src).as_str()).unwrap();
-    let d = checked.decls.iter().find(|d| d.name == "fib_iter").unwrap();
+    let d = checked
+        .defs
+        .decls
+        .iter()
+        .find(|d| d.name == "fib_iter")
+        .unwrap();
     assert_eq!(d.ty.show(), "(Int) -> Int");
     assert_eq!(prism::types::show_effects(&d.effects), "{}");
 }
@@ -880,10 +883,6 @@ fn streams_example() {
 
 #[test]
 fn rc_balanced() {
-    on_compiler_stack("rc-balanced", rc_balanced_on_compiler_stack);
-}
-
-fn rc_balanced_on_compiler_stack() {
     let root = env!("CARGO_MANIFEST_DIR");
     for dir in ["tests/cases", "tests/cases/run", "examples"] {
         let entries = fs::read_dir(format!("{root}/{dir}")).unwrap();
@@ -900,43 +899,6 @@ fn rc_balanced_on_compiler_stack() {
             if let Err(err) = prism::rc_balanced(&full) {
                 panic!("{}: {err}", path.display());
             }
-        }
-    }
-}
-
-// Every successfully checked corpus program crosses the typed elaboration
-// boundary. The boundary itself compares the erased tree with its raw
-// compatibility input before hashing; this named corpus gate makes that exact
-// (and therefore hash) neutrality invariant a permanent test obligation.
-#[test]
-fn typed_core_erasure_is_corpus_hash_neutral() {
-    on_compiler_stack(
-        "typed-core-corpus-hash",
-        typed_core_erasure_is_corpus_hash_neutral_on_compiler_stack,
-    );
-}
-
-fn typed_core_erasure_is_corpus_hash_neutral_on_compiler_stack() {
-    for path in corpus_files() {
-        let src = fs::read_to_string(&path).unwrap();
-        let full = prism::with_prelude(&src);
-        if prism::check(&full).is_err() {
-            continue;
-        }
-        if let Err(error) = prism::dump("core-hash", &full) {
-            if matches!(
-                error,
-                prism::error::Error::TypedCoreEnvironment(_)
-                    | prism::error::Error::TypedCoreConstruction(_)
-                    | prism::error::Error::TypedCoreVerification(_)
-                    | prism::error::Error::TypedCoreErasure(_)
-                    | prism::error::Error::TypedCoreSpecialization(_)
-            ) {
-                panic!("{}: {error}", path.display());
-            }
-            // Some type-correct negative fixtures intentionally fail a later raw
-            // elaboration or backend precondition. They never reach typed Core
-            // and therefore have no erasure-neutrality judgment to check.
         }
     }
 }
@@ -1068,10 +1030,6 @@ fn optimization_coverage_on_compiler_stack() {
 
 #[test]
 fn fmt_idempotent() {
-    on_compiler_stack("fmt-idempotent", fmt_idempotent_on_compiler_stack);
-}
-
-fn fmt_idempotent_on_compiler_stack() {
     for path in corpus_files() {
         let src = fs::read_to_string(&path).unwrap();
         let Ok(once) = prism::format(&src) else {
@@ -1087,10 +1045,6 @@ fn fmt_idempotent_on_compiler_stack() {
 // sugar marker that round-trips to the wrong tree, which idempotency cannot see.
 #[test]
 fn fmt_preserves_core() {
-    on_compiler_stack("fmt-preserves-core", fmt_preserves_core_on_compiler_stack);
-}
-
-fn fmt_preserves_core_on_compiler_stack() {
     for path in corpus_files() {
         let src = fs::read_to_string(&path).unwrap();
         let Ok(core) = prism::dump("core", &prism::with_prelude(&src)) else {

@@ -21,7 +21,7 @@ const PARALLEL_QUERY_THREADS: usize = 4;
 const FINAL_EDIT_INDEX: usize = 4;
 const NATIVE_OBJECT_QUERIES: &str = "queries/native-object";
 const RUNTIME_OBJECT_QUERIES: &str = "queries/runtime-object";
-const OPTIMIZED_SCC_QUERIES: &str = "queries/optimized-scc";
+const RETIRED_OPTIMIZED_SCC_QUERIES: &str = "queries/optimized-scc";
 const LLVM_SCC_QUERIES: &str = "queries/llvm-scc-bitcode";
 const CLOSURE_SUMMARY_QUERIES: &str = "queries/llvm-scc-closure-summary";
 const RETIRED_EFFECT_PLAN_QUERIES: &str = "queries/effect-lowering-plan";
@@ -108,12 +108,12 @@ fn persisted_fact_graph_spans_all_active_native_query_producers() {
     ));
     let after = before.replace("k(41)", "k(42)");
     let mut cfg = Config::default();
-    cfg.flags.quiet = true;
-    cfg.flags.compiler_cache = true;
-    cfg.flags.store_path = Some(tmp.store_root());
+    cfg.update_flags(|flags| flags.quiet = true);
+    cfg.update_flags(|flags| flags.compiler_cache = true);
+    cfg.update_flags(|flags| flags.store_path = Some(tmp.store_root()));
 
     for (index, source) in [before, after].into_iter().enumerate() {
-        cfg.session = Some(CompilerSession::new());
+        cfg.set_session(Some(CompilerSession::new()));
         check_modules_on(&source, &roots, &cfg).unwrap();
         build_on_report(&source, &roots, &tmp.join(format!("program-{index}")), &cfg).unwrap();
     }
@@ -130,7 +130,6 @@ fn persisted_fact_graph_spans_all_active_native_query_producers() {
         kinds,
         [
             QueryKind::Module,
-            QueryKind::Optimizer,
             QueryKind::BackendScc,
             QueryKind::ClosurePlan,
             QueryKind::Object,
@@ -138,7 +137,7 @@ fn persisted_fact_graph_spans_all_active_native_query_producers() {
         ]
         .into_iter()
         .collect(),
-        "one fact graph must explain the six active native query producers"
+        "one fact graph must explain the five active native query producers"
     );
     assert!(
         ledger
@@ -158,9 +157,9 @@ fn warm_native_build_materializes_byte_identical_binary() {
     let src = with_prelude("fn main() = println(40 + 2)");
     let roots = [prism::Root::Embedded(prism::stdlib::STDLIB)];
     let mut cfg = Config::default();
-    cfg.flags.compiler_cache = true;
-    cfg.flags.store_path = Some(tmp.store_root());
-    cfg.flags.query_threads = SEQUENTIAL_QUERY_THREADS;
+    cfg.update_flags(|flags| flags.compiler_cache = true);
+    cfg.update_flags(|flags| flags.store_path = Some(tmp.store_root()));
+    cfg.update_flags(|flags| flags.query_threads = SEQUENTIAL_QUERY_THREADS);
 
     let bin = tmp.join("program");
     let first = build_on_report(&src, &roots, &bin, &cfg).unwrap();
@@ -173,14 +172,18 @@ fn warm_native_build_materializes_byte_identical_binary() {
     );
     let native_objects = query_count(&tmp.store_root(), NATIVE_OBJECT_QUERIES);
     let runtime_objects = query_count(&tmp.store_root(), RUNTIME_OBJECT_QUERIES);
-    let optimized_sccs = query_count(&tmp.store_root(), OPTIMIZED_SCC_QUERIES);
     let llvm_sccs = query_count(&tmp.store_root(), LLVM_SCC_QUERIES);
     let closure_summaries = query_count(&tmp.store_root(), CLOSURE_SUMMARY_QUERIES);
     assert!(native_objects > 1);
     assert!(llvm_sccs > 1);
     assert!(closure_summaries > 0);
     assert!(runtime_objects > 1);
-    assert!(optimized_sccs > 1);
+    assert!(
+        !tmp.store_root()
+            .join(RETIRED_OPTIMIZED_SCC_QUERIES)
+            .exists(),
+        "the mid-end optimizer must publish no durable query family"
+    );
     assert!(!tmp.store_root().join(RETIRED_EFFECT_PLAN_QUERIES).exists());
     assert!(!tmp
         .store_root()
@@ -218,7 +221,7 @@ fn warm_native_build_materializes_byte_identical_binary() {
     );
 
     let mut parallel_cfg = cfg.clone();
-    parallel_cfg.flags.query_threads = PARALLEL_QUERY_THREADS;
+    parallel_cfg.update_flags(|flags| flags.query_threads = PARALLEL_QUERY_THREADS);
     fs::remove_file(&bin).unwrap();
     let parallel = build_on_report(&src, &roots, &bin, &parallel_cfg).unwrap();
     assert_eq!(parallel.cache, NativeCacheStatus::Hit);
@@ -261,10 +264,6 @@ fn warm_native_build_materializes_byte_identical_binary() {
         query_count(&tmp.store_root(), RUNTIME_OBJECT_QUERIES),
         runtime_objects
     );
-    assert_eq!(
-        query_count(&tmp.store_root(), OPTIMIZED_SCC_QUERIES),
-        optimized_sccs
-    );
 
     fs::remove_file(&bin).unwrap();
     let formatted_only = format!("{src}\n-- query identity ignores trivia\n");
@@ -275,11 +274,6 @@ fn warm_native_build_materializes_byte_identical_binary() {
         "formatting-only edit vs cold build",
         &cold,
         &fs::read(&bin).unwrap(),
-    );
-    assert_eq!(
-        query_count(&tmp.store_root(), OPTIMIZED_SCC_QUERIES),
-        optimized_sccs,
-        "formatting-only edits must write no semantic SCC artifacts"
     );
     assert_eq!(
         query_count(&tmp.store_root(), LLVM_SCC_QUERIES),
@@ -296,10 +290,6 @@ fn warm_native_build_materializes_byte_identical_binary() {
     let changed = with_prelude("fn main() = println(40 + 3)");
     let changed_report = build_on_report(&changed, &roots, &bin, &cfg).unwrap();
     assert_eq!(changed_report.cache, NativeCacheStatus::Write);
-    assert!(
-        query_count(&tmp.store_root(), OPTIMIZED_SCC_QUERIES) > optimized_sccs,
-        "a semantic edit must write its affected SCC cone"
-    );
     let changed_llvm_sccs = query_count(&tmp.store_root(), LLVM_SCC_QUERIES);
     assert_eq!(
         changed_llvm_sccs - llvm_sccs,
@@ -328,7 +318,7 @@ fn warm_native_build_materializes_byte_identical_binary() {
     );
 
     fs::remove_file(&bin).unwrap();
-    cfg.flags.compiler_cache = false;
+    cfg.update_flags(|flags| flags.compiler_cache = false);
     let report = build_on_report(&changed, &roots, &bin, &cfg).unwrap();
     assert_eq!(report.cache, NativeCacheStatus::Disabled);
     let uncached = fs::read(&bin).unwrap();
@@ -344,7 +334,7 @@ fn warm_native_build_materializes_byte_identical_binary() {
     );
 
     let whole = tmp.join("whole-program");
-    cfg.flags.scc_backend = false;
+    cfg.update_flags(|flags| flags.scc_backend = false);
     let whole_report = build_on_report(&changed, &roots, &whole, &cfg).unwrap();
     assert_eq!(whole_report.cache, NativeCacheStatus::Disabled);
     assert!(!fs::read(&whole).unwrap().is_empty());
@@ -367,9 +357,9 @@ fn typed_route_second_build_preserves_warm_cache_artifacts() {
     let src = with_prelude(include_str!("../../examples/imperative.pr"));
     let roots = [prism::Root::Embedded(prism::stdlib::STDLIB)];
     let mut cfg = Config::default();
-    cfg.flags.compiler_cache = true;
-    cfg.flags.quiet = true;
-    cfg.flags.store_path = Some(tmp.store_root());
+    cfg.update_flags(|flags| flags.compiler_cache = true);
+    cfg.update_flags(|flags| flags.quiet = true);
+    cfg.update_flags(|flags| flags.store_path = Some(tmp.store_root()));
 
     let cold_bin = tmp.join("cold");
     let cold_report = build_on_report(&src, &roots, &cold_bin, &cfg).unwrap();
@@ -381,15 +371,11 @@ fn typed_route_second_build_preserves_warm_cache_artifacts() {
         &cold_run.stderr,
         cold_run.status.code().unwrap(),
     );
-    let semantic_bindings = [
-        OPTIMIZED_SCC_QUERIES,
-        LLVM_SCC_QUERIES,
-        CLOSURE_SUMMARY_QUERIES,
-    ]
-    .into_iter()
-    .filter(|kind| tmp.store_root().join(kind).is_dir())
-    .map(|kind| (kind, query_bindings(&tmp.store_root(), kind)))
-    .collect::<Vec<_>>();
+    let semantic_bindings = [LLVM_SCC_QUERIES, CLOSURE_SUMMARY_QUERIES]
+        .into_iter()
+        .filter(|kind| tmp.store_root().join(kind).is_dir())
+        .map(|kind| (kind, query_bindings(&tmp.store_root(), kind)))
+        .collect::<Vec<_>>();
     assert!(
         !tmp.store_root().join(RETIRED_EFFECT_PLAN_QUERIES).exists()
             && !tmp
@@ -465,9 +451,9 @@ fn incremental_store_reaches_the_fresh_final_artifacts() {
         interface_edit.replace("println(api(39, 1))", "println(api(39, 1) + dormant(1))");
 
     let mut incremental_cfg = Config::default();
-    incremental_cfg.flags.compiler_cache = true;
-    incremental_cfg.flags.store_path = Some(incremental.store_root());
-    incremental_cfg.flags.query_threads = SEQUENTIAL_QUERY_THREADS;
+    incremental_cfg.update_flags(|flags| flags.compiler_cache = true);
+    incremental_cfg.update_flags(|flags| flags.store_path = Some(incremental.store_root()));
+    incremental_cfg.update_flags(|flags| flags.query_threads = SEQUENTIAL_QUERY_THREADS);
     for (index, source) in [
         base,
         formatted,
@@ -488,15 +474,15 @@ fn incremental_store_reaches_the_fresh_final_artifacts() {
     let incremental_bin = incremental.join("program");
 
     let mut fresh_cfg = Config::default();
-    fresh_cfg.flags.compiler_cache = true;
-    fresh_cfg.flags.store_path = Some(fresh.store_root());
-    fresh_cfg.flags.query_threads = SEQUENTIAL_QUERY_THREADS;
+    fresh_cfg.update_flags(|flags| flags.compiler_cache = true);
+    fresh_cfg.update_flags(|flags| flags.store_path = Some(fresh.store_root()));
+    fresh_cfg.update_flags(|flags| flags.query_threads = SEQUENTIAL_QUERY_THREADS);
     let fresh_bin = fresh.join("program");
     build_on_report(&final_source, &roots, &fresh_bin, &fresh_cfg).unwrap();
 
     let mut parallel_cfg = fresh_cfg.clone();
-    parallel_cfg.flags.query_threads = PARALLEL_QUERY_THREADS;
-    parallel_cfg.flags.store_path = Some(parallel.store_root());
+    parallel_cfg.update_flags(|flags| flags.query_threads = PARALLEL_QUERY_THREADS);
+    parallel_cfg.update_flags(|flags| flags.store_path = Some(parallel.store_root()));
     let parallel_bin = parallel.join("program");
     build_on_report(&final_source, &roots, &parallel_bin, &parallel_cfg).unwrap();
 
@@ -527,7 +513,6 @@ fn incremental_store_reaches_the_fresh_final_artifacts() {
     assert_eq!(run(&parallel_bin), fresh_trace);
 
     for kind in [
-        OPTIMIZED_SCC_QUERIES,
         LLVM_SCC_QUERIES,
         CLOSURE_SUMMARY_QUERIES,
         NATIVE_OBJECT_QUERIES,
@@ -558,22 +543,17 @@ fn sequential_and_parallel_scc_artifacts_are_identical() {
     );
     let roots = [prism::Root::Embedded(prism::stdlib::STDLIB)];
     let mut sequential_cfg = Config::default();
-    sequential_cfg.flags.compiler_cache = true;
-    sequential_cfg.flags.store_path = Some(sequential.store_root());
-    sequential_cfg.flags.query_threads = SEQUENTIAL_QUERY_THREADS;
+    sequential_cfg.update_flags(|flags| flags.compiler_cache = true);
+    sequential_cfg.update_flags(|flags| flags.store_path = Some(sequential.store_root()));
+    sequential_cfg.update_flags(|flags| flags.query_threads = SEQUENTIAL_QUERY_THREADS);
     let mut parallel_cfg = sequential_cfg.clone();
-    parallel_cfg.flags.query_threads = PARALLEL_QUERY_THREADS;
-    parallel_cfg.flags.store_path = Some(parallel.store_root());
+    parallel_cfg.update_flags(|flags| flags.query_threads = PARALLEL_QUERY_THREADS);
+    parallel_cfg.update_flags(|flags| flags.store_path = Some(parallel.store_root()));
 
     let sequential_bin = sequential.join("program");
     let parallel_bin = parallel.join("program");
     build_on_report(&src, &roots, &sequential_bin, &sequential_cfg).unwrap();
     build_on_report(&src, &roots, &parallel_bin, &parallel_cfg).unwrap();
-    assert_eq!(
-        query_bindings(&sequential.store_root(), OPTIMIZED_SCC_QUERIES),
-        query_bindings(&parallel.store_root(), OPTIMIZED_SCC_QUERIES),
-        "worker count must not alter SCC keys or artifact identities"
-    );
     assert_eq!(
         query_bindings(&sequential.store_root(), LLVM_SCC_QUERIES),
         query_bindings(&parallel.store_root(), LLVM_SCC_QUERIES),
@@ -605,8 +585,8 @@ fn unreachable_scc_is_not_reused_after_it_becomes_reachable() {
          fn main() : Unit = println(hidden() + 1)\n",
     );
     let mut cfg = Config::default();
-    cfg.flags.compiler_cache = true;
-    cfg.flags.store_path = Some(tmp.store_root());
+    cfg.update_flags(|flags| flags.compiler_cache = true);
+    cfg.update_flags(|flags| flags.store_path = Some(tmp.store_root()));
 
     let before_bin = tmp.join("before");
     build_on_report(&before, &roots, &before_bin, &cfg).unwrap();
@@ -630,16 +610,22 @@ fn closure_body_edit_preserves_dispatch_shards() {
     require_cc();
     let tmp = TempDir::new("compiler-cache", "closure-shards");
     let roots = [prism::Root::Embedded(prism::stdlib::STDLIB)];
+    // A closure passed to `apply` as a literal is a known callee the specializer
+    // devirtualizes, and a devirtualized program has no dispatch shards left to
+    // preserve. Each closure is instead fetched from an array cell at an index
+    // only recursion can produce: the optimizer tracks no facts through mutable
+    // cells, so the callee stays unknown and the shards this test watches exist.
     let before = with_prelude(
         "fn apply(f : (Int) -> Int, x : Int) = f(x)\n\
-         fn left() = apply(\\(x) -> x + 1, 20)\n\
-         fn right() = apply(\\(x) -> x * 2, 10)\n\
+         fn spin(n : Int) : Int = if n <= 0 then 0 else spin(n - 1)\n\
+         fn left() = apply(array_get(array_of_list(Cons(\\(x) -> x + 1, Nil)), spin(1)), 20)\n\
+         fn right() = apply(array_get(array_of_list(Cons(\\(x) -> x * 2, Nil)), spin(1)), 10)\n\
          fn main() = println(left() + right())\n",
     );
     let after = before.replace("x + 1", "x + 2");
     let mut cfg = Config::default();
-    cfg.flags.compiler_cache = true;
-    cfg.flags.store_path = Some(tmp.store_root());
+    cfg.update_flags(|flags| flags.compiler_cache = true);
+    cfg.update_flags(|flags| flags.store_path = Some(tmp.store_root()));
 
     build_on_report(&before, &roots, &tmp.join("before"), &cfg).unwrap();
     let before_queries = query_bindings(&tmp.store_root(), LLVM_SCC_QUERIES);
@@ -676,14 +662,14 @@ fn scc_backend_matches_the_whole_program_oracle() {
     {
         let src = with_prelude(&fs::read_to_string(example).unwrap());
         let mut scc_cfg = Config::default();
-        scc_cfg.flags.compiler_cache = false;
+        scc_cfg.update_flags(|flags| flags.compiler_cache = false);
         prism::verify_backend_recomposition_on(&src, &roots, &scc_cfg).unwrap();
-        scc_cfg.flags.quiet = true;
+        scc_cfg.update_flags(|flags| flags.quiet = true);
         let scc_bin = tmp.join(format!("scc-{index}"));
         build_on_report(&src, &roots, &scc_bin, &scc_cfg).unwrap();
 
         let mut whole_cfg = scc_cfg.clone();
-        whole_cfg.flags.scc_backend = false;
+        whole_cfg.update_flags(|flags| flags.scc_backend = false);
         let whole_bin = tmp.join(format!("whole-{index}"));
         build_on_report(&src, &roots, &whole_bin, &whole_cfg).unwrap();
 
@@ -714,11 +700,11 @@ fn effectful_build_publishes_no_legacy_effect_queries_and_retires_stale_facts() 
     let src = with_prelude(&body);
     let roots = [prism::Root::Embedded(prism::stdlib::STDLIB)];
     let mut cfg = Config::default();
-    cfg.flags.quiet = true;
-    cfg.flags.compiler_cache = true;
-    cfg.flags.effect_tier = prism::EffectTier::FreeMonad;
-    cfg.flags.store_path = Some(fresh.store_root());
-    cfg.session = Some(CompilerSession::new());
+    cfg.update_flags(|flags| flags.quiet = true);
+    cfg.update_flags(|flags| flags.compiler_cache = true);
+    cfg.update_flags(|flags| flags.effect_tier = prism::EffectTier::FreeMonad);
+    cfg.update_flags(|flags| flags.store_path = Some(fresh.store_root()));
+    cfg.set_session(Some(CompilerSession::new()));
 
     let first_bin = fresh.join("first");
     let first_report = build_on_report(&src, &roots, &first_bin, &cfg).unwrap();
@@ -747,8 +733,7 @@ fn effectful_build_publishes_no_legacy_effect_queries_and_retires_stale_facts() 
     assert_eq!(second.stderr, first.stderr);
     assert_eq!(second.status.code(), first.status.code());
     assert!(cfg
-        .session
-        .as_ref()
+        .session()
         .unwrap()
         .decisions()
         .iter()
@@ -776,13 +761,12 @@ fn effectful_build_publishes_no_legacy_effect_queries_and_retires_stale_facts() 
     record_fact(&store, &scope, legacy_effect.clone()).unwrap();
 
     let mut upgrade_cfg = cfg;
-    upgrade_cfg.flags.store_path = Some(upgrade.store_root());
-    upgrade_cfg.session = Some(CompilerSession::new());
+    upgrade_cfg.update_flags(|flags| flags.store_path = Some(upgrade.store_root()));
+    upgrade_cfg.set_session(Some(CompilerSession::new()));
     let upgrade_bin = upgrade.join("program");
     build_on_report(&src, &roots, &upgrade_bin, &upgrade_cfg).unwrap();
     assert!(upgrade_cfg
-        .session
-        .as_ref()
+        .session()
         .unwrap()
         .decisions()
         .iter()
@@ -838,8 +822,8 @@ fn corrupt_backend_scc_is_rejected() {
     let src = with_prelude("fn main() = println(40 + 2)");
     let roots = [prism::Root::Embedded(prism::stdlib::STDLIB)];
     let mut cfg = Config::default();
-    cfg.flags.compiler_cache = true;
-    cfg.flags.store_path = Some(tmp.store_root());
+    cfg.update_flags(|flags| flags.compiler_cache = true);
+    cfg.update_flags(|flags| flags.store_path = Some(tmp.store_root()));
 
     build_on_report(&src, &roots, &tmp.join("first"), &cfg).unwrap();
     let query = query_files(&tmp.store_root(), LLVM_SCC_QUERIES)
@@ -872,8 +856,8 @@ fn corrupt_backend_closure_summary_is_rejected() {
     let src = with_prelude("fn main() = println((\\(x) -> x + 1)(41))");
     let roots = [prism::Root::Embedded(prism::stdlib::STDLIB)];
     let mut cfg = Config::default();
-    cfg.flags.compiler_cache = true;
-    cfg.flags.store_path = Some(tmp.store_root());
+    cfg.update_flags(|flags| flags.compiler_cache = true);
+    cfg.update_flags(|flags| flags.store_path = Some(tmp.store_root()));
 
     build_on_report(&src, &roots, &tmp.join("first"), &cfg).unwrap();
     let query = query_files(&tmp.store_root(), CLOSURE_SUMMARY_QUERIES)
@@ -900,50 +884,13 @@ fn corrupt_backend_closure_summary_is_rejected() {
 }
 
 #[test]
-fn corrupt_optimized_scc_is_rejected() {
-    require_cc();
-    let tmp = TempDir::new("compiler-cache", "corrupt-optimized-scc");
-    let src = with_prelude("fn main() = println(40 + 2)");
-    let roots = [prism::Root::Embedded(prism::stdlib::STDLIB)];
-    let mut cfg = Config::default();
-    cfg.flags.compiler_cache = true;
-    cfg.flags.store_path = Some(tmp.store_root());
-
-    build_on_report(&src, &roots, &tmp.join("first"), &cfg).unwrap();
-    let query = query_files(&tmp.store_root(), OPTIMIZED_SCC_QUERIES)
-        .into_iter()
-        .next()
-        .unwrap();
-    let binding = fs::read_to_string(query).unwrap();
-    let object_hash = binding.lines().nth(1).unwrap();
-    let object = tmp
-        .store_root()
-        .join("objects")
-        .join(&object_hash[..2])
-        .join(&object_hash[2..]);
-    fs::write(object, b"corrupt").unwrap();
-    drop_linked_queries(&tmp.store_root());
-
-    let error = build_on_report(&src, &roots, &tmp.join("relocated"), &cfg).unwrap_err();
-    assert!(
-        error
-            .to_string()
-            .contains("optimized SCC object hash mismatch"),
-        "unexpected error: {error}"
-    );
-}
-
-#[test]
 fn session_semantic_hit_matches_cold_native_build() {
     require_cc();
     let tmp = TempDir::new("compiler-cache", "session-semantic");
     let roots = [prism::Root::Embedded(prism::stdlib::STDLIB)];
     let session = CompilerSession::new();
-    let mut cfg = Config {
-        session: Some(session.clone()),
-        ..Config::default()
-    };
-    cfg.flags.compiler_cache = false;
+    let mut cfg = Config::default().with_session(session.clone());
+    cfg.update_flags(|flags| flags.compiler_cache = false);
     let bin = tmp.join("program");
     let source = with_prelude("fn main() = println(42)\n");
     let formatted = format!("{source}\n-- formatting-only edit\n");

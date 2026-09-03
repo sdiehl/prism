@@ -183,6 +183,11 @@ pub(crate) enum CountKey {
     /// How many per-SCC bitcode shards the sharded backend emitted.
     #[cfg(feature = "native")]
     SccShards,
+    /// The deepest expression nesting in the phase's tree: the surface AST on
+    /// the `parse` row, the core AST (the checked HIR's carrier) on the
+    /// `desugar` row. Measured iteratively at the phase boundary, so the depth
+    /// figure the budgets act on is observable without a Core descent.
+    AstDepth,
     /// Core nodes this phase entered through the shared descent.
     CoreVisits,
     /// Core nodes this phase reconstructed through the shared descent.
@@ -225,6 +230,7 @@ impl CountKey {
             Self::RuntimeObjectMisses => "runtime_object_misses",
             #[cfg(feature = "native")]
             Self::SccShards => "scc_shards",
+            Self::AstDepth => "ast_depth",
             Self::CoreVisits => "core_visits",
             Self::RebuiltNodes => "rebuilt_nodes",
             Self::MaxDepth => "max_depth",

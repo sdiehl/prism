@@ -1,0 +1,7 @@
+-- The recursive call feeds a multiplication, so one stack frame stays alive
+-- per element: the claim is refused with the non-tail diagnostic.
+fn count(n : Int) : Int @ bounded_stack =
+  if n == 0 then
+    1
+  else
+    count(n - 1) * 2

@@ -148,10 +148,8 @@ pub fn check_cmd(files: &[PathBuf], json: bool, cfg: &Config) -> CmdResult {
 
     // The checker is an interpreter oracle. Core optimization cannot improve
     // its evidence and is disproportionately expensive for the checker.
-    let mut shadow_cfg = cfg.clone();
-    shadow_cfg.flags.opt_level = OptLevel::O0;
-    shadow_cfg.passes = None;
-    shadow_cfg.timing = None;
+    let mut shadow_cfg = cfg.clone().use_level(OptLevel::O0);
+    shadow_cfg.set_timing(None);
     let started = Instant::now();
     let checker = crate::driver::prepared_oracle_core(
         &with_prelude(&checker_src),
@@ -254,13 +252,15 @@ fn run_target(
     } = target;
     let started = Instant::now();
     let mut output = Vec::new();
-    crate::eval::run_io_with_args(checker, &mut output, &mut &b""[..], args).map_err(|error| {
-        command_error(
-            format!("Prism T1 shadow failed to run: {error}"),
-            &src,
-            &name,
-        )
-    })?;
+    crate::eval::run_io_with_args(checker, &mut output, &mut &b""[..], args, None).map_err(
+        |error| {
+            command_error(
+                format!("Prism T1 shadow failed to run: {error}"),
+                &src,
+                &name,
+            )
+        },
+    )?;
     bootstrap_timing(cfg, "shadow_eval", &report_source, started.elapsed());
     let protocol_text = String::from_utf8(output).map_err(|error| {
         command_error(
@@ -339,7 +339,7 @@ fn report_for(report_source: String, rust_facts: RustFacts, protocol: Protocol) 
 }
 
 fn bootstrap_timing(cfg: &Config, phase: &str, source: &str, elapsed: Duration) {
-    if cfg.timing.is_some() {
+    if cfg.timing().is_some() {
         eprintln!(
             "bootstrap-time\t{phase}\t{:.1}ms\tsource={source}",
             elapsed.as_secs_f64() * 1_000.0

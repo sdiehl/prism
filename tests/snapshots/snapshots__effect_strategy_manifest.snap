@@ -9,7 +9,7 @@ examples/calc.pr: evidence
 examples/capabilities.pr: evidence
 examples/channels.pr: whole-program-free-monad
 examples/chaos_swarm.pr: whole-program-free-monad
-examples/cli.pr: selective-free-monad
+examples/cli.pr: evidence
 examples/clock.pr: whole-program-free-monad
 examples/comprehension.pr: selective-free-monad
 examples/condition.pr: selective-free-monad
@@ -58,7 +58,6 @@ examples/protocol_ladder.pr: selective-free-monad
 examples/queens.pr: selective-free-monad
 examples/record_replay.pr: whole-program-free-monad
 examples/replay_concurrent.pr: whole-program-free-monad
-examples/result_pipeline.pr: selective-free-monad
 examples/same_fringe.pr: whole-program-free-monad
 examples/sandbox.pr: evidence
 examples/scheduler.pr: whole-program-free-monad
@@ -78,6 +77,7 @@ tests/cases/effect_rows.pr: selective-free-monad
 tests/cases/effects.pr: selective-free-monad
 tests/cases/errors_unhandled.pr: selective-free-monad
 tests/cases/fail_unhandled.pr: selective-free-monad
+tests/cases/fip_budget.pr: whole-program-free-monad
 tests/cases/higher_eff.pr: selective-free-monad
 tests/cases/mask_tunnels_to_outer.pr: selective-free-monad
 tests/cases/multishot.pr: evidence
@@ -165,7 +165,7 @@ tests/cases/run/path_lit.pr: evidence
 tests/cases/run/path_sugar.pr: whole-program-free-monad
 tests/cases/run/quickcheck_detect.pr: whole-program-free-monad
 tests/cases/run/read_bad_utf8.pr: evidence
-tests/cases/run/reified_under_world.pr: whole-program-free-monad
+tests/cases/run/reified_under_world.pr: local-partial
 tests/cases/run/replayable_ok.pr: evidence
 tests/cases/run/rewrite_strategies.pr: whole-program-free-monad
 tests/cases/run/rollback.pr: selective-free-monad
@@ -181,6 +181,7 @@ tests/cases/run/streams_edge.pr: state-fusion
 tests/cases/run/sugar_if.pr: evidence
 tests/cases/run/syntax_hostile.pr: selective-free-monad
 tests/cases/run/syntax_walk.pr: evidence
+tests/cases/run/teleport.pr: evidence
 tests/cases/run/tensor.pr: selective-free-monad
 tests/cases/run/thunk_effect_absorb.pr: whole-program-free-monad
 tests/cases/run/trmc_under_multishot.pr: selective-free-monad

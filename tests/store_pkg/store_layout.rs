@@ -424,8 +424,8 @@ fn resolve_path_prefers_the_explicit_override() {
 fn second_commit_of_an_unchanged_program_writes_zero_objects() {
     let tmp = TempDir::new("store", "e2e");
     let mut cfg = Config::default();
-    cfg.flags.store = true;
-    cfg.flags.store_path = Some(tmp.store_root());
+    cfg.update_flags(|flags| flags.store = true);
+    cfg.update_flags(|flags| flags.store_path = Some(tmp.store_root()));
 
     let src = with_prelude("fn double(x : Int) : Int = x * 2\n");
     let roots = default_roots(Path::new("."));
@@ -451,8 +451,8 @@ fn second_commit_of_an_unchanged_program_writes_zero_objects() {
 fn unboxed_program_commits_without_panicking() {
     let tmp = TempDir::new("store", "unboxed");
     let mut cfg = Config::default();
-    cfg.flags.store = true;
-    cfg.flags.store_path = Some(tmp.store_root());
+    cfg.update_flags(|flags| flags.store = true);
+    cfg.update_flags(|flags| flags.store_path = Some(tmp.store_root()));
 
     let src = with_prelude(
         "fn point() : #{ x : Int, y : Int } = #{ x = 1, y = 2 }\n\nfn main() : Int = point().#x + point().#y\n",

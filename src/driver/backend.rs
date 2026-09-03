@@ -9,7 +9,7 @@ use crate::core::{
 };
 use crate::error::Error;
 use crate::lineage::{FactOutcome, QueryKind};
-use crate::store::disk::{resolve_store_path, Store};
+use crate::store::disk::Store;
 use crate::sym::Sym;
 use crate::types::CtorInfo;
 use prism_native::{
@@ -57,7 +57,7 @@ struct SccJobOutput {
 
 /// Whether the sharded per-SCC backend is in play for this configuration.
 pub(super) const fn scc_backend_enabled(cfg: &Config) -> bool {
-    cfg.flags.scc_backend && !cfg.flags.native_kont_frames
+    cfg.flags().scc_backend && !cfg.flags().native_kont_frames
 }
 
 pub(super) fn materialize_scc_bitcode(
@@ -71,10 +71,8 @@ pub(super) fn materialize_scc_bitcode(
         return Ok(None);
     }
     fs::create_dir_all(directory)?;
-    let store = if cfg.flags.compiler_cache && !cfg.flags.store {
-        Some(Store::open_or_create(resolve_store_path(
-            cfg.flags.store_path.as_deref(),
-        ))?)
+    let store = if cfg.flags().compiler_cache && !cfg.flags().store {
+        Some(cfg.open_store()?)
     } else {
         None
     };
@@ -92,7 +90,7 @@ pub(super) fn materialize_scc_bitcode(
             })
         })
         .collect::<Result<Vec<_>, Error>>()?;
-    let outputs = QueryScheduler::new(cfg.flags.query_threads).map_ordered(&jobs, |job| {
+    let outputs = QueryScheduler::new(cfg.flags().query_threads).map_ordered(&jobs, |job| {
         let selected = job.members.iter().copied().collect::<BTreeSet<_>>();
         let (closure_summary, closure_summary_hit) = if let Some(store) = &store {
             if let Some(summary) = load_closure_summary(store, &job.key)? {
@@ -187,7 +185,7 @@ pub(super) fn materialize_scc_bitcode(
             }
             Err(SccBitcodeError::Codegen(error)) => Err(Error::CodegenBackend(error)),
         }
-    });
+    })?;
     let mut paths = Vec::with_capacity(groups.len() + 2);
     let mut summaries = Vec::with_capacity(groups.len());
     let mut all_hit = true;
@@ -350,7 +348,7 @@ fn scc_key(
         .collect::<BTreeMap<_, _>>();
     let mut used_ctors = UsedConstructors::default();
     for member in members {
-        used_ctors.visit_comp(&by_name[member].body);
+        used_ctors.walk_comp(&by_name[member].body);
     }
     for ctor in used_ctors.names {
         field(&mut hasher, ctor.as_str().as_bytes());
@@ -367,7 +365,7 @@ struct UsedConstructors {
 }
 
 impl Visit for UsedConstructors {
-    fn visit_comp(&mut self, computation: &Comp) {
+    fn comp(&mut self, computation: &Comp) -> bool {
         if let Comp::Case(_, arms) = computation {
             for (pattern, _) in arms {
                 if let CorePat::Ctor(name, _) = pattern {
@@ -375,14 +373,14 @@ impl Visit for UsedConstructors {
                 }
             }
         }
-        self.descend_comp(computation);
+        true
     }
 
-    fn visit_value(&mut self, value: &Value) {
+    fn value(&mut self, value: &Value) -> bool {
         if let Value::Ctor(name, _, _) = value {
             self.names.insert(*name);
         }
-        self.descend_value(value);
+        true
     }
 }
 
@@ -534,7 +532,7 @@ fn record_query(
     output: Option<String>,
     reason: &str,
 ) {
-    if let Some(session) = &cfg.session {
+    if let Some(session) = cfg.session() {
         session.record_decision(QueryDecision::new(
             kind,
             identity.to_string(),
@@ -550,19 +548,19 @@ fn record_query(
 }
 
 fn record_hit(cfg: &Config) {
-    if let Some(session) = &cfg.session {
+    if let Some(session) = cfg.session() {
         session.record_hit();
     }
 }
 
 fn record_miss(cfg: &Config) {
-    if let Some(session) = &cfg.session {
+    if let Some(session) = cfg.session() {
         session.record_miss();
     }
 }
 
 fn record_write(cfg: &Config) {
-    if let Some(session) = &cfg.session {
+    if let Some(session) = cfg.session() {
         session.record_write();
     }
 }

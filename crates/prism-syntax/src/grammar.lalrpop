@@ -1,6 +1,6 @@
 use marginalia::Span;
 use crate::ast::{Item, Vis, Fip, Total, DataDecl, Ctor, Decl, Param, Ty, Row, Expr, BinOp, Arm, Pattern, PatternDecl, PathOp, PathStep, ReflectKind, S, Spanned, EffectDecl, EffOp, EffLabel, Grade, HandlerArm, HandlerMode, Sugar, SugarArm, IntLit, ClassDecl, InstanceDecl, CanonicalDecl, Constraint, AliasDecl, AliasRhs, SynonymDecl, ErrorDecl, CatchArm, ImportDecl, Qualifier, StableDecl, Rung, RungField, Converter, ConvDir, Migration, MigrationRoute, VersionRoute, MigrationDir, CoeffectRow};
-use crate::sugar::{dot_call, param, params, with_stmt, with_rest, open_if, let_else, let_pat, path_lit, let_stmt, seq_stmt, try_mark, interp_lit, pattern_decl, assign_stmt, compound_stmt, compound_path_op, var_decl, lift_noalloc, decl_mods, grade_word_msg, dot_op_removed, mig_dir, reflect_expr, IfTail, FLIP_CLASS, FLIP_INSTANCE, FLIP_EFFECT, DECLINE_DIM_ARITH, GRADE_MANY_CLAUSE, MIGRATE_RESUME, MIGRATE_RET_ORDER};
+use crate::sugar::{dot_call, param, params, with_stmt, with_rest, open_if, let_else, let_pat, path_lit, let_stmt, seq_stmt, try_mark, interp_lit, pattern_decl, assign_stmt, compound_stmt, compound_path_op, var_decl, lift_decl_claims, decl_mods, alloc_budget, grade_word_msg, dot_op_removed, mig_dir, reflect_expr, IfTail, FLIP_CLASS, FLIP_INSTANCE, FLIP_EFFECT, DECLINE_DIM_ARITH, GRADE_MANY_CLAUSE, MIGRATE_RESUME, MIGRATE_RET_ORDER};
 use crate::lex::Token;
 use crate::kind::Kind;
 use crate::names;
@@ -636,10 +636,11 @@ EffOpParam: Ty = {
 
 Fn: Decl = {
     <l:@L> <mods:DeclMods> <rep:"replayable"?> <fip:FipKw> "fn" <name:"ident"> "(" <params:Params> ")" <ann:RetAnn> <wh:GivenClause?> <reqs:Requires*> <ens:Ensures*> <dec:Decreases?> "=" <body:ExprOrBlock> <wb:WhereBlock?> <r:@R> => {
-        // A `@ noalloc` row at the root of the return annotation is the
-        // declaration's allocation certificate, not part of the type.
-        let (ret, no_alloc) = lift_noalloc(ann.2);
-        Decl { name, params, eff: ann.0, eff_tail: ann.1, ret, constraints: wh.unwrap_or_default(), body, wheres: wb.unwrap_or_default(), requires: reqs, ensures: ens, decreases: dec, konst: false, test: mods.0, total: mods.1, fip, replayable: rep.is_some(), no_alloc, span: Span::new(l, r) }
+        // A declaration-claim row (`@ noalloc`, `@ bounded_stack`, or their
+        // composition) at the root of the return annotation is the
+        // declaration's certificate, not part of the type.
+        let (ret, claims) = lift_decl_claims(ann.2);
+        Decl { name, params, eff: ann.0, eff_tail: ann.1, ret, constraints: wh.unwrap_or_default(), body, wheres: wb.unwrap_or_default(), requires: reqs, ensures: ens, decreases: dec, konst: false, test: mods.0, total: mods.1, fip, replayable: rep.is_some(), no_alloc: claims.no_alloc, bounded_stack: claims.bounded_stack, linear: claims.linear, span: Span::new(l, r) }
     },
 };
 
@@ -694,11 +695,18 @@ Decreases: S<Expr> = {
 // is a distinct item, never a runtime function.
 LogicFn: Decl = { "logic" <f:Fn> => f };
 
-// An optional `fip`/`fbip` keyword before `fn` requests the FP^2 in-place check.
+// An optional `fip`/`fbip` keyword before `fn` requests the FP^2 in-place
+// check; an optional parenthesized budget grades it (`fip(2) fn` may allocate
+// at most two fresh heap cells per call). A bare keyword is a zero budget.
 FipKw: Fip = {
-    "fip"  => Fip::Fip,
-    "fbip" => Fip::Fbip,
-    ()     => Fip::No,
+    "fip" <b:FipBudget?>  => Fip::Fip(b.unwrap_or(0)),
+    "fbip" <b:FipBudget?> => Fip::Fbip(b.unwrap_or(0)),
+    ()                    => Fip::No,
+};
+
+FipBudget: u32 = {
+    <l:@L> "(" <n:"int"> ")" <r:@R> =>? alloc_budget(&n, Span::new(l, r))
+        .map_err(|error| lalrpop_util::ParseError::User { error }),
 };
 
 // A top-level immutable constant: `let NAME = EXPR` or `let NAME : TYPE = EXPR`.
@@ -706,7 +714,7 @@ FipKw: Fip = {
 // value rather than push a call frame.
 ConstD: Decl = {
     <l:@L> "let" <name:"ident"> <ann:(":" <Type>)?> "=" <body:ExprOrBlock> <r:@R> =>
-        Decl { name, params: vec![], eff: None, eff_tail: None, ret: ann, constraints: vec![], body, wheres: vec![], requires: vec![], ensures: vec![], decreases: None, konst: true, test: false, total: Total::No, fip: Fip::No, replayable: false, no_alloc: false, span: Span::new(l, r) },
+        Decl { name, params: vec![], eff: None, eff_tail: None, ret: ann, constraints: vec![], body, wheres: vec![], requires: vec![], ensures: vec![], decreases: None, konst: true, test: false, total: Total::No, fip: Fip::No, replayable: false, no_alloc: false, bounded_stack: false, linear: false, span: Span::new(l, r) },
 };
 
 // Haskell-style trailing definitions: `body where { x = e; y = e }`. Bindings

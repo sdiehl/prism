@@ -1,0 +1,12 @@
+-- Compiler fixture for a known closure applied through a parameter. `step` is
+-- the only value ever passed as `f`, but `apply_twice` has two call sites, so
+-- the bounded inliner never substitutes it and both applications of `f` remain
+-- indirect calls through the closure today. An optimizer that tracks closure
+-- identities can rewrite them into direct calls without copying the body of
+-- either function; the printed sum must be byte-identical either way.
+
+fn apply_twice(f : (Int) -> Int, x : Int) : Int = f(f(x))
+
+fn main() : Unit ! {IO} =
+  let step = \(n : Int) -> n + 3
+  println(apply_twice(step, 10) + apply_twice(step, 20))

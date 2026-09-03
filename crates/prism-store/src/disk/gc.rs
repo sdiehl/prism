@@ -36,9 +36,9 @@ use std::thread;
 use std::time::{Duration, SystemTime};
 
 use super::{
-    atomic_write, census, index, queries, refresh_entry_age, unique_name, META_DIR, OBJECTS_DIR,
-    OBJECT_SHARD_BUDGET, QUERIES_DIR, QUERY_SHARD_BUDGET, RETIRED_FORMAT, RETIRED_MANIFEST,
-    RETIRED_PREFIX, SHARD_COUNT, SHARD_HEX, TEMP_PREFIX,
+    atomic_write_now, census, index, queries, refresh_entry_age, unique_name, META_DIR,
+    OBJECTS_DIR, OBJECT_SHARD_BUDGET, QUERIES_DIR, QUERY_SHARD_BUDGET, RETIRED_FORMAT,
+    RETIRED_MANIFEST, RETIRED_PREFIX, SHARD_COUNT, SHARD_HEX, TEMP_PREFIX,
 };
 
 // The sweep fans out across a tree's shard subdirectories, one disjoint chunk
@@ -197,7 +197,10 @@ fn query_kind(origin: &str) -> Option<&str> {
 // at the store root. The rename is the entire visible cost; the tree drains
 // afterwards, or on a later run if this one dies first.
 fn retire_tree(root: &Path, src: &Path, origin: &str) -> io::Result<()> {
-    atomic_write(
+    // Eager on purpose: the tree is renamed away on the next line, so a
+    // deferred manifest would try to publish into a path that no longer
+    // exists.
+    atomic_write_now(
         &src.join(RETIRED_MANIFEST),
         format!("{RETIRED_FORMAT}\n{origin}\n").as_bytes(),
     )?;

@@ -11,7 +11,7 @@ use crate::names::{self, bare_name};
 use crate::parse::parse;
 use crate::resolve::{load, resolve_loaded_module_units, Module, Root};
 use crate::stdlib::STDLIB;
-use crate::store::disk::{resolve_store_path, Store, Written};
+use crate::store::disk::{Store, Written};
 use crate::sym::Sym;
 use crate::syntax::ast::{Core as CorePhase, Program};
 use crate::syntax::desugar::desugar_with_scope;
@@ -145,9 +145,9 @@ pub fn check_modules_on(
     // check and run the test supplements. The single-file front does the same at
     // its own resolve boundary; both call [`strip_tests_for_mode`], so the two
     // production views cannot drift.
-    strip_tests_for_mode(cfg.mode, &mut root_entry);
+    strip_tests_for_mode(cfg.mode(), &mut root_entry);
     for module in &mut loaded {
-        strip_tests_for_mode(cfg.mode, &mut module.prog);
+        strip_tests_for_mode(cfg.mode(), &mut module.prog);
     }
     let shipped = embedded_std_modules(&loaded);
     let entries = loaded
@@ -245,7 +245,7 @@ pub fn check_modules_on(
                 cfg,
             )?;
             let seed = seeded_dependencies(deps.clone(), &interfaces, &foundation)?;
-            if let Some(session) = &cfg.session {
+            if let Some(session) = cfg.session() {
                 if let Some(mut module) = session.lookup_module(&key) {
                     module.reused = true;
                     session.record_hit();
@@ -261,7 +261,7 @@ pub fn check_modules_on(
             }
             if let Some(cache) = DurableInterfaceCache::open(cfg)? {
                 if let Some(module) = cache.load_body(&body_key, &name, &seed)? {
-                    if let Some(session) = &cfg.session {
+                    if let Some(session) = cfg.session() {
                         session.record_hit();
                         session.insert_module(key.clone(), module.clone());
                     }
@@ -274,7 +274,7 @@ pub fn check_modules_on(
                     continue;
                 }
                 if let Some(interface) = cache.load(&interface_key)? {
-                    if let Some(session) = &cfg.session {
+                    if let Some(session) = cfg.session() {
                         session.record_hit();
                     }
                     pending.remove(&name);
@@ -294,7 +294,7 @@ pub fn check_modules_on(
                 .ok_or_else(|| missing_ready_artifact(&name, "resolved program"))?
                 .clone();
             jobs.push(ModuleJob {
-                key: cfg.session.as_ref().map(|_| key),
+                key: cfg.session().map(|_| key),
                 interface_key: durable_interface_key(cfg, interface_key),
                 body_key: durable_interface_key(cfg, body_key),
                 name: name.clone(),
@@ -305,10 +305,10 @@ pub fn check_modules_on(
             });
         }
         let results =
-            QueryScheduler::new(cfg.flags.query_threads).map_ordered(&jobs, check_module_job);
+            QueryScheduler::new(cfg.flags().query_threads).map_ordered(&jobs, check_module_job)?;
         for (job, result) in jobs.into_iter().zip(results) {
             let (module, body) = result?;
-            if let (Some(session), Some(key)) = (&cfg.session, &job.key) {
+            if let (Some(session), Some(key)) = (cfg.session(), &job.key) {
                 session.insert_module(key.clone(), module.clone());
                 session.record_write();
             }
@@ -369,7 +369,7 @@ pub fn check_modules_on(
         roots,
         cfg,
     )?;
-    let (root, root_reused, root_interface) = if let Some(session) = &cfg.session {
+    let (root, root_reused, root_interface) = if let Some(session) = cfg.session() {
         if let Some(module) = session.lookup_module(&root_key) {
             session.record_hit();
             (module.checked, true, module.interface.digest)
@@ -438,10 +438,10 @@ fn injected_typecheck_seed() -> Result<TypecheckSeed, Error> {
         &BTreeMap::new(),
     )?;
     let checked = check_seeded(&program, &TypecheckSeed::default())?;
-    let mut seed = TypecheckSeed::from_checked(&checked);
+    let mut seed = TypecheckSeed::try_from_checked(&checked)
+        .map_err(|error| Error::ResolveModule(error.to_string()))?;
     let name = Sym::from(INJECTED_FOUNDATION_NAME);
-    seed.env.remove(&name);
-    seed.constrained.remove(&name);
+    seed.remove_value(name);
     let _ = CACHE.set(seed.clone());
     Ok(CACHE.get().cloned().unwrap_or(seed))
 }
@@ -504,12 +504,12 @@ fn strip_prelude_declarations(program: &mut Program) {
 
 fn desugar_scope(seed: &TypecheckSeed) -> (BTreeMap<String, String>, BTreeMap<String, String>) {
     let classes = seed
-        .classes
+        .classes()
         .keys()
         .map(|name| (bare_name(name.as_str()).to_string(), name.to_string()))
         .collect();
     let values = seed
-        .env
+        .environment()
         .keys()
         .map(|name| (bare_name(name.as_str()).to_string(), name.to_string()))
         .collect();
@@ -580,7 +580,8 @@ where
     S: AsRef<str>,
 {
     let mut seed = foundation.clone();
-    seed.extend(dependency_seed(dependencies, interfaces)?);
+    seed.try_extend(dependency_seed(dependencies, interfaces)?)
+        .map_err(|error| Error::ResolveModule(error.to_string()))?;
     Ok(seed)
 }
 
@@ -663,7 +664,7 @@ impl CheckedBody {
         checked: &Checked,
         public_interface: &ModuleInterface,
     ) -> Result<Option<Self>, Error> {
-        if !checked.warnings.is_empty() {
+        if !checked.reports.warnings.is_empty() {
             return Ok(None);
         }
         let mut body_entry = entry.clone();
@@ -701,6 +702,7 @@ impl CheckedBody {
         let seed_interface =
             module_interface_from_checked(&body_entry, module_path, program, checked)?;
         let decls = checked
+            .defs
             .decls
             .iter()
             .filter(|decl| bare_name(&decl.name) != names::FAIL_OP)
@@ -737,7 +739,7 @@ impl CheckedBody {
             &seed_interface,
             &decls,
             &facts,
-            checked.seeds,
+            checked.interface.seeds,
         )?;
         Ok(Some(Self {
             format: CHECKED_BODY_FORMAT.to_string(),
@@ -745,7 +747,7 @@ impl CheckedBody {
             seed_interface,
             decls,
             facts,
-            seeds: checked.seeds,
+            seeds: checked.interface.seeds,
             digest,
         }))
     }
@@ -771,12 +773,13 @@ impl CheckedBody {
             )));
         }
         let mut seed = base.clone();
-        seed.extend(
+        seed.try_extend(
             self.seed_interface
                 .rehydrate()
                 .map_err(Error::ResolveModule)?
                 .typecheck_seed(),
-        );
+        )
+        .map_err(|error| Error::ResolveModule(error.to_string()))?;
         let decls = self
             .decls
             .into_iter()
@@ -794,24 +797,7 @@ impl CheckedBody {
             })
             .collect::<Result<Vec<_>, Error>>()?;
         let facts = NodeFacts::from_json(&self.facts).map_err(Error::ResolveModule)?;
-        let checked = Checked {
-            env: seed.env,
-            data: seed.data,
-            ctors: seed.ctors,
-            decls,
-            eff_ops: seed.eff_ops,
-            facts,
-            classes: seed.classes,
-            instances: seed.instances,
-            inst_keys: seed.inst_keys,
-            canonical: seed.canonical,
-            methods: seed.methods,
-            method_effects: BTreeMap::new(),
-            constrained: seed.constrained,
-            seeds: self.seeds,
-            warnings: Vec::new(),
-            holes: Vec::new(),
-        };
+        let checked = seed.into_rehydrated_checked(decls, facts, self.seeds);
         Ok((checked, self.public_interface))
     }
 }
@@ -845,7 +831,7 @@ impl DurableInterfaceCache {
             return Ok(None);
         }
         Ok(Some(Self {
-            store: Store::open_or_create(resolve_store_path(cfg.flags.store_path.as_deref()))?,
+            store: cfg.open_store()?,
         }))
     }
 
@@ -936,7 +922,7 @@ impl DurableInterfaceCache {
 }
 
 fn durable_interface_key(cfg: &Config, key: String) -> Option<String> {
-    (cfg.flags.compiler_cache && !cfg.flags.store).then_some(key)
+    (cfg.flags().compiler_cache && !cfg.flags().store).then_some(key)
 }
 
 fn load_cached_body(
@@ -1077,12 +1063,13 @@ where
                 "missing checked interface for module `{dependency}`"
             ))
         })?;
-        seed.extend(
+        seed.try_extend(
             interface
                 .rehydrate()
                 .map_err(Error::ResolveModule)?
                 .typecheck_seed(),
-        );
+        )
+        .map_err(|error| Error::ResolveModule(error.to_string()))?;
     }
     Ok(seed)
 }

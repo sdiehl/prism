@@ -293,7 +293,7 @@ fn classify(
     }
     match checked {
         Ok(c) => {
-            let kind = if c.decls.iter().any(|d| d.name == ENTRY_POINT) {
+            let kind = if c.defs.decls.iter().any(|d| d.name == ENTRY_POINT) {
                 "run"
             } else {
                 "check"

@@ -32,7 +32,8 @@ pub enum CodecError {
     Malformed,
     /// A node or dependency index pointed outside its table.
     BadReference,
-    /// The reconstructed graph exceeded the node-expansion budget.
+    /// Reconstruction crossed a budget: the node-expansion count, or the
+    /// nesting-depth watermark that bounds one spine of the rebuilt tree.
     DepthLimit,
     /// Bytes remained after the frame was fully decoded.
     TrailingBytes,
@@ -49,7 +50,7 @@ impl std::fmt::Display for CodecError {
             Self::TooLarge => "a length prefix exceeded its bound",
             Self::Malformed => "a tag or discriminant had no valid interpretation",
             Self::BadReference => "a node or dependency index was out of range",
-            Self::DepthLimit => "the reconstructed graph exceeded the expansion budget",
+            Self::DepthLimit => "the reconstructed graph exceeded an expansion or depth budget",
             Self::TrailingBytes => "trailing bytes after the decoded frame",
             Self::Utf8 => "a string field was not valid UTF-8",
         };
@@ -174,6 +175,14 @@ impl<'a> Reader<'a> {
     #[must_use]
     pub const fn at_end(&self) -> bool {
         self.pos == self.buf.len()
+    }
+
+    /// How many bytes have been consumed. A decoder that carries a digest of one
+    /// section of its frame reads this on either side of that section, so what it
+    /// hashes is the bytes it actually parsed rather than a re-rendering of them.
+    #[must_use]
+    pub const fn position(&self) -> usize {
+        self.pos
     }
 
     /// # Errors

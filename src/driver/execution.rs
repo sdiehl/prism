@@ -27,9 +27,10 @@ use crate::resolve::{default_roots, Root};
 use crate::sym::Sym;
 use serde::Serialize;
 
+use super::identity::stdlib_layers;
 use super::{
-    namespace_identity, prepared_core, prepared_core_deferred_holes, reuse_lowered_core,
-    stdlib_hash, timing, Config,
+    namespace_identity, prepared_core, prepared_core_deferred_holes, reuse_lowered_core, timing,
+    Config,
 };
 
 // The version of the runtime semantics a snapshot is bound to. Bumped only when a
@@ -50,7 +51,7 @@ const RUNTIME_SEMANTICS_VERSION: &str = "1";
 // resumed under LIFO.
 fn execution_bundle(src: &str, roots: &[Root], cfg: &Config) -> Result<String, Error> {
     let code = namespace_identity(src, roots)?.root;
-    let stdlib = stdlib_hash()?.root;
+    let stdlib = stdlib_layers(cfg)?.root;
     let entries = BTreeMap::from([
         ("code".to_string(), code),
         ("stdlib".to_string(), stdlib),
@@ -58,6 +59,20 @@ fn execution_bundle(src: &str, roots: &[Root], cfg: &Config) -> Result<String, E
         ("runtime".to_string(), hash_str(RUNTIME_SEMANTICS_VERSION)),
     ]);
     Ok(hash_root(&entries).into_string())
+}
+
+// The mobility identity every execution context in this module hands to the
+// machine. A run that never moves a computation never forces it, so arming it
+// is free; arming it *everywhere* is what keeps one program from succeeding
+// through the CLI and refusing through the library or the differential oracle,
+// which would make mobility a property of how a program was launched rather
+// than of the program.
+pub(super) fn identity_of<'a>(
+    src: &'a str,
+    roots: &'a [Root],
+    cfg: &'a Config,
+) -> impl Fn() -> Result<String, String> + 'a {
+    move || execution_bundle(src, roots, cfg).map_err(|e| e.to_string())
 }
 
 /// # Examples
@@ -78,9 +93,11 @@ pub fn interpret(src: &str) -> Result<Run, Error> {
 /// # Errors
 /// Fails on ordinary front-end errors or when evaluation reaches a hole.
 pub fn interpret_deferred_holes(src: &str) -> Result<Run, Error> {
-    let core =
-        prepared_core_deferred_holes(src, &default_roots(Path::new(".")), &Config::from_env())?;
-    run(&core).map_err(Error::RuntimeEvaluation)
+    let roots = default_roots(Path::new("."));
+    let cfg = Config::from_env();
+    let core = prepared_core_deferred_holes(src, &roots, &cfg)?;
+    let identity = identity_of(src, &roots, &cfg);
+    run(&core, Some(&identity)).map_err(Error::RuntimeEvaluation)
 }
 
 /// Like [`interpret`], resolving any module imports relative to `base`.
@@ -103,8 +120,10 @@ pub fn interpret_at(src: &str, base: &Path) -> Result<Run, Error> {
 /// # Errors
 /// Fails on front-end errors or a runtime fault.
 pub fn interpret_on(src: &str, roots: &[Root]) -> Result<Run, Error> {
-    let core = prepared_core(src, roots, &Config::from_env())?;
-    run(&core).map_err(Error::RuntimeEvaluation)
+    let cfg = Config::from_env();
+    let core = prepared_core(src, roots, &cfg)?;
+    let identity = identity_of(src, roots, &cfg);
+    run(&core, Some(&identity)).map_err(Error::RuntimeEvaluation)
 }
 
 /// Like [`interpret_at`], but streams `print` to `out_sink` and reads `input`.
@@ -190,11 +209,15 @@ fn interpret_io_on_with_args_policy(
     } else {
         prepared_core(src, roots, cfg)?
     };
+    let identity = identity_of(src, roots, cfg);
     timing::timed_res(
-        cfg.timing.as_ref(),
+        cfg.timing(),
         timing::Phase::Eval,
         "",
-        || run_io_with_args(&core, out_sink, input, args).map_err(Error::RuntimeEvaluation),
+        || {
+            run_io_with_args(&core, out_sink, input, args, Some(&identity))
+                .map_err(Error::RuntimeEvaluation)
+        },
         |_| timing::RowExtras::default(),
     )
 }
@@ -229,8 +252,16 @@ pub fn record_on_with_args(
     args: Vec<String>,
 ) -> Result<(Option<i32>, String, usize), Error> {
     let core = prepared_core(src, roots, cfg)?;
-    let run = run_traced_with_args(&core, out_sink, input, Tape::Record(Vec::new()), args)
-        .map_err(Error::RuntimeEvaluation)?;
+    let identity = identity_of(src, roots, cfg);
+    let run = run_traced_with_args(
+        &core,
+        out_sink,
+        input,
+        Tape::Record(Vec::new()),
+        args,
+        Some(&identity),
+    )
+    .map_err(Error::RuntimeEvaluation)?;
     Ok((run.exit, trace::encode(&run.frames), run.frames.len()))
 }
 
@@ -274,8 +305,16 @@ pub fn record_run_on(
     args: Vec<String>,
 ) -> Result<RecordedRun, Error> {
     let core = prepared_core(src, roots, cfg)?;
-    let run = run_traced_with_args(&core, out_sink, input, Tape::Record(Vec::new()), args)
-        .map_err(Error::RuntimeEvaluation)?;
+    let identity = identity_of(src, roots, cfg);
+    let run = run_traced_with_args(
+        &core,
+        out_sink,
+        input,
+        Tape::Record(Vec::new()),
+        args,
+        Some(&identity),
+    )
+    .map_err(Error::RuntimeEvaluation)?;
     Ok(RecordedRun {
         exit: run.exit,
         trace: trace::encode(&run.frames),
@@ -361,7 +400,8 @@ fn observe_run_on_policy(
     } else {
         prepared_core(src, roots, cfg)?
     };
-    let run = run_observed_with_args(&core, out_sink, input, args);
+    let identity = identity_of(src, roots, cfg);
+    let run = run_observed_with_args(&core, out_sink, input, args, Some(&identity));
     Ok(RecordedRun {
         exit: run.exit,
         trace: trace::encode(&run.frames),
@@ -391,6 +431,7 @@ pub fn replay_run_on(
     let core = prepared_core(src, roots, cfg)?;
     let frames = trace::decode(trace).map_err(Error::RuntimeReplay)?;
     let mut empty = Cursor::new(Vec::new());
+    let identity = identity_of(src, roots, cfg);
     let run = run_traced(
         &core,
         out_sink,
@@ -400,6 +441,7 @@ pub fn replay_run_on(
             cursor: 0,
             budget: None,
         },
+        Some(&identity),
     )
     .map_err(Error::RuntimeReplay)?;
     Ok(RecordedRun {
@@ -431,6 +473,7 @@ pub fn replay_on(
     let core = prepared_core(src, roots, cfg)?;
     let frames = trace::decode(trace).map_err(Error::RuntimeReplay)?;
     let mut empty = Cursor::new(Vec::new());
+    let identity = identity_of(src, roots, cfg);
     let run = run_traced(
         &core,
         out_sink,
@@ -440,6 +483,7 @@ pub fn replay_on(
             cursor: 0,
             budget: None,
         },
+        Some(&identity),
     )
     .map_err(Error::RuntimeReplay)?;
     Ok(run.exit)
@@ -508,7 +552,8 @@ pub fn durable_run_on(
         cursor: 0,
         budget,
     };
-    let run = run_traced_with_args(&core, out_sink, input, tape, args)
+    let identity = identity_of(src, roots, cfg);
+    let run = run_traced_with_args(&core, out_sink, input, tape, args, Some(&identity))
         .map_err(Error::RuntimeEvaluation)?;
     // The authoritative trace is the on-disk log, not the in-memory frames the run
     // returns, so read the committed extent back from disk after the run.

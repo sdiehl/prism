@@ -72,11 +72,12 @@ pub(crate) const LEX_UNTERMINATED_STRING: &str = "E7003";
 pub(crate) const LEX_NUMBER_SEPARATOR: &str = "E7004";
 pub(crate) const PARSE_SYNTAX: &str = "E7100";
 pub(crate) const PARSE_EOF: &str = "E7101";
-/// A parse refused because nesting exhausted the parser's recursion budget.
+/// A parse refused because nesting exhausted the parser's depth budget.
 ///
-/// A structured refusal at the current token, never a stack abort. Reserved for
-/// the Prism-language parser (the generated parser bounds depth differently);
-/// the stdlib side mirrors the string in `Syntax.Parse.Support`.
+/// A structured refusal at the current token, never a stack abort. Both
+/// parsers issue it: the compiler's own parser refuses token-stream nesting
+/// past `parse::MAX_NESTING` before any tree is built, and the stdlib parser
+/// mirrors the code and message in `Syntax.Parse.Support`.
 pub const PARSE_DEPTH: &str = "E7102";
 pub(crate) const RESOLVE_MODULE: &str = "E7200";
 pub(crate) const RESOLVE_PROJECT: &str = "E7201";

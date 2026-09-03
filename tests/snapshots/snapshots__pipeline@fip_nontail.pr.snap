@@ -35,7 +35,9 @@ Program {
                 span: 471..472,
             },
             wheres: [],
-            fip: Fip,
+            fip: Fip(
+                0,
+            ),
             span: 454..472,
         },
         Decl {
@@ -84,7 +86,9 @@ Program {
                 span: 492..506,
             },
             wheres: [],
-            fip: Fip,
+            fip: Fip(
+                0,
+            ),
             span: 474..506,
         },
     ],
@@ -103,7 +107,7 @@ fn relay(x) =
   wrap(t@1)
 
 == fip ==
-[E1998] Type Error: usage check `fip` failed for function `relay`: recurses in non-tail position (one stack frame per element); make the recursive call a tail call or a tail under a single constructor / addition, or annotate it `fbip`
+[E6080] Type Error: usage check `fip` failed for function `relay`: recurses in non-tail position (one stack frame per element); make the recursive call a tail call or a tail under a single constructor / addition, or annotate it `fbip`
    ╭─[ <source>:9:1 ]
    │
  9 │ fip fn relay(x) = wrap(relay(x))
