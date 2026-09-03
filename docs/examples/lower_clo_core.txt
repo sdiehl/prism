@@ -1,6 +1,6 @@
 fn adder(x) =
   thunk { \y.
-    return x to t@731
-    return y to t@732
-    t@731 + t@732
+    return x to t@41
+    return y to t@42
+    t@41 + t@42
   }

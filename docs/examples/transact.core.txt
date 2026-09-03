@@ -1,47 +1,47 @@
 fn attempt(spend) =
   handle
-    return () to t@731
-    do get@balance@0(t@731) to snap@1
+    return () to t@42
+    do get@balance@0(t@42) to snap@1
     handle
-      return () to t@732
-      do get@balance@0(t@732) to t@733
-      return spend to t@734
-      t@733 - t@734 to t@735
-      do set@balance@0(t@735)
-      return () to t@736
-      do get@balance@0(t@736) to t@737
-      return 0 to t@738
-      t@737 >= t@738 to t@739
-      guard(t@739)
-      return () to t@740
-      do get@balance@0(t@740)
+      return () to t@43
+      do get@balance@0(t@43) to t@44
+      return spend to t@45
+      t@44 - t@45 to t@46
+      do set@balance@0(t@46)
+      return () to t@47
+      do get@balance@0(t@47) to t@48
+      return 0 to t@49
+      t@48 >= t@49 to t@50
+      guard(t@50)
+      return () to t@51
+      do get@balance@0(t@51)
     with
       fail(k@) =>
-        return snap@1 to t@741
-        do set@balance@0(t@741) to u@
+        return snap@1 to t@52
+        do set@balance@0(t@52) to u@
         return -1
       return r@ =>
         return r@
   with
     get@balance@0(u@, k@) =>
       thunk { \s@.
-        return s@ to t@742
-        return s@ to t@743
-        return k@ to t@744
-        (force t@744)(t@743) to t@745
-        (force t@745)(t@742)
+        return s@ to t@53
+        return s@ to t@54
+        return k@ to t@55
+        (force t@55)(t@54) to t@56
+        (force t@56)(t@53)
       }
     set@balance@0(v@, k@) =>
       thunk { \s@.
-        return v@ to t@746
-        return () to t@747
-        return k@ to t@748
-        (force t@748)(t@747) to t@749
-        (force t@749)(t@746)
+        return v@ to t@57
+        return () to t@58
+        return k@ to t@59
+        (force t@59)(t@58) to t@60
+        (force t@60)(t@57)
       }
     return r@ =>
       return thunk { \s@. return r@ }
   to run@0
-  return 100 to t@750
-  return run@0 to t@751
-  (force t@751)(t@750)
+  return 100 to t@61
+  return run@0 to t@62
+  (force t@62)(t@61)

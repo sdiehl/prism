@@ -1,5 +1,5 @@
 fn main() =
-  return 10 to t@735
-  main$ll1(t@735) to t@739
-  print t@739 to t@740
+  return 10 to t@45
+  main$ll1(t@45) to t@49
+  print t@49 to t@50
   print_nl

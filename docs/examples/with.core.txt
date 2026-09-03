@@ -1,12 +1,12 @@
 fn main() =
   handle
-    do read@conf@0() to t@731
-    prints t@731 to t@732
+    do read@conf@0() to t@41
+    prints t@41 to t@42
     print_nl
   with
     read@conf@0(k) =>
-      return "conf.toml" to t@733
-      return k to t@734
-      (force t@734)(t@733)
+      return "conf.toml" to t@43
+      return k to t@44
+      (force t@44)(t@43)
     return r =>
       return r

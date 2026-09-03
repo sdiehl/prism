@@ -1,24 +1,24 @@
 fn i@eqColor@eq(_x, _y) =
-  return _x to t@2074
-  return _y to t@2075
-  return (t@2074, t@2075) to t@2076
-  case t@2076 of
-    (t@2077, t@2078) =>
-      case t@2077 of
+  return _x to t@49
+  return _y to t@50
+  return (t@49, t@50) to t@51
+  case t@51 of
+    (t@52, t@53) =>
+      case t@52 of
         Blue =>
-          case t@2078 of
+          case t@53 of
             Blue =>
               return true
             _ =>
               return false
         Green =>
-          case t@2078 of
+          case t@53 of
             Green =>
               return true
             _ =>
               return false
         Red =>
-          case t@2078 of
+          case t@53 of
             Red =>
               return true
             _ =>
@@ -26,8 +26,8 @@ fn i@eqColor@eq(_x, _y) =
         _ =>
           return false
 fn i@showColor@show(_x) =
-  return _x to t@2079
-  case t@2079 of
+  return _x to t@54
+  case t@54 of
     Red =>
       return "Red"
     Green =>

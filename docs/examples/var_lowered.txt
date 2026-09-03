@@ -2,12 +2,12 @@ fn fib_iter(n) =
   ref_new 0 to 0@cell
   ref_new 1 to 1@cell
   thunk { \.
-    ref_get 0@cell to t@738
-    ref_get 1@cell to t@739
-    t@738 + t@739 to t
-    ref_get 1@cell to t@741
-    ref_set 0@cell t@741
+    ref_get 0@cell to t@56
+    ref_get 1@cell to t@57
+    t@56 + t@57 to t
+    ref_get 1@cell to t@59
+    ref_set 0@cell t@59
     ref_set 1@cell t
-  } to t@743
-  repeat(n, t@743)
+  } to t@61
+  repeat(n, t@61)
   ref_get 0@cell

@@ -1,16 +1,16 @@
 fn bump(xs) =
-  return xs to t@731
-  case t@731 of
+  return xs to t@41
+  case t@41 of
     Nil =>
-      reuse_token t@731 to reuse#t@731
-      reuse reuse#t@731 as Nil
+      reuse_token t@41 to reuse#t@41
+      reuse reuse#t@41 as Nil
     Cons(h, t) =>
       dup h
       dup t
-      reuse_token t@731 to reuse#t@731
-      return h to t@732
-      return 1 to t@733
-      t@732 + t@733 to t@734
-      return t to t@735
-      bump(t@735) to t@736
-      reuse reuse#t@731 as Cons(t@734, t@736)
+      reuse_token t@41 to reuse#t@41
+      return h to t@42
+      return 1 to t@43
+      t@42 + t@43 to t@44
+      return t to t@45
+      bump(t@45) to t@46
+      reuse reuse#t@41 as Cons(t@44, t@46)

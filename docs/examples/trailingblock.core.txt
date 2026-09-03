@@ -1,5 +1,5 @@
 fn main() =
   twice$hs1() to r
-  return r to t@738
-  print t@738 to t@739
+  return r to t@48
+  print t@48 to t@49
   print_nl
