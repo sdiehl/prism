@@ -426,7 +426,10 @@ fn semantic_query_hasher(
 // `Debug` rendering. `Debug` is a presentation format with no stability
 // contract, so a derive or field-order change would silently move this key;
 // `Core` serializes deterministically (ordered vectors and maps, no unordered
-// collections), so equal terms always encode to equal bytes.
+// collections), so equal terms always encode to equal bytes. The encoding is
+// also a function of the term alone and not of the caller's thread: `Comp` and
+// `Value` serialize behind the shared Core stack seam, so a deep lowered spine
+// keys correctly from a small-stack caller too.
 #[cfg(feature = "native")]
 fn lowered_core_identity(core: &LoweredCore) -> Result<Vec<u8>, Error> {
     serde_json::to_vec(&**core).map_err(|error| {
