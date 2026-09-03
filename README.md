@@ -8,13 +8,13 @@
 
 Prism is an impure functional programming language whose type system tracks side effects. Effect sets are inferred, extensible rows that compose through ordinary calls instead of monads, and they track observability rather than implementation: an effect handled inside a function vanishes from its type, so internally effectful code can still be analyzed, optimized, and reused as pure code. The language also has rank-N polymorphism, typeclasses, derived lenses and optic paths, fusing streams, deterministic reference counting, and native codegen through LLVM, with an optional textual MLIR backend for parity checking.
 
-The compiler is built around deterministic simulation testing at the language level. Prism programs elaborate to a strict A-normal-form call-by-push-value core, definitions and packages are content-addressed by hash, project builds can explain their lineage, and suspended continuations carry the code identity they may resume against. The compiler also builds to WebAssembly, so the playground and gallery run in the browser; the interpreter is a CEK machine modeled in Lean and is the differential oracle every native backend must match byte-for-byte.
+The compiler is built around deterministic simulation testing at the language level. Prism programs elaborate to a strict A-normal-form call-by-push-value core, definitions and packages are content-addressed by hash, project builds can explain their lineage, and suspended continuations carry the code identity they may resume against. The compiler also builds to WebAssembly, so the playground and gallery run in the browser. The interpreter is a CEK machine modeled in Lean, and it is the differential oracle every native backend must match byte-for-byte.
 
 Try it in the browser at the [Prism playground](https://sdiehl.github.io/prism/play/).
 
 Read the [language specification](https://sdiehl.github.io/prism/spec.html) and the [compiler documentation](https://sdiehl.github.io/prism/compiler.html).
 
-The [`examples/`](./examples) directory contains a tour of most advanced features; my [blog post](https://www.stephendiehl.com/posts/prism/) explains the project design.
+The [`examples/`](./examples) directory contains a tour of most advanced features, and my [blog post](https://www.stephendiehl.com/posts/prism/) explains the project design.
 
 ## Install
 
@@ -23,7 +23,7 @@ The [`examples/`](./examples) directory contains a tour of most advanced feature
 ```shell
 nix build github:sdiehl/prism        # binary at ./result/bin/prism
 nix run github:sdiehl/prism          # or run it directly
-nix develop                          # dev shell: LLVM, cargo, just; target/release on PATH
+nix develop                          # dev shell: LLVM, cargo, just, target/release on PATH
 ```
 
 ### macOS / Linux
@@ -35,13 +35,13 @@ brew install llvm@22                                          # macOS
 curl -fsSL https://apt.llvm.org/llvm.sh | sudo bash -s 22     # Debian/Ubuntu
 ```
 
-Then install prism (macOS Apple Silicon; Linux x86_64, aarch64):
+Then install prism (macOS Apple Silicon, Linux x86_64 and aarch64):
 
 ```shell
-curl --proto '=https' --tlsv1.2 -fsSL https://sdiehl.github.io/prism/install.sh | PRISM_VERSION=v0.22.0 sh
+curl --proto '=https' --tlsv1.2 -fsSL https://sdiehl.github.io/prism/install.sh | sh
 ```
 
-The installer verifies each release asset's SHA-256 against the release manifest (and its build-provenance attestation when an authenticated `gh` is available) before unpacking. It installs `prismup`, the Prism toolchain manager, to `~/.prismup/bin` and uses it to install the compiler; installed versions live under `~/.prismup/prism/` and `prismup -s <version>` switches between them. No sudo. If Nix is present it uses the flake instead, with hashes verified by the Nix store.
+The installer verifies release checksums and installs under `~/.prismup` with no sudo.
 
 Also available via a variety of other package managers:
 
@@ -91,7 +91,7 @@ prism program.pr -o out              # ...with a custom output path
 prism program.pr -O2                 # ...at optimization level 2
 prism run program.pr                 # interpret instead of compiling
 prism build                          # compile the enclosing project (needs a prism.toml), into target/
-prism build --watch --verbose        # rebuild on edits; show unit/Merkle impact and timing
+prism build --watch --verbose        # rebuild on edits, show unit/Merkle impact and timing
 prism clean                          # remove the project's target/ directory
 prism check                          # type check the enclosing project
 prism check program.pr               # type check one source file

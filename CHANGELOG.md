@@ -2,38 +2,38 @@
 
 ## 0.22.0
 
-- Optimizer: added typed interprocedural summaries for result shape, effects, allocation, captures, and cardinality.
-- Optimizer: exact-size list-to-array builders allocate their final destination once when cardinality is proven.
-- Inlining: tiny multi-site callees may inline when summaries prove them pure, allocation-free, and callback-free.
-- Optimizer facts: the v2 dump exposes typed summaries and checks canonical cached bytes against recomputation.
-- Compiler loop: optimization skips unreachable definitions and retired a durable SCC cache slower than recomputation.
-- Compiler loop: an executable build closes the checked program over its entry point before elaboration, so an edit rebuild elaborates only what `main` reaches.
-- Parser: source nested beyond the compiler's depth budget is refused with a diagnostic before parsing instead of overflowing the stack.
-- Store: artifact decoding bounds its nesting depth, so a corrupt or hostile object cannot overflow the reader.
-- Native builds: independent runtime translation units compile in parallel, with cold work serialized per cache key.
-- Store durability: compile-scoped transactions batch cache publication without process-global pending-write state.
-- Optimization controls: normalized levels and plans reject contradictions and key effect-tier exclusions in caches.
-- Core traversal: typed/raw reads, raw rewrites, and context-neutral typed rewrites use explicit heap worklists.
-- Core analyses: latent effects, handler shape, allocation, linearity, tail recursion, and reuse lint use worklists.
-- Core identity: canonical hashing preserves exact bytes while encoding computations and values with heap worklists.
-- FBIP: borrow inference, RC insertion and verification, and reuse selection now use path-aware heap worklists.
-- Stack safety: tests and CI need no override; control-sensitive rewrites retain finite migration guards.
-- Compiler stages: checked and elaborated fronts are sealed variants, and elaboration carries validated Core directly.
-- Typechecker: sealed dependency seeds reject namespace-role collisions and invalid constructor indices at assembly.
-- Compiler errors: query-worker panics return deterministic internal errors instead of unwinding through the library.
-- Golden determinism: frontend and pipeline fixtures neutralize build stamps before committed byte comparisons.
-- Compiler internals: specialization, fusion, state, and monadic lowering are split at recognition and rewrite seams.
-- Standard library: added effect-polymorphic `cata`, `ana`, `para`, and `hylo` over ordinary recursive datatypes.
-- Usage contracts: `@ linear`, `@ bounded_stack`, and explicit `@ many` now enforce independent call-tree contracts.
-- Callable certificates: function parameters can require and preserve an allocation-free `@ noalloc` callback.
-- Standard library: added `Net`, a scoped TCP capability whose listener and stream tokens cannot outlive their bracket.
-- Networking: reads answer `Chunk` or `End`, writes report partial progress, and failures classify into a closed `NetError`.
-- Mobility: `teleport` reports delivery as `Result(Unit, MoveError)`, with `Undelivered` for a transport that never arrived.
-- Mobility: sealed envelopes carry a versioned portability certificate covering the bundle identity and the capture graph.
-- Mobility: a committed sender/receiver example moves a continuation between two operating-system processes over loopback TCP.
-- REPL: pure inferred types elide empty effect rows by default; `:set +e` restores their explicit spelling.
-- Release tooling: one cold acceptance pass reseats artifacts; a 60-program sentinel corpus drives the fast gate.
-- Maintenance: removed the failed parser-generator experiment, its frozen corpus, manifest, and artifact hooks.
+- Optimizer: added typed summaries for result shape, effects, allocation, captures, and cardinality.
+- Optimizer: list-to-array builders with proven cardinality allocate their destination once.
+- Inlining: tiny multi-site callees inline when proven pure, allocation-free, and callback-free.
+- Optimizer facts: the v2 dump exposes typed summaries and checks cached bytes against recomputation.
+- Compiler loop: unreachable definitions skip optimization, and the durable SCC cache is retired.
+- Compiler loop: executable builds elaborate only the definitions `main` reaches.
+- Parser: nesting beyond the depth budget is refused with a diagnostic before parsing.
+- Store: artifact decoding bounds nesting depth, so a hostile object cannot overflow the reader.
+- Native builds: runtime translation units compile in parallel, cold work serialized per cache key.
+- Store: compile-scoped transactions batch cache publication with no process-global pending state.
+- Optimization controls: levels and plans reject contradictions, and tier exclusions key the caches.
+- Core traversal: typed and raw reads and context-neutral rewrites run on explicit heap worklists.
+- Core analyses: effect, allocation, linearity, tail-recursion, and reuse passes use worklists.
+- Core identity: canonical hashing encodes terms with heap worklists and preserves exact bytes.
+- FBIP: borrow inference, RC insertion, verification, and reuse selection use path-aware worklists.
+- Stack safety: tests and CI need no stack override, control-sensitive rewrites keep finite guards.
+- Compiler stages: checked and elaborated fronts are sealed variants that carry validated Core.
+- Typechecker: sealed dependency seeds reject namespace collisions and invalid constructor indices.
+- Compiler errors: query-worker panics become deterministic internal errors instead of unwinding.
+- Goldens: frontend and pipeline fixtures neutralize build stamps before byte comparison.
+- Internals: specialization, fusion, state, and monadic lowering split into recognition and rewrite.
+- Standard library: added effect-polymorphic `cata`, `ana`, `para`, and `hylo` over recursive types.
+- Usage contracts: `@ linear`, `@ bounded_stack`, and `@ many` are enforced across the call tree.
+- Callable certificates: parameters can require and preserve a `@ noalloc` callback.
+- Standard library: added `Net`, a scoped TCP capability whose tokens cannot outlive their bracket.
+- Networking: reads answer `Chunk` or `End`, writes report progress, failures classify as `NetError`.
+- Mobility: `teleport` answers `Result(Unit, MoveError)`, with `Undelivered` for a lost transport.
+- Mobility: sealed envelopes carry a versioned certificate over bundle identity and capture graph.
+- Mobility: a committed example moves a continuation between two processes over loopback TCP.
+- REPL: pure inferred types elide empty effect rows by default, and `:set +e` restores them.
+- Tooling: one cold acceptance pass reseats artifacts, and a 60-program sentinel drives the fast gate.
+- Maintenance: removed the parser-generator experiment with its frozen corpus, manifest, and hooks.
 
 ## 0.21.0
 
