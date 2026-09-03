@@ -18,7 +18,7 @@ const src = join(here, "..", "src");
 const out = join(here, "build");
 mkdirSync(out, { recursive: true });
 
-const MODULES = ["viewer-model", "viewer-review", "viewer-context", "viewer"];
+const MODULES = ["viewer-model", "viewer-diff", "viewer-review", "viewer-context", "viewer"];
 
 for (const name of MODULES) {
   const adapted = readFileSync(join(src, `${name}.ts`), "utf8")

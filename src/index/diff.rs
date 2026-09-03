@@ -23,7 +23,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use super::{Def, Index};
+use super::{Def, Edge, Index};
 
 /// Schema tag for the diff artifact.
 pub const INDEX_DIFF_FORMAT: &str = "prism-index-diff-v1";
@@ -119,6 +119,28 @@ pub struct DiffEnvelope {
     pub counts: Counts,
 }
 
+/// The edges one revision has and the other does not.
+///
+/// The entries carry each changed definition's two records, which is enough to
+/// show its two bodies but not its two *neighbourhoods*: who called it before,
+/// what it called, which tests reached it. Those are edges, and an edge's other
+/// end is very often an untouched definition the entry list omits. Carrying the
+/// whole old edge set would repeat the index; carrying the difference is a few
+/// rows per edit, and a consumer that has the new index recovers the old edge
+/// set exactly as `new − added + removed`.
+///
+/// Always present, even when empty, so a consumer can tell "nothing moved" from
+/// an artifact written before the delta existed.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct EdgeDelta {
+    /// In the new revision only. Sorted like an index's edge list.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub added: Vec<Edge>,
+    /// In the old revision only.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub removed: Vec<Edge>,
+}
+
 /// The diff artifact.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct IndexDiff {
@@ -127,6 +149,11 @@ pub struct IndexDiff {
     /// name. Untouched definitions are omitted rather than listed: a review view
     /// wants what moved, and the count is in the envelope.
     pub entries: Vec<Entry>,
+    /// What moved in the dependency graph. Absent only in an artifact older
+    /// than the field, which a consumer should treat as "unknown" rather than
+    /// "nothing".
+    #[serde(default)]
+    pub edges: Option<EdgeDelta>,
 }
 
 impl IndexDiff {
@@ -277,6 +304,21 @@ pub fn diff(old: &Index, new: &Index) -> Result<IndexDiff, String> {
     // within each. A reviewer reads this top to bottom.
     entries.sort_by(|a, b| a.status.cmp(&b.status).then_with(|| a.id.cmp(&b.id)));
 
+    // Both edge lists are sorted and deduplicated, so the two differences are
+    // set differences and come out in the same order.
+    let old_edges: BTreeSet<&Edge> = old.edges.iter().collect();
+    let new_edges: BTreeSet<&Edge> = new.edges.iter().collect();
+    let edges = EdgeDelta {
+        added: new_edges
+            .difference(&old_edges)
+            .map(|e| (*e).clone())
+            .collect(),
+        removed: old_edges
+            .difference(&new_edges)
+            .map(|e| (*e).clone())
+            .collect(),
+    };
+
     Ok(IndexDiff {
         envelope: DiffEnvelope {
             format: INDEX_DIFF_FORMAT.to_string(),
@@ -296,6 +338,7 @@ pub fn diff(old: &Index, new: &Index) -> Result<IndexDiff, String> {
             counts,
         },
         entries,
+        edges: Some(edges),
     })
 }
 

@@ -10,6 +10,21 @@
 /// Every relation `prism index` derives.
 export type EdgeKind = "calls" | "uses-type" | "performs" | "handles" | "instance-of" | "tests";
 
+export interface Edge {
+  kind: EdgeKind;
+  from: string;
+  to: string;
+}
+
+/// What the relation lookups below are built over: a revision's definitions
+/// and edges. The loaded index is one; the old revision a diff can rebuild
+/// (`Revisions.before`) is another, and the lookups do not care which.
+export interface Graph {
+  defs: Def[];
+  byId: Map<string, Def>;
+  edges: Edge[];
+}
+
 export type Kind =
   | "value"
   | "const"
@@ -142,7 +157,7 @@ interface Wire {
   envelope: Envelope;
   modules: IndexModule[];
   defs: Def[];
-  edges: { kind: EdgeKind; from: string; to: string }[];
+  edges: Edge[];
   builtins?: Primitive[];
   token_classes?: string[];
   type_table?: string[];
@@ -156,7 +171,7 @@ export class Index {
   readonly modules: IndexModule[];
   readonly defs: Def[];
   readonly byId: Map<string, Def>;
-  readonly edges: { kind: EdgeKind; from: string; to: string }[];
+  readonly edges: Edge[];
   /// The compiler's own primitives, by name. One of these has no definition
   /// anywhere, so it is not a link. It is also not missing, and saying which
   /// of the two it is is the difference between "primitive" and "this index is
@@ -233,7 +248,7 @@ export class Relations {
   private readonly out = new Map<string, string[]>();
   private readonly inn = new Map<string, string[]>();
 
-  constructor(index: Index) {
+  constructor(index: Graph) {
     for (const e of index.edges) {
       push(this.out, `${e.kind} ${e.from}`, e.to);
       push(this.inn, `${e.kind} ${e.to}`, e.from);
@@ -259,7 +274,7 @@ export class Mentions {
   private readonly out = new Map<string, string[]>();
   private readonly inn = new Map<string, string[]>();
 
-  constructor(index: Index) {
+  constructor(index: Graph) {
     const term = (id: string): boolean => {
       const kind = index.byId.get(id)?.kind;
       return kind === "value" || kind === "const" || kind === "test" || kind === "logic";
@@ -317,7 +332,7 @@ export class Members {
   /// definition → the members its own source names.
   private readonly byUser = new Map<string, MemberUse[]>();
 
-  constructor(index: Index) {
+  constructor(index: Graph) {
     // Seeded from the declarations themselves, so a member nothing uses is still a
     // member: an effect's operations are performed by *programs*, so a library
     // index would otherwise list none of `Output`'s.
@@ -402,6 +417,9 @@ interface DiffWire {
     counts: Record<Status | "unchanged", number>;
   };
   entries: DiffEntry[];
+  /// The edges one revision has and the other does not. Absent from an
+  /// artifact older than the field, which is "unknown", not "none".
+  edges?: { added?: Edge[]; removed?: Edge[] };
 }
 
 const DIFF_FORMAT = "prism-index-diff-v1";
@@ -414,6 +432,11 @@ const DIFF_FORMAT = "prism-index-diff-v1";
 /// consults this for whatever the other revision had.
 export class Revisions {
   readonly envelope: DiffWire["envelope"];
+  /// What moved in the dependency graph, or `null` when the artifact predates
+  /// the delta and cannot say.
+  readonly edges: { added: Edge[]; removed: Edge[] } | null;
+  /// The renames the diff knows as facts: old canonical name to new.
+  readonly movedTo = new Map<string, string>();
   private readonly byId = new Map<string, DiffEntry>();
 
   /// `classes` and `types` belong to the index loaded in the viewer. They are the
@@ -440,11 +463,37 @@ export class Revisions {
       );
     }
     this.envelope = wire.envelope;
+    this.edges = wire.edges
+      ? { added: wire.edges.added ?? [], removed: wire.edges.removed ?? [] }
+      : null;
     for (const e of wire.entries) {
       if (e.old) adopt(e.old, wire.envelope.old, classes, types);
       if (e.new) adopt(e.new, wire.envelope.new, classes, types);
       this.byId.set(e.id, e);
+      if (e.status === "moved" && e.old_id !== undefined) this.movedTo.set(e.old_id, e.id);
     }
+  }
+
+  /// The old revision's definitions and edges, rebuilt from the new revision's
+  /// and this diff.
+  ///
+  /// The artifact carries what differs and nothing else, so the other side is
+  /// recovered rather than read: every definition the diff does not mention is
+  /// the same on both sides, and every edge not in the delta likewise. The
+  /// result is what lets a card ask the old revision the same questions it asks
+  /// the new one, who called this and what it called, through the same lookups.
+  /// `null` when the artifact carries no edge delta, since a graph with the
+  /// old definitions and the new edges would answer those questions wrongly.
+  before(index: Index): Graph | null {
+    if (!this.edges) return null;
+    const byId = new Map(index.byId);
+    for (const e of this.byId.values()) {
+      byId.delete(e.id);
+      if (e.old) byId.set(e.old_id ?? e.id, e.old);
+    }
+    const added = new Set(this.edges.added.map(edgeKey));
+    const edges = [...index.edges.filter((e) => !added.has(edgeKey(e))), ...this.edges.removed];
+    return { defs: [...byId.values()], byId, edges };
   }
 
   get(id: string): DiffEntry | undefined {
@@ -579,6 +628,8 @@ function repack(packed: string | undefined, classes: string[], map: Int32Array):
   }
   return out.join(" ");
 }
+
+const edgeKey = (e: Edge): string => `${e.kind} ${e.from} ${e.to}`;
 
 function push(map: Map<string, string[]>, key: string, value: string): void {
   const at = map.get(key);

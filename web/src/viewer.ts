@@ -15,6 +15,7 @@
 // generated somewhere else and handed over.
 
 import "./viewer.css";
+import { folded, type Range, type TextDiff, textDiff } from "./viewer-diff.js";
 import {
   type Def,
   type DiffEntry,
@@ -51,6 +52,10 @@ const RELATIONS: { kind: EdgeKind; dir: "in" | "out"; label: string; hint: strin
   { kind: "instance-of", dir: "out", label: "instance of", hint: "the class this implements" },
   { kind: "instance-of", dir: "in", label: "instances", hint: "instances of this class" },
 ];
+
+// How a revision pair is laid out: the two sides beside each other, or one
+// above the other.
+type Mode = "split" | "unified";
 
 // One search result: a definition, or one member of one, with how well it matched
 // (0 exact, 1 prefix, 2 substring, 3 only through the module path).
@@ -91,6 +96,10 @@ const CHIPS = 12;
 const el = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 const esc = (s: string): string =>
   s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c] ?? c);
+// For an attribute inside painted text, whose lines are split on the newline: a
+// tooltip puts a type on its own line, and that newline must not read as a
+// line of source.
+const attr = (s: string): string => esc(s).replace(/\n/g, "&#10;");
 
 class Viewer {
   private readonly rel: Relations;
@@ -110,6 +119,15 @@ class Viewer {
   private readonly openMods = new Set<string>();
   // The relation rows the reader asked to see in full.
   private readonly wide = new Set<string>();
+  // The folded runs of unchanged lines a reader opened, by card, field and run.
+  private readonly unfolded = new Set<string>();
+  // How a revision pair is laid out: old beside new, or old above new. The page
+  // has one setting, remembered; a card can depart from it, for this visit.
+  private mode: Mode = "split";
+  private readonly modeOf = new Map<string, Mode>();
+  // The old revision's relations, when the loaded diff carries what it takes to
+  // rebuild them: what every row on a card had before.
+  private readonly was: { rel: Relations; members: Members; mentions: Mentions } | null;
   // The cards whose note field is open. A note is rare and a definition is not, so
   // the field appears when there is one or when it has been asked for, rather than
   // standing on every card in the deck waiting to be used.
@@ -130,6 +148,8 @@ class Viewer {
       rail: HTMLElement;
       main: HTMLElement;
       railToggle: HTMLElement;
+      /// The page's split/unified control, shown only with a revision pair.
+      mode: HTMLElement;
     },
     storage: Storage | null = null,
     /// The mark store's namespace. The caller joins the artifact URL with the
@@ -140,7 +160,12 @@ class Viewer {
     this.rel = new Relations(index);
     this.members = new Members(index);
     this.mentions = new Mentions(index);
+    const before = revs?.before(index) ?? null;
+    this.was = before
+      ? { rel: new Relations(before), members: new Members(before), mentions: new Mentions(before) }
+      : null;
     this.review = new Review(unit, storage);
+    this.mode = this.review.diffMode();
     // Follow marks across the renames a loaded diff knows as facts, and across
     // file moves by unambiguous content address.
     this.review.rekey(
@@ -161,6 +186,8 @@ class Viewer {
       : this.index.envelope.title;
     this.nodes.title.innerHTML =
       esc(title) + testLayer(this.index.envelope.tests) + brokenModules(this.index.modules);
+    this.nodes.mode.hidden = !this.revs;
+    this.reflectMode();
     this.renderList("");
     this.nodes.search.addEventListener("input", () => this.renderList(this.nodes.search.value));
     window.addEventListener("hashchange", () => this.fromUrl());
@@ -641,6 +668,13 @@ class Viewer {
     if (!d) return this.builtinCard(id);
     const focused = id === this.focused ? " is-focused" : "";
     const mark = this.review.get(id);
+    // The other revision of this definition, when there is one to compare
+    // with. Every field below is then shown as a diff against it: the body,
+    // but equally the signature, the doc, the claims, the relation rows: a
+    // review reads the whole definition, and "changed" with no sign of what
+    // asks the reviewer to find out.
+    const old = this.other(id);
+    const mode = this.layout(id);
     // A definition's own text is what a reviewer reads, so the body is the card's
     // subject and it is shown: opening a card is already the reader asking for it,
     // and a second click to see what they asked for is a click that buys nothing.
@@ -648,28 +682,30 @@ class Viewer {
     const shut = this.folded.has(id);
     // Nothing relates to `compose` in either direction because it calls only its
     // own parameters. Omit the empty relation strip.
-    const rel = this.relations(id);
+    const rel = this.relations(id, mode);
     return `<article class="card${focused}${shut ? " is-folded" : ""}" data-card="${esc(id)}">
       <header class="card-head">
-        ${kindBadge(d.kind)}
+        ${old && old.kind !== d.kind ? kindBadge(old.kind, "del") + kindBadge(d.kind, "ins") : kindBadge(d.kind)}
         <button class="card-name" data-fold aria-expanded="${!shut}">${esc(qualified(d))}</button>
-        ${d.vis === "public" ? '<span class="tag tag--pub">pub</span>' : ""}
-        ${d.vis === "opaque" ? '<span class="tag tag--pub">opaque</span>' : ""}
-        ${(d.claims ?? []).map((c) => `<span class="tag tag--claim">${esc(c)}</span>`).join("")}
-        ${d.deprecated ? `<span class="tag tag--dep" data-tip="${esc(`deprecated: ${d.deprecated}`)}">deprecated</span>` : ""}
+        ${visTags(d, old)}
+        ${claimTags(d, old)}
+        ${deprecatedTags(d, old)}
         <span class="grow"></span>
-        ${this.seen(id, mark)}
-        <button class="seen${mark?.note ? " is-on" : ""}" data-write-note="${esc(id)}"
-          data-tip="${mark?.note ? "edit this note" : "attach a note"}">note</button>
-        ${hashChip(d)}
-        <button class="card-x" data-close="${esc(id)}" data-tip="close">&times;</button>
+        <span class="card-actions">
+          ${old ? modeToggle(mode, id) : ""}
+          ${this.seen(id, mark)}
+          <button class="seen${mark?.note ? " is-on" : ""}" data-write-note="${esc(id)}"
+            data-tip="${mark?.note ? "edit this note" : "attach a note"}">note</button>
+          ${hashChip(d)}
+          <button class="card-x" data-close="${esc(id)}" data-tip="close">&times;</button>
+        </span>
       </header>
       ${this.since(id)}
-      ${this.signature(d)}
-      ${this.effectRow(d)}
-      ${d.doc ? `<div class="card-doc">${renderDoc(d.doc)}</div>` : ""}
-      ${this.before(id)}
-      ${this.sources(d)}
+      ${this.signature(d, old, mode)}
+      ${this.effectRow(d, old, mode)}
+      ${this.docs(d, old, mode)}
+      ${this.before(id, d, old)}
+      ${this.sources(d, old, mode)}
       ${rel ? `<div class="card-rel">${rel}</div>` : ""}
       ${
         mark?.note || this.noting.has(id)
@@ -699,8 +735,10 @@ class Viewer {
         ${builtinBadge()}
         <button class="card-name" data-fold aria-expanded="${!shut}">${esc(p.name)}</button>
         <span class="grow"></span>
-        <span class="hash hash--none" data-tip="no content address: implemented in the compiler, not defined in Prism">&mdash;</span>
-        <button class="card-x" data-close="${esc(id)}" data-tip="close">&times;</button>
+        <span class="card-actions">
+          <span class="hash hash--none" data-tip="no content address: implemented in the compiler, not defined in Prism">&mdash;</span>
+          <button class="card-x" data-close="${esc(id)}" data-tip="close">&times;</button>
+        </span>
       </header>
       ${p.signature ? `<div class="card-sig"><code>${esc(p.name)} : ${this.linkedSig(p.signature)}</code></div>` : ""}
       ${p.doc ? `<div class="card-doc"><p>${esc(p.doc)}</p></div>` : ""}
@@ -721,6 +759,16 @@ class Viewer {
         this.index.describe(word),
       )}">${word}</button>`;
     });
+  }
+
+  // The other revision's record of a definition, when the card can compare the
+  // two: the loaded diff has an old side for it and the loaded index the new.
+  // A definition only added or only removed has one revision, and reading that
+  // one as a diff against nothing would tint every line of it for no reader's
+  // benefit; its status line says what it is.
+  private other(id: string): Def | undefined {
+    const e = this.revs?.get(id);
+    return e?.old && this.index.byId.has(id) ? e.old : undefined;
   }
 
   // The read mark. Its freshness is a comparison against the revision the mark was
@@ -758,56 +806,191 @@ class Viewer {
     }
   }
 
-  // What the other revision had, when it had something different.
+  // What the other revision had, and in which fields.
   //
   // A `cone` entry gets a sentence rather than a second copy of identical text:
   // its bytes did not move, only its address did, because something it depends on
   // changed. The classification lets a reviewer read the three edits without
   // scrolling past all forty-seven consequences.
-  private before(id: string): string {
+  //
+  // A `changed` entry names what changed ("doc", "body, calls", "claims"), so
+  // the line is a table of contents for the diffs below it rather than a bare
+  // verdict. The hash sees none of a doc edit and a reviewer would otherwise be
+  // left to find the one line that moved.
+  private before(id: string, d: Def, old: Def | undefined): string {
     const e = this.revs?.get(id);
     if (!e) return "";
     const was = e.old_id && e.old_id !== id ? ` &middot; was <code>${esc(e.old_id)}</code>` : "";
     const head = (note: string): string =>
       `<div class="card-was"><span class="status status--${e.status}">${e.status}</span>${note}${was}</div>`;
+    const moved = old ? this.changes(id, d, old) : [];
+    const fields = moved.length > 0 ? ` ${moved.join(", ")}` : "";
     switch (e.status) {
       case "cone":
-        return head(" text unchanged; re-addressed because a dependency moved");
+        return head(
+          ` text unchanged; re-addressed because a dependency moved${moved.length > 0 ? ` &middot;${fields}` : ""}`,
+        );
       case "added":
         return head(" new in this revision");
       case "removed":
         return head(" gone in this revision");
       case "moved":
-        return head(" same bytes, new name");
+        return head(` same bytes, new name${moved.length > 0 ? ` &middot;${fields}` : ""}`);
+      case "cosmetic":
+        return head(" same behavior, different text");
       default:
-        return head(e.status === "cosmetic" ? " same behavior, different text" : " previously");
+        return head(fields || " previously");
     }
   }
 
-  // The definition's text, beside the other revision's when there is one.
+  // The fields that differ between a definition's two revisions, in the order
+  // the card shows them, then the relation rows that moved.
+  private changes(id: string, d: Def, old: Def): string[] {
+    const out: string[] = [];
+    if (old.kind !== d.kind) out.push("kind");
+    if ((old.vis ?? "private") !== (d.vis ?? "private")) out.push("visibility");
+    if (!sameList(old.claims ?? [], d.claims ?? [])) out.push("claims");
+    if ((old.deprecated ?? "") !== (d.deprecated ?? "")) out.push("deprecation");
+    if ((old.ty ?? "") !== (d.ty ?? "")) out.push("signature");
+    if ((old.effects ?? "") !== (d.effects ?? "")) out.push("effects");
+    if ((old.doc ?? "") !== (d.doc ?? "")) out.push("doc");
+    if (old.source !== d.source) out.push("body");
+    for (const { kind, dir, label } of RELATIONS) {
+      const was = this.wasTargets(id, kind, dir);
+      if (was && !sameSet(was, this.targets(id, kind, dir))) out.push(label);
+    }
+    const members = this.memberUsers(id);
+    for (const [name, { now, was }] of members) {
+      if (was && !sameSet(was, now)) out.push(name);
+    }
+    return out;
+  }
+
+  // The definition's text, as a diff against the other revision's when there is
+  // one.
   //
-  // Side by side rather than stacked: the two versions of a definition are being
-  // compared, and comparing means reading across, not scrolling. The left pane is
-  // painted and linked exactly like the right one, from the old revision's own
+  // A diff, not two bodies: the revisions are being compared, and two full texts
+  // side by side leave the reader to find the edit by eye, which on a body of any
+  // length is the work a diff exists to do. Lines are aligned by the shortest edit
+  // script and each edited line marks the words that moved, so a one-token change
+  // in a twelve-line body reads as one token (`viewer-diff.ts`).
+  //
+  // Both sides are painted and linked exactly alike, each from its own revision's
   // occurrence rows. A name in the version you are moving away from is as worth
   // following as one in the version you are moving to, and the artifact carries
   // what it needs to do that. A target the old revision had and this one does not
   // keeps its text without becoming a link, the same rule every other reference
   // outside the index follows.
-  private sources(d: Def): string {
-    const old = this.revs?.get(d.id)?.old;
-    const now = `<pre class="card-src"><code>${this.body(d)}</code></pre>`;
-    if (!old || old.source === d.source) return now;
-    return `<div class="card-diff">
-      <div class="card-pane">
-        <div class="card-pane-head">before</div>
-        <pre class="card-src card-src--was"><code>${this.body(old)}</code></pre>
-      </div>
-      <div class="card-pane">
-        <div class="card-pane-head">after</div>
-        ${now}
-      </div>
-    </div>`;
+  private sources(d: Def, old: Def | undefined, mode: Mode): string {
+    if (!old || old.source === d.source) {
+      return `<pre class="card-src"><code>${this.body(d)}</code></pre>`;
+    }
+    return this.fieldDiff(
+      `${d.id} source`,
+      mode,
+      old.source,
+      d.source,
+      (def, emph) => this.painted(def.source, this.marks(def), def.tokens, def, false, emph),
+      [old, d],
+      { heads: true },
+    );
+  }
+
+  // One field of a definition, in both revisions, as a diff laid out by `mode`.
+  //
+  // `paint` renders one side's text, painted and linked where the artifact
+  // carries spans for it and escaped where it does not, with the words that moved
+  // marked. The same engine and the same rows serve the body, the signature,
+  // the effect row and the docstring: a reviewer reads them all, and a change
+  // to any of them is shown the same way.
+  private fieldDiff(
+    key: string,
+    mode: Mode,
+    oldText: string,
+    newText: string,
+    paint: (def: Def, emph: Range[]) => string,
+    [old, now]: [Def, Def],
+    opts: { heads?: boolean; cls?: string } = {},
+  ): string {
+    const td = textDiff(oldText, newText);
+    const was = oldText === "" ? [] : paint(old, td.oldEmph).split("\n");
+    const is = newText === "" ? [] : paint(now, td.newEmph).split("\n");
+    return mode === "split"
+      ? this.splitDiff(key, td, was, is, opts)
+      : this.unifiedDiff(key, td, was, is, opts);
+  }
+
+  // Two revisions of one text, side by side, line against line.
+  //
+  // Aligned rather than two independent panes: comparing means reading across,
+  // and reading across only works when the line on the left is the line the one
+  // on the right replaced. An edit that drops three lines and adds one pads the
+  // short side, so the rows stay level. Long runs of kept lines fold to their
+  // ends, since a body that is mostly unchanged is mostly not what the reader
+  // came for; the fold says how much it hides and opens on a click.
+  //
+  // `was` and `now` are the two texts painted, one fragment per line.
+  private splitDiff(
+    key: string,
+    td: TextDiff,
+    was: string[],
+    now: string[],
+    { heads = false, cls = "" }: { heads?: boolean; cls?: string },
+  ): string {
+    const cell = (
+      side: "old" | "new",
+      line: string | undefined,
+      mark: "" | "del" | "ins",
+    ): string =>
+      line === undefined
+        ? `<div class="dl dl--${side} dl--pad"></div>`
+        : `<div class="dl dl--${side}${mark ? ` is-${mark}` : ""}"><code>${line}</code></div>`;
+    let html = `<div class="card-diff card-diff--split${cls}">${
+      heads ? '<div class="diff-head">before</div><div class="diff-head">after</div>' : ""
+    }`;
+    td.blocks.forEach((b, i) => {
+      if (b.kind === "change") {
+        for (let k = 0; k < Math.max(b.dels.length, b.inss.length); k++) {
+          html += cell("old", was[b.dels[k]], "del") + cell("new", now[b.inss[k]], "ins");
+        }
+        return;
+      }
+      const fold = `${key} ${i}`;
+      const { head, hidden, tail } = folded(b.pairs, this.unfolded.has(fold));
+      for (const [a, c] of head) html += cell("old", was[a], "") + cell("new", now[c], "");
+      if (hidden.length > 0) html += foldRow(fold, hidden.length);
+      for (const [a, c] of tail) html += cell("old", was[a], "") + cell("new", now[c], "");
+    });
+    return `${html}</div>`;
+  }
+
+  // Two revisions of one text, one above the other: what was dropped, then what
+  // was introduced, in place among the lines both have. Narrower than the split
+  // layout and the better fit for prose, and for a reader who moves down rather
+  // than across.
+  private unifiedDiff(
+    key: string,
+    td: TextDiff,
+    was: string[],
+    now: string[],
+    { cls = "" }: { heads?: boolean; cls?: string },
+  ): string {
+    const cell = (line: string, mark: "" | "del" | "ins"): string =>
+      `<div class="dl${mark ? ` is-${mark}` : ""}"><code>${line}</code></div>`;
+    let html = `<div class="card-diff card-diff--unified${cls}">`;
+    td.blocks.forEach((b, i) => {
+      if (b.kind === "change") {
+        for (const a of b.dels) html += cell(was[a], "del");
+        for (const c of b.inss) html += cell(now[c], "ins");
+        return;
+      }
+      const fold = `${key} ${i}`;
+      const { head, hidden, tail } = folded(b.pairs, this.unfolded.has(fold));
+      for (const [, c] of head) html += cell(now[c], "");
+      if (hidden.length > 0) html += foldRow(fold, hidden.length);
+      for (const [, c] of tail) html += cell(now[c], "");
+    });
+    return `${html}</div>`;
   }
 
   // The definition's own text, with every name that resolves to a definition
@@ -833,14 +1016,60 @@ class Viewer {
   // signature are the same colour and the same link they are in a body, which is
   // the point: the signature is the part a reader reads first. It leads with the
   // name it types, so the line reads as the declaration a reader would write.
-  private signature(d: Def): string {
+  //
+  // Against the other revision, when the type moved, it is the two types as a
+  // diff: a widened effect row or a new parameter is the first thing a reviewer
+  // of a changed function needs, and the two types share most of their text.
+  private signature(d: Def, old: Def | undefined, mode: Mode): string {
+    if (old && (old.ty ?? "") !== (d.ty ?? "")) {
+      return `<div class="card-sig card-sig--diff">${this.fieldDiff(
+        `${d.id} signature`,
+        mode,
+        old.ty ?? "",
+        d.ty ?? "",
+        (def, emph) =>
+          this.painted(def.ty ?? "", def.ty_refs ?? [], def.ty_tokens, def, false, emph),
+        [old, d],
+      )}</div>`;
+    }
     if (!d.ty) return "";
     return `<div class="card-sig"><code>${esc(d.name)} : ${this.painted(d.ty, d.ty_refs ?? [], d.ty_tokens, d, true)}</code></div>`;
   }
 
-  private effectRow(d: Def): string {
+  private effectRow(d: Def, old: Def | undefined, mode: Mode): string {
+    if (old && (old.effects ?? "") !== (d.effects ?? "")) {
+      return `<div class="card-eff card-eff--diff"><div class="diff-cap">effects</div>${this.fieldDiff(
+        `${d.id} effects`,
+        mode,
+        old.effects ?? "",
+        d.effects ?? "",
+        (def, emph) =>
+          this.painted(def.effects ?? "", def.eff_refs ?? [], def.eff_tokens, def, false, emph),
+        [old, d],
+      )}</div>`;
+    }
     if (!d.effects) return "";
     return `<div class="card-eff">effects <code>${this.painted(d.effects, d.eff_refs ?? [], d.eff_tokens, d, true)}</code></div>`;
+  }
+
+  // The docstring, rendered; or, when the other revision's differs, the two as
+  // a diff of their text. A diff of the rendering would have to mark words
+  // inside paragraphs and fences it also has to lay out, and the text is what
+  // the author edited: the lines as written, with the words that moved marked,
+  // is the honest view and the one every other diff tool shows for prose.
+  private docs(d: Def, old: Def | undefined, mode: Mode): string {
+    if (old && (old.doc ?? "") !== (d.doc ?? "")) {
+      return `<div class="card-doc card-doc--diff">${this.fieldDiff(
+        `${d.id} doc`,
+        mode,
+        old.doc ?? "",
+        d.doc ?? "",
+        (def, emph) => this.painted(def.doc ?? "", [], undefined, def, false, emph),
+        [old, d],
+        { cls: " card-diff--prose" },
+      )}</div>`;
+    }
+    return d.doc ? `<div class="card-doc">${renderDoc(d.doc)}</div>` : "";
   }
 
   // Paint one text with its highlight spans and wrap its references in links.
@@ -855,14 +1084,54 @@ class Viewer {
   // since that is exactly the ambiguity the qualification exists to resolve. No
   // signature in the standard library does, across 1108 qualified names, but a
   // corpus property is not a guarantee.
+  //
+  // `emph` marks the parts of the text a revision pair moved (see `sources`).
+  // They are the innermost layer: a mark wraps only raw text, inside whatever
+  // token and reference it falls in, so it can never cross either's markup.
+  //
+  // A newline is never inside a tag. A token that spans lines (a multi-line
+  // string, a block comment) is painted once per line, so the result splits on
+  // `\n` into one well-formed fragment per line, which is what lets a diff lay
+  // the lines of two revisions beside each other without painting twice.
   private painted(
     text: string,
     marks: Mark[],
     packed: string | undefined,
     d: Def,
     brief = false,
+    emph: Range[] = [],
   ): string {
     const spans = decodeSpans(packed, this.index.tokenClasses);
+    // One slice of text, escaped, in its token class, with the emphasised parts
+    // marked and every line break left bare between tags.
+    let em = 0;
+    const chunk = (from: number, to: number, cls: string | null): string => {
+      let html = "";
+      let pos = from;
+      while (em < emph.length && emph[em][1] <= from) em++;
+      const piece = (lo: number, hi: number, marked: boolean): void => {
+        html += text
+          .slice(lo, hi)
+          .split("\n")
+          .map((line) => {
+            let h = esc(line);
+            if (line && marked) h = `<mark class="dfx">${h}</mark>`;
+            if (line && cls) h = `<span class="tk-${cls}">${h}</span>`;
+            return h;
+          })
+          .join("\n");
+      };
+      for (let i = em; i < emph.length && emph[i][0] < to; i++) {
+        const lo = Math.max(emph[i][0], pos);
+        const hi = Math.min(emph[i][1], to);
+        if (hi <= lo) continue;
+        if (lo > pos) piece(pos, lo, false);
+        piece(lo, hi, true);
+        pos = hi;
+      }
+      if (pos < to) piece(pos, to, false);
+      return html;
+    };
     const distinct = new Map<string, string>();
     if (brief) {
       for (const m of marks) {
@@ -884,11 +1153,11 @@ class Viewer {
         const from = Math.max(spans[i].start, lo);
         const to = Math.min(spans[i].end, hi);
         if (to <= from) continue;
-        html += esc(text.slice(pos, from));
-        html += `<span class="tk-${spans[i].cls}">${esc(text.slice(from, to))}</span>`;
+        html += chunk(pos, from, null);
+        html += chunk(from, to, spans[i].cls);
         pos = to;
       }
-      return html + esc(text.slice(pos, hi));
+      return html + chunk(pos, hi, null);
     };
 
     let html = "";
@@ -912,12 +1181,12 @@ class Viewer {
       if (r.ty !== undefined) {
         // Hoverable, not navigable: a local binds here and leads nowhere.
         const tip = `${text.slice(r.start, r.end)}\n${r.ty}`;
-        html += `<span class="ref ref--local" data-tip="${esc(tip)}">${name}</span>`;
+        html += `<span class="ref ref--local" data-tip="${attr(tip)}">${name}</span>`;
         continue;
       }
       if (r.member !== undefined) {
         const users = this.members.users(d.id, r.member);
-        const tip = esc(this.aboutMember(d, r.member));
+        const tip = attr(this.aboutMember(d, r.member));
         // A link only when there is somewhere to go. A member nothing uses still
         // says what it is on hover, but an underline promising a destination that
         // does not exist is worse than plain text.
@@ -931,7 +1200,7 @@ class Viewer {
       // Prism definition because it is implemented in the compiler, which is a
       // different fact from a name this artifact happens not to cover. It still
       // leads somewhere, to the builtin's own synthesized card.
-      const tip = `data-tip="${esc(this.index.describe(r.target))}"`;
+      const tip = `data-tip="${attr(this.index.describe(r.target))}"`;
       switch (this.index.classify(r.target)) {
         case "definition":
           html += `<button class="ref" data-goto="${esc(r.target)}" ${tip}>${name}</button>`;
@@ -979,12 +1248,12 @@ class Viewer {
   // synthesized card; a target the index genuinely does not cover is rendered as
   // plain text rather than a dead link, so it reads as leaving the index instead
   // of looking broken.
-  private relations(id: string): string {
+  private relations(id: string, mode: Mode): string {
     // Edges first, members after. On a type the member rows are the heaviest thing
     // on the card. `Option` has 127 uses of `None` and 135 of `Some`, and leading
     // with them buries the summary of what the definition relates to under the
     // detail of who writes each of its parts.
-    return this.edgeRows(id) + this.memberRows(id);
+    return this.edgeRows(id, mode) + this.memberRows(id, mode);
   }
 
   // One row per member of this declaration that anything uses: who writes `pure`,
@@ -996,26 +1265,48 @@ class Viewer {
   // occurrence set, read from the far end. A reference to a member resolves to
   // the declaration that owns it, and the span it covers says which member was
   // meant. Without this a class card can list its instances and nothing else.
-  private memberRows(id: string): string {
-    return this.members
-      .of(id)
-      .map(([name, users]) =>
+  private memberRows(id: string, mode: Mode): string {
+    return [...this.memberUsers(id)]
+      .map(([name, { now, was }]) =>
         this.row({
           key: `${id} member ${name}`,
           label: `<code>${esc(name)}</code>`,
           hint: `definitions that write \`${name}\`, a member of this declaration`,
-          targets: users,
+          targets: now,
+          was,
+          mode,
           attrs: ` rel--member" data-uses="${esc(name)}`,
         }),
       )
       .join("");
   }
 
-  private edgeRows(id: string): string {
+  // Each member of a declaration with its users, in this revision and, when the
+  // card has the other revision to compare with, in that one. A member only the
+  // old revision had is here with no current users, so its row can show them
+  // going.
+  private memberUsers(id: string): Map<string, { now: string[]; was?: string[] }> {
+    const out = new Map<string, { now: string[]; was?: string[] }>();
+    for (const [name, users] of this.members.of(id)) out.set(name, { now: users });
+    const oldId = this.oldId(id);
+    if (oldId === undefined || !this.was) return out;
+    for (const [name, users] of this.was.members.of(oldId)) {
+      const at = out.get(name) ?? { now: [] };
+      at.was = users;
+      out.set(name, at);
+    }
+    // A member the old revision did not have had no users then, and its row
+    // should say so: every user is arriving.
+    for (const at of out.values()) at.was ??= [];
+    return new Map([...out].sort((a, b) => a[0].localeCompare(b[0])));
+  }
+
+  private edgeRows(id: string, mode: Mode): string {
     return RELATIONS.map(({ kind, dir, label, hint }) => {
-      const edges = this.rel.get(kind, dir, id);
+      const targets = this.targets(id, kind, dir);
+      const was = this.wasTargets(id, kind, dir);
       if (kind !== "calls") {
-        return this.row({ key: `${id} ${kind} ${dir}`, label, hint, targets: edges });
+        return this.row({ key: `${id} ${kind} ${dir}`, label, hint, targets, was, mode });
       }
       // The call rows lead with what the source names, in the order it names them,
       // and then with what the dependency graph adds. The two are not the same set:
@@ -1025,15 +1316,81 @@ class Viewer {
       // A chip is marked when it is only the second, since a name appearing in
       // a row and nowhere in the body it belongs to reads as a bug.
       const written = this.mentions.get(dir, id);
-      const derived = edges.filter((t) => !written.includes(t));
+      const oldId = this.oldId(id);
+      const wasWritten = oldId === undefined ? [] : (this.was?.mentions.get(dir, oldId) ?? []);
       return this.row({
         key: `${id} ${kind} ${dir}`,
         label,
         hint: `${hint}; a dotted chip is reached through elaboration rather than named here`,
-        targets: [...written, ...derived],
-        derived: new Set(derived),
+        targets,
+        was,
+        mode,
+        derived: new Set(targets.filter((t) => !written.includes(t))),
+        wasDerived: new Set((was ?? []).filter((t) => !wasWritten.includes(t))),
       });
     }).join("");
+  }
+
+  // One relation row's targets in this revision: the edges, led for the call
+  // rows by what the source names (see `edgeRows`).
+  private targets(id: string, kind: EdgeKind, dir: "in" | "out"): string[] {
+    const edges = this.rel.get(kind, dir, id);
+    if (kind !== "calls") return edges;
+    const written = this.mentions.get(dir, id);
+    return [...written, ...edges.filter((t) => !written.includes(t))];
+  }
+
+  // The same row in the other revision, or `undefined` when the pair cannot
+  // say: no diff is loaded, this definition has no other revision, or the
+  // artifact predates the edge delta. The same lookups over the old graph,
+  // keyed by the name the definition had then.
+  private wasTargets(id: string, kind: EdgeKind, dir: "in" | "out"): string[] | undefined {
+    const oldId = this.oldId(id);
+    if (oldId === undefined || !this.was) return undefined;
+    const edges = this.was.rel.get(kind, dir, oldId);
+    if (kind !== "calls") return edges;
+    const written = this.was.mentions.get(dir, oldId);
+    return [...written, ...edges.filter((t) => !written.includes(t))];
+  }
+
+  // What the definition was called in the other revision, when it has one.
+  private oldId(id: string): string | undefined {
+    const e = this.revs?.get(id);
+    return e?.old && this.index.byId.has(id) ? (e.old_id ?? id) : undefined;
+  }
+
+  /// Lay every card's diffs out split or unified. Remembered, and it resets any
+  /// card that had departed from the page's setting: the page-wide control is
+  /// the reader saying how they want to read, and a card's override was only
+  /// ever relative to the previous answer.
+  setMode(mode: Mode): void {
+    this.mode = mode;
+    this.modeOf.clear();
+    this.review.setDiffMode(mode);
+    this.reflectMode();
+    this.render();
+  }
+
+  /// Lay one card's diffs out its own way, for this visit.
+  setCardMode(id: string, mode: Mode): void {
+    this.modeOf.set(id, mode);
+    this.render();
+  }
+
+  private layout(id: string): Mode {
+    return this.modeOf.get(id) ?? this.mode;
+  }
+
+  private reflectMode(): void {
+    for (const b of this.nodes.mode.querySelectorAll<HTMLElement>("[data-mode]")) {
+      b.setAttribute("aria-pressed", String(b.dataset.mode === this.mode));
+    }
+  }
+
+  /// Open a folded run of unchanged lines in a diff.
+  unfold(key: string): void {
+    this.unfolded.add(key);
+    this.render();
   }
 
   /// Show a row in full rather than capped.
@@ -1054,42 +1411,105 @@ class Viewer {
     label: string;
     hint: string;
     targets: string[];
+    /// The same row in the other revision, when the pair can say.
+    was?: string[];
+    mode?: Mode;
     attrs?: string;
     /// Targets the dependency graph reports that the source does not name.
     derived?: Set<string>;
+    /// The same classification in the old revision.
+    wasDerived?: Set<string>;
   }): string {
-    const { key, label, hint, targets, attrs = "", derived } = spec;
-    if (targets.length === 0) return "";
+    const {
+      key,
+      label,
+      hint,
+      targets,
+      was,
+      mode = "split",
+      attrs = "",
+      derived,
+      wasDerived,
+    } = spec;
+    if (targets.length === 0 && !was?.length) return "";
+    const head = (count: string): string =>
+      `<span class="rel-label" data-tip="${esc(hint)}">${label}
+      <span class="rel-n">${count}</span></span>`;
+    // The row as it is, when there is nothing to compare with or the two
+    // revisions agree.
+    if (!was || sameSet(was, targets)) {
+      return `<div class="rel${attrs}">${head(String(targets.length))}
+      <div class="rel-chips">${this.chips(key, targets, derived)}</div></div>`;
+    }
+    // The row moved. Split: what it was beside what it is, each side marking
+    // what the other lacks. Unified: one row, what it is with what arrived
+    // marked, and what left struck through at the end.
+    const count = `${was.length} &rarr; ${targets.length}`;
+    if (mode === "split") {
+      return `<div class="rel rel--split${attrs}">${head(count)}
+      <div class="rel-chips rel-chips--old">${this.chips(`${key} was`, was, wasDerived, (t) => (targets.includes(t) ? "" : "del"))}</div>
+      <div class="rel-chips rel-chips--new">${this.chips(key, targets, derived, (t) => (was.includes(t) ? "" : "ins"))}</div></div>`;
+    }
+    const gone = was.filter((t) => !targets.includes(t));
+    const unifiedDerived = new Set([...(derived ?? []), ...gone.filter((t) => wasDerived?.has(t))]);
+    return `<div class="rel${attrs}">${head(count)}
+      <div class="rel-chips">${this.chips(key, [...targets, ...gone], unifiedDerived, (t) =>
+        gone.includes(t) ? "del" : was.includes(t) ? "" : "ins",
+      )}</div></div>`;
+  }
+
+  // The chips of one row, capped (see `row`), each marked by `mark` as staying,
+  // arriving or leaving.
+  private chips(
+    key: string,
+    targets: string[],
+    derived: Set<string> | undefined,
+    mark: (t: string) => "" | "del" | "ins" = () => "",
+  ): string {
     const all = this.wide.has(key);
-    const shown = all ? targets : targets.slice(0, CHIPS);
-    const chips = shown
-      .map((t) => {
-        const only = derived?.has(t) ?? false;
-        const why = only
-          ? "\nreached through elaboration, not named in this source: a constant is inlined, an instance method is lifted out"
-          : "";
-        const tip = `data-tip="${esc(this.index.describe(t) + why)}"`;
-        const mark = only ? " chip--derived" : "";
-        switch (this.index.classify(t)) {
-          case "definition":
-            return `<button class="chip${mark}" data-goto="${esc(t)}" ${tip}>${esc(short(t))}</button>`;
-          case "builtin": {
-            const to = this.index.primitive(t)?.name ?? t;
-            return `<button class="chip chip--prim${mark}" data-goto="${esc(to)}" ${tip}>${esc(short(t))}</button>`;
-          }
-          default:
-            return `<span class="chip chip--out${mark}" ${tip}>${esc(short(t))}</span>`;
-        }
-      })
-      .join("");
+    // The cap never hides a change: a chip that arrived or left is the row's
+    // point, and "+1 more" over the one that moved would be the row saying
+    // nothing.
+    const shown = all ? targets : targets.filter((t, i) => i < CHIPS || mark(t) !== "");
+    const chips = shown.map((t) => this.chip(t, derived?.has(t) ?? false, mark(t))).join("");
     const rest = targets.length - shown.length;
     const more =
       rest > 0 || all
         ? `<button class="chip chip--more" data-wide="${esc(key)}">${all ? "fewer" : `+${rest} more`}</button>`
         : "";
-    return `<div class="rel${attrs}"><span class="rel-label" data-tip="${esc(hint)}">${label}
-      <span class="rel-n">${targets.length}</span></span>
-      <div class="rel-chips">${chips}${more}</div></div>`;
+    return chips + more;
+  }
+
+  // One chip. A target names a definition, a builtin, or something outside the
+  // index; and a chip from the other revision may name a definition by a name
+  // this revision no longer has. A renamed one leads to its new name, since the
+  // diff knows the rename as a fact; a removed one leads to the card its old
+  // record still opens, since a reviewer wants to see what went.
+  private chip(t: string, derived: boolean, mark: "" | "del" | "ins"): string {
+    const why = derived
+      ? "\nreached through elaboration, not named in this source: a constant is inlined, an instance method is lifted out"
+      : "";
+    const cls = `chip${derived ? " chip--derived" : ""}${mark ? ` is-${mark}` : ""}`;
+    const name = esc(short(t));
+    const to = this.revs?.movedTo.get(t);
+    if (to !== undefined) {
+      const tip = `data-tip="${esc(`${this.index.describe(to)}\nwas ${t}${why}`)}"`;
+      return `<button class="${cls}" data-goto="${esc(to)}" ${tip}>${name}</button>`;
+    }
+    const tip = `data-tip="${esc(this.index.describe(t) + why)}"`;
+    switch (this.index.classify(t)) {
+      case "definition":
+        return `<button class="${cls}" data-goto="${esc(t)}" ${tip}>${name}</button>`;
+      case "builtin": {
+        const prim = this.index.primitive(t)?.name ?? t;
+        return `<button class="${cls} chip--prim" data-goto="${esc(prim)}" ${tip}>${name}</button>`;
+      }
+      default:
+        if (this.revs?.get(t)?.status === "removed") {
+          return `<button class="${cls}" data-goto="${esc(t)}" data-tip="${esc(`${t}\nremoved in this revision${why}`)}">${name}</button>`;
+        }
+        return `<span class="${cls} chip--out" ${tip}>${name}</span>`;
+    }
   }
 }
 
@@ -1192,6 +1612,11 @@ const brokenModules = (modules: IndexModule[]): string => {
 const short = (id: string): string => id.split(/[.@]/).at(-1) ?? id;
 const shortName = short;
 
+// The row standing in for a folded run of unchanged lines: how many, and an
+// invitation. Spans both columns of a split diff.
+const foldRow = (key: string, n: number): string =>
+  `<button class="dl-fold" data-unfold="${esc(key)}" data-tip="show these lines">&#8943; ${n} unchanged lines</button>`;
+
 const hashChip = (d: Def): string =>
   d.hash
     ? `<button class="hash" data-tip="${esc(d.hash)}\nclick to copy" data-copy="${esc(d.hash)}">${d.hash.slice(0, HASH_CHIP)}</button>`
@@ -1222,11 +1647,64 @@ export const KINDS: Record<string, { label: string; gloss: string }> = {
 // nothing: `T`, `C`, `I` and a bare `!` are four different guesses, and three of
 // the thirteen kinds wanted `!` at once. The word costs a few pixels and needs no
 // legend; the tooltip carries the sentence the word still leaves out.
-const kindBadge = (kind: string): string => {
+const kindBadge = (kind: string, mark: "" | "del" | "ins" = ""): string => {
   const k = KINDS[kind];
   const tip = k ? `${k.label}: ${k.gloss}` : kind;
-  return `<span class="kind kind--${kind}" data-tip="${esc(tip)}">${esc(k?.label ?? kind)}</span>`;
+  return `<span class="kind kind--${kind}${mark ? ` is-${mark}` : ""}" data-tip="${esc(tip)}">${esc(k?.label ?? kind)}</span>`;
 };
+
+// The header tags, each against the other revision's when the card has one: a
+// tag the old revision had and this one lacks is struck through, one this
+// revision gained is marked as arriving. A claims edit (`total` to `assume
+// total`) moves no hashed byte and no line of source, and this is where it
+// shows.
+const visTags = (d: Def, old: Def | undefined): string => {
+  const now = d.vis ?? "private";
+  const was = old ? (old.vis ?? "private") : now;
+  const tag = (vis: string, mark: "" | "del" | "ins"): string =>
+    vis === "private" && !mark
+      ? ""
+      : `<span class="tag tag--pub${mark ? ` is-${mark}` : ""}">${vis === "public" ? "pub" : esc(vis)}</span>`;
+  return was === now ? tag(now, "") : tag(was, "del") + tag(now, "ins");
+};
+
+const claimTags = (d: Def, old: Def | undefined): string => {
+  const now = d.claims ?? [];
+  const was = old ? (old.claims ?? []) : now;
+  const tag = (c: string, mark: "" | "del" | "ins"): string =>
+    `<span class="tag tag--claim${mark ? ` is-${mark}` : ""}">${esc(c)}</span>`;
+  return (
+    was
+      .filter((c) => !now.includes(c))
+      .map((c) => tag(c, "del"))
+      .join("") + now.map((c) => tag(c, was.includes(c) ? "" : "ins")).join("")
+  );
+};
+
+const deprecatedTags = (d: Def, old: Def | undefined): string => {
+  const now = d.deprecated;
+  const was = old ? old.deprecated : now;
+  const tag = (why: string, mark: "" | "del" | "ins"): string =>
+    `<span class="tag tag--dep${mark ? ` is-${mark}` : ""}" data-tip="${esc(`deprecated: ${why}`)}">deprecated</span>`;
+  if (was === now) return now ? tag(now, "") : "";
+  return (was ? tag(was, "del") : "") + (now ? tag(now, "ins") : "");
+};
+
+// The split/unified control: on the page header for every card, and on a card
+// for itself. Two buttons rather than one that toggles, so the current layout
+// is read off it and not inferred from what clicking did.
+const modeToggle = (mode: Mode, card?: string): string => {
+  const own = card === undefined ? "" : ` data-card-mode="${esc(card)}"`;
+  const btn = (m: Mode, tip: string): string =>
+    `<button class="seg-btn" data-mode="${m}"${own} aria-pressed="${mode === m}" data-tip="${tip}">${m}</button>`;
+  return `<span class="seg" role="group" aria-label="diff layout">${btn("split", "old beside new")}${btn("unified", "old above new")}</span>`;
+};
+
+const sameList = (a: string[], b: string[]): boolean =>
+  a.length === b.length && a.every((x, i) => x === b[i]);
+
+const sameSet = (a: string[], b: string[]): boolean =>
+  a.length === b.length && a.every((x) => b.includes(x));
 
 // The badge naming a compiler primitive, wherever one stands in for a kind
 // badge. One word for all three primitive kinds: the signature says the rest,
@@ -1345,6 +1823,18 @@ function wireNavigation(viewer: Viewer): void {
       viewer.widen(wide.dataset.wide ?? "");
       return;
     }
+    const unfold = target?.closest<HTMLElement>("[data-unfold]");
+    if (unfold) {
+      viewer.unfold(unfold.dataset.unfold ?? "");
+      return;
+    }
+    const mode = target?.closest<HTMLElement>("[data-mode]");
+    if (mode) {
+      const m: Mode = mode.dataset.mode === "unified" ? "unified" : "split";
+      if (mode.dataset.cardMode !== undefined) viewer.setCardMode(mode.dataset.cardMode, m);
+      else viewer.setMode(m);
+      return;
+    }
     const mod = target?.closest<HTMLElement>("[data-mod]");
     if (mod) {
       viewer.toggleModule(mod.dataset.mod ?? "");
@@ -1415,6 +1905,7 @@ async function boot(): Promise<void> {
         rail: el("rail"),
         main: el("viewer-main"),
         railToggle: el("rail-toggle"),
+        mode: el("diff-mode"),
       },
       globalThis.localStorage ?? null,
       // Marks are namespaced by where the artifact lives *and* what it calls

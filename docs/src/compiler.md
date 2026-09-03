@@ -2702,7 +2702,9 @@ $ prism index --diff before.json after.json
   Changed   Lib.base
 ```
 
-The viewer accepts the older artifact through `?diff=<url>` and renders changed definitions side by side. Authored changes lead the review; cosmetic and dependency-cone changes remain available without overwhelming the primary diff.
+The artifact carries both revisions of every definition that moved, and the edges one revision has and the other does not, so a consumer holding the new index recovers the old dependency graph exactly without a second index.
+
+The viewer accepts the older artifact through `?diff=<url>` and shows every field of a changed definition as a diff against the other revision: the body line by line with the words that moved marked inside an edited line, the signature, effect row and docstring the same way, the claims, visibility and deprecation tags as what left and what arrived, and each relation row (callers, calls, tests, uses, members) as the set it was against the set it is. The status line names which fields moved. A page-wide control lays the pairs out split (old beside new) or unified (old above new), remembered across visits, and any card can choose its own layout. Authored changes lead the review; cosmetic and dependency-cone changes remain available without overwhelming the primary diff.
 
 ### 30.3 Review State and Questions {#review-state}
 

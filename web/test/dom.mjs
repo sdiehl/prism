@@ -70,6 +70,7 @@ export function nodes() {
     rail: new El("nav"),
     main: new El("main"),
     railToggle: new El("button"),
+    mode: new El("span"),
   };
 }
 
@@ -138,6 +139,15 @@ export function plain(html) {
 export function card(html, id) {
   const at = html.split(`data-card="${id}"`)[1];
   return at ? at.split("</article>")[0] : "";
+}
+
+/// The cells of one side of a split diff, concatenated.
+export function column(html, side) {
+  return [
+    ...html.matchAll(new RegExp(`<div class="dl dl--${side}[^"]*"><code>(.*?)</code></div>`, "gs")),
+  ]
+    .map((m) => m[1])
+    .join("\n");
 }
 
 export function done() {

@@ -1023,6 +1023,59 @@ fn a_revision_against_itself_has_no_entries() {
     let d = super::diff(&index, &index).expect("comparable schemes");
     assert!(d.entries.is_empty());
     assert_eq!(d.envelope.counts.unchanged, index.defs.len());
+    // The edge delta is carried even when empty: "nothing moved" is a fact, and
+    // must read differently from an artifact that never recorded edges at all.
+    let edges = d.edges.as_ref().expect("delta present");
+    assert!(edges.added.is_empty() && edges.removed.is_empty());
+    let json = d.to_json().expect("serialize");
+    assert!(json.contains("\"edges\": {}"), "{json}");
+}
+
+// The entries say what a definition's text became; the edge delta says what
+// its neighbourhood became, which the entries cannot: the other end of an edge
+// is usually an untouched definition the entry list omits. A consumer holding
+// the new index recovers the old edge set as `new − added + removed`.
+#[test]
+fn the_diff_carries_the_edges_that_moved() {
+    use super::Edge;
+    let old = index_of(REV_OLD);
+    // `top` stops calling `mid` and calls `spare` instead.
+    let new = index_of(&REV_OLD.replace("mid(n) + mid(n)", "spare(n) + spare(n)"));
+    let d = super::diff(&old, &new).expect("comparable schemes");
+    let edges = d.edges.as_ref().expect("delta present");
+    let calls = |from: &str, to: &str| Edge {
+        kind: EdgeKind::Calls,
+        from: from.into(),
+        to: to.into(),
+    };
+    assert!(edges.removed.contains(&calls("top", "mid")), "{edges:?}");
+    assert!(edges.added.contains(&calls("top", "spare")), "{edges:?}");
+    // Exactly the set difference, in both directions.
+    let old_set: BTreeSet<&Edge> = old.edges.iter().collect();
+    let new_set: BTreeSet<&Edge> = new.edges.iter().collect();
+    let recovered: BTreeSet<&Edge> = new_set
+        .iter()
+        .copied()
+        .filter(|e| !edges.added.contains(e))
+        .chain(edges.removed.iter())
+        .collect();
+    assert_eq!(recovered, old_set);
+    // And the delta survives the artifact boundary; an artifact without one
+    // still reads, as unknown rather than as empty.
+    let back = super::IndexDiff::from_json(&d.to_json().expect("serialize")).expect("reads back");
+    assert_eq!(back.edges, d.edges);
+    let without = d.to_json().expect("serialize");
+    let without = without.replace(
+        &format!(
+            ",\n  \"edges\": {}",
+            serde_json::to_string_pretty(edges)
+                .expect("serialize")
+                .replace('\n', "\n  ")
+        ),
+        "",
+    );
+    let older = super::IndexDiff::from_json(&without).expect("reads back");
+    assert!(older.edges.is_none(), "{without}");
 }
 
 // The artifact is the input to a `--check` gate, so identical source must yield

@@ -3,6 +3,15 @@
    for the two-column reading surface. */
 @import "./theme.css";
 
+/* The diff tints: the site's own red and green, washed for a whole line and
+   stronger for the words inside it that moved. */
+:root {
+  --del-wash: rgb(164 54 47 / 9%);
+  --del-mark: rgb(164 54 47 / 26%);
+  --ins-wash: rgb(47 111 79 / 10%);
+  --ins-mark: rgb(47 111 79 / 28%);
+}
+
 .viewer-body {
   display: flex;
   flex-direction: column;
@@ -35,6 +44,43 @@
   color: var(--ink);
   background: var(--bg-soft);
   border-color: var(--line);
+}
+
+/* The split/unified control: two buttons reading as one, the current layout
+   pressed. On the page header for every card, and on a card for itself. */
+.seg {
+  display: inline-flex;
+  flex: 0 0 auto;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.seg[hidden] {
+  display: none;
+}
+
+.seg-btn {
+  padding: 1px 7px;
+  font-family: var(--ui);
+  font-size: 10.5px;
+  color: var(--muted);
+  cursor: pointer;
+  background: var(--bg-soft);
+  border: 0;
+}
+
+.seg-btn + .seg-btn {
+  border-left: 1px solid var(--line);
+}
+
+.seg-btn:hover {
+  color: var(--ink);
+}
+
+.seg-btn[aria-pressed="true"] {
+  color: var(--panel);
+  background: var(--accent);
 }
 
 /* With the rail away the deck takes the whole width; the grid must give up the
@@ -251,6 +297,15 @@ kbd {
   padding: 8px 10px 10px;
 }
 
+/* Keep the card's controls as one unit. At narrow widths the unit moves below
+   the definition name instead of shrinking the diff selector out of sight. */
+.card-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 7px;
+  align-items: center;
+}
+
 /* Expanded by default: opening a card is already the reader asking for the
    definition, and a second click to see what they asked for buys nothing. Folding
    stays for a card being kept open for reference, and folds to the signature. */
@@ -305,6 +360,56 @@ kbd {
   padding: 0 10px 8px 32px;
   font-size: 11.5px;
   color: var(--warn);
+}
+
+/* A field shown as a diff bleeds to the card's edges, whatever measure or box
+   it has when shown whole: every split on a card must divide at the same
+   line, and the body's divider is the card's midpoint. The cells carry the
+   indent the whole field had, so the text still starts where it did. */
+.card-sig.card-sig--diff,
+.card-eff.card-eff--diff,
+.card-doc.card-doc--diff {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  background: none;
+  border-radius: 0;
+}
+
+.card-sig--diff .card-diff,
+.card-eff--diff .card-diff,
+.card-doc--diff .card-diff {
+  padding: 3px 0 6px;
+  border-top: 0;
+}
+
+.card-sig--diff .card-diff {
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.card-eff--diff .card-diff {
+  font-size: 11.5px;
+}
+
+/* The name of a field whose diff has no room for it inline: a caption row
+   above, in the field's own colour. */
+.diff-cap {
+  padding: 0 0 0 32px;
+}
+
+/* Prose diffs in the reading face; the inline-code styling a rendered
+   docstring gives its `code` must not reach the cells. */
+.card-doc--diff .card-diff--prose {
+  font-family: var(--ui);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.card-doc--diff .dl code {
+  padding: 0;
+  font: inherit;
+  background: none;
 }
 
 .card-doc {
@@ -451,44 +556,128 @@ button.ref--prim:hover {
   color: var(--muted);
 }
 
-/* Two revisions of one definition, side by side: comparing means reading across,
-   not scrolling. Each pane scrolls its own long lines, so neither can push the
-   other off the card. */
+/* Two revisions of one text, as a diff. Rows are aligned: the line on the left
+   is the line the one on the right replaced, with the short side of an uneven
+   edit padded so that the rows stay level. Cells wrap rather than scroll: a
+   pane that scrolls on its own unaligns the very rows the layout exists to
+   align. */
 .card-diff {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  padding: 5px 0 11px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.45;
   border-top: 1px solid var(--line);
 }
 
-.card-pane {
-  min-width: 0;
-  border-left: 1px solid var(--line);
+.card-diff--split {
+  grid-template-columns: 1fr 1fr;
 }
 
-.card-pane:first-child {
-  border-left: 0;
+.card-diff--unified {
+  grid-template-columns: 1fr;
 }
 
-.card-pane-head {
-  padding: 5px 12px 0 32px;
+/* Folding hides the body whichever form it takes; a diffed signature stays,
+   as the signature does. */
+.card.is-folded > .card-diff {
+  display: none;
+}
+
+.diff-head {
+  padding: 0 12px 4px 32px;
+  font-family: var(--ui);
   font-size: 10px;
   letter-spacing: 0.03em;
   color: var(--muted);
   text-transform: uppercase;
 }
 
-.card-diff .card-src {
-  border-top: 0;
+/* One line of one side. The gutter carries the sign, for a reader who does not
+   see the tint; an empty line still takes its row. */
+.dl {
+  position: relative;
+  min-width: 0;
+  min-height: 1.45em;
+  padding: 0 12px 0 32px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
-/* The old pane is styled exactly like the new one. It was tinted and dimmed back
-   when the two were stacked and nothing else told them apart; side by side, the
-   captions and the divider do that, and a wash over one side now suggests a
-   meaning it does not have. In a conventional diff a tinted region marks what
-   changed, and this tints a whole pane regardless. It also made the version being
-   reviewed the harder of the two to read. */
-.card-src--was {
-  border-top: 0;
+.dl::before {
+  position: absolute;
+  left: 16px;
+  color: var(--muted);
+  content: "";
+}
+
+.dl--new {
+  border-left: 1px solid var(--line);
+}
+
+/* What one revision has and the other does not. The whole line is tinted, and
+   within an edited line the words that moved are marked more strongly: the
+   tint says "here", the mark says "this". */
+.dl.is-del {
+  background: var(--del-wash);
+}
+
+.dl.is-ins {
+  background: var(--ins-wash);
+}
+
+.dl.is-del::before {
+  content: "−";
+}
+
+.dl.is-ins::before {
+  content: "+";
+}
+
+.dfx {
+  color: inherit;
+  border-radius: 2px;
+}
+
+.is-del .dfx {
+  background: var(--del-mark);
+}
+
+.is-ins .dfx {
+  background: var(--ins-mark);
+}
+
+/* The padding opposite a line the other side lacks: hatched, so it reads as
+   "nothing here" rather than as an empty line. */
+.dl--pad {
+  background: repeating-linear-gradient(
+    -45deg,
+    transparent,
+    transparent 5px,
+    var(--bg-soft) 5px,
+    var(--bg-soft) 6px
+  );
+}
+
+/* A folded run of unchanged lines: one row across both columns, saying how
+   much it hides. */
+.dl-fold {
+  grid-column: 1 / -1;
+  padding: 2px 12px 2px 32px;
+  font-family: var(--ui);
+  font-size: 11px;
+  color: var(--muted);
+  text-align: left;
+  cursor: pointer;
+  background: var(--bg-soft);
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.dl-fold:hover {
+  color: var(--ink);
+  background: var(--accent-wash);
 }
 
 .status {
@@ -676,6 +865,43 @@ button.ref--prim:hover {
   border-color: var(--accent);
 }
 
+/* A chip, tag or badge the other revision had and this one lacks, or the
+   reverse: the same red and green the line diff uses, and a strike through
+   what left so the mark survives without its colour. */
+.chip.is-del,
+.tag.is-del,
+.kind.is-del {
+  color: var(--err);
+  text-decoration: line-through;
+  background: var(--del-wash);
+  border-color: rgb(164 54 47 / 35%);
+}
+
+.chip.is-ins,
+.tag.is-ins,
+.kind.is-ins {
+  color: var(--accent-strong);
+  background: var(--ins-wash);
+  border-color: rgb(47 111 79 / 45%);
+}
+
+/* A relation row in both revisions, side by side: what it was, what it is.
+   The divider sits at the card's midpoint, where the body's does, so every
+   split on the card reads down one line. The strip is inset 32px on the
+   left and 10px on the right, the label takes 92px, and the row's 8px gap
+   falls twice before the new half; so the old half is half the strip, less
+   half the inset difference (11px), the label, and the two gaps. */
+.rel--split {
+  display: grid;
+  grid-template-columns: 92px calc(50% - 11px - 92px - 16px) 1fr;
+  align-items: baseline;
+}
+
+.rel-chips--new {
+  padding-left: 8px;
+  border-left: 1px solid var(--line);
+}
+
 /* A compiler primitive: muted like a name that leaves the index, but a live
    link to the builtin's synthesized card. */
 .chip--prim {
@@ -798,29 +1024,64 @@ button.ref--prim:hover {
   cursor: help;
 }
 
-/* One column when there is no room for two: a pane squeezed to nothing compares
-   nothing. */
-@media (max-width: 1000px) {
-  .card-diff {
-    grid-template-columns: 1fr;
-  }
-
-  .card-pane {
-    border-top: 1px solid var(--line);
-    border-left: 0;
-  }
-
-  .card-pane:first-child {
-    border-top: 0;
-  }
-}
-
 @media (max-width: 720px) {
+  /* The desktop header has enough room for its identity, revision summary and
+     navigation on one line. Give each a readable row on a narrow screen rather
+     than squeezing the summary one word wide and pushing links off the page. */
+  .viewer-body > header {
+    flex-wrap: wrap;
+    gap: 0.45rem 0.7rem;
+    padding: 0.65rem 0.75rem;
+  }
+
+  .viewer-body > header #index-title,
+  .viewer-body > header .controls {
+    flex: 1 0 100%;
+  }
+
+  .viewer-body > header #index-title {
+    order: 2;
+    line-height: 1.35;
+  }
+
+  .viewer-body > header .controls {
+    order: 3;
+    flex-wrap: wrap;
+    gap: 0.45rem 0.8rem;
+  }
+
   .viewer-main {
     grid-template-columns: 1fr;
   }
 
   .rail {
     max-height: 32vh;
+  }
+
+  .card-head {
+    flex-wrap: wrap;
+  }
+
+  .card-name {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    text-align: left;
+  }
+
+  .card-actions {
+    margin-left: auto;
+  }
+
+  /* Keep the code itself split: even here it remains useful. Only the relation
+     label moves above its pair, restoring two real half-width chip columns in
+     place of the fixed label plus a 30px old side. */
+  .rel--split {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    row-gap: 4px;
+  }
+
+  .rel--split .rel-label {
+    grid-column: 1 / -1;
+    text-align: left;
   }
 }

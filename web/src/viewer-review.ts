@@ -128,6 +128,21 @@ export class Review {
     }
   }
 
+  /// How a card lays a revision pair out: the two sides beside each other, or
+  /// one above the other. A layout preference like the rail's, kept the same
+  /// way and for the same reason.
+  diffMode(): "split" | "unified" {
+    return this.storage?.getItem(`${VERSION}:diff`) === "unified" ? "unified" : "split";
+  }
+
+  setDiffMode(mode: "split" | "unified"): void {
+    try {
+      this.storage?.setItem(`${VERSION}:diff`, mode);
+    } catch {
+      // Quota or a disabled store: the preference is not worth failing over.
+    }
+  }
+
   get(id: string): Mark | undefined {
     return this.marks.get(id);
   }
