@@ -66,7 +66,7 @@ blake3 = "1"
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 insta = { version = "1.41", features = ["glob"] }
 prism-core = { path = "crates/prism-core", features = ["test-hooks"] }
-rstest = "0.26.1"
+rstest = "0.27.0"
 
 [[bench]]
 name = "compile"
