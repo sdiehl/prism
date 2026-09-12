@@ -15,7 +15,7 @@ anstyle = "1"
 ariadne = "0.6"
 lalrpop-util = { version = "0.23", features = ["lexer"] }
 logos = "0.16"
-marginalia = "0.2.1"
+marginalia = "0.3.0"
 num-bigint = "0.5.0"
 offsides = "0.2"
 prism-common = { path = "../prism-common" }

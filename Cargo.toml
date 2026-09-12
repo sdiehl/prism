@@ -20,7 +20,7 @@ glob = { version = "0.3", optional = true }
 im = "15.1"
 libmimalloc-sys = { version = "0.1", optional = true }
 logos = "0.16"
-marginalia = "0.2.1"
+marginalia = "0.3.0"
 num-bigint = "0.5.0"
 prism-common = { path = "crates/prism-common" }
 prism-core = { path = "crates/prism-core" }
