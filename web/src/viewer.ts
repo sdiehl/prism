@@ -150,6 +150,7 @@ class Viewer {
       railToggle: HTMLElement;
       /// The page's split/unified control, shown only with a revision pair.
       mode: HTMLElement;
+      expansion: HTMLElement;
     },
     storage: Storage | null = null,
     /// The mark store's namespace. The caller joins the artifact URL with the
@@ -187,13 +188,15 @@ class Viewer {
     this.nodes.title.innerHTML =
       esc(title) + testLayer(this.index.envelope.tests) + brokenModules(this.index.modules);
     this.nodes.mode.hidden = !this.revs;
+    this.nodes.expansion.hidden = !this.revs;
     this.reflectMode();
     this.renderList("");
     this.nodes.search.addEventListener("input", () => this.renderList(this.nodes.search.value));
     window.addEventListener("hashchange", () => this.fromUrl());
     document.addEventListener("keydown", (e) => this.onKey(e));
-    // Render before consulting the URL: with no fragment nothing is open, and the
-    // deck still has to show what this surface is for rather than nothing at all.
+    // A diff is a scrollable review from the start. This is deliberately not a
+    // stored preference: every visit starts with the authored changes expanded.
+    this.open = this.authoredIds();
     this.render();
     this.fromUrl();
   }
@@ -262,6 +265,7 @@ class Viewer {
   show(id: string): void {
     if (!this.lookup(id) && !this.index.builtins.has(id)) return;
     if (!this.open.includes(id)) this.open.push(id);
+    this.folded.delete(id);
     this.focused = id;
     history.replaceState(null, "", `#${encodeURIComponent(id)}`);
     this.render();
@@ -271,6 +275,24 @@ class Viewer {
   private close(id: string): void {
     this.open = this.open.filter((o) => o !== id);
     if (this.focused === id) this.focused = this.open.at(-1) ?? null;
+    this.render();
+  }
+
+  private authoredIds(): string[] {
+    return (this.revs?.all() ?? [])
+      .filter((e) => e.status !== "cone" && e.status !== "cosmetic" && this.lookup(e.id))
+      .map((e) => e.id);
+  }
+
+  /// Bulk actions include any context cards the reader opened. Expanding also
+  /// brings back authored changes that were closed, without duplicating cards.
+  setAllExpanded(expanded: boolean): void {
+    if (expanded) {
+      this.open = [...new Set([...this.open, ...this.authoredIds()])];
+      this.folded.clear();
+    } else {
+      for (const id of this.open) this.folded.add(id);
+    }
     this.render();
   }
 
@@ -1835,6 +1857,11 @@ function wireNavigation(viewer: Viewer): void {
       else viewer.setMode(m);
       return;
     }
+    const expansion = target?.closest<HTMLElement>("[data-expand-all]");
+    if (expansion) {
+      viewer.setAllExpanded(expansion.dataset.expandAll === "true");
+      return;
+    }
     const mod = target?.closest<HTMLElement>("[data-mod]");
     if (mod) {
       viewer.toggleModule(mod.dataset.mod ?? "");
@@ -1906,6 +1933,7 @@ async function boot(): Promise<void> {
         main: el("viewer-main"),
         railToggle: el("rail-toggle"),
         mode: el("diff-mode"),
+        expansion: el("diff-expansion"),
       },
       globalThis.localStorage ?? null,
       // Marks are namespaced by where the artifact lives *and* what it calls

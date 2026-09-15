@@ -306,12 +306,8 @@ kbd {
   align-items: center;
 }
 
-/* Expanded by default: opening a card is already the reader asking for the
-   definition, and a second click to see what they asked for buys nothing. Folding
-   stays for a card being kept open for reference, and folds to the signature. */
-.card.is-folded .card-src,
-.card.is-folded .card-doc,
-.card.is-folded .card-eff {
+/* A folded card keeps just its header so a collapsed review is easy to scan. */
+.card.is-folded > :not(.card-head) {
   display: none;
 }
 
@@ -576,12 +572,6 @@ button.ref--prim:hover {
 
 .card-diff--unified {
   grid-template-columns: 1fr;
-}
-
-/* Folding hides the body whichever form it takes; a diffed signature stays,
-   as the signature does. */
-.card.is-folded > .card-diff {
-  display: none;
 }
 
 .diff-head {

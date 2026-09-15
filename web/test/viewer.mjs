@@ -61,6 +61,8 @@ let bodies = 0;
 let corrupt = 0;
 const viewer = new Viewer(index, null, nodes(), new Storage());
 viewer.start();
+check("a single revision still starts with an empty deck", viewer.nodes.cards.innerHTML === "");
+check("bulk controls are hidden for a single revision", viewer.nodes.expansion.hidden);
 // Every definition, not just the referencing ones: member marks are inserted into
 // declarations that carry no references at all.
 for (const d of index.defs) {
@@ -715,6 +717,42 @@ const pair = new Viewer(
   new Storage(),
 );
 pair.start();
+check("a diff offers bulk expansion controls", !pair.nodes.expansion.hidden);
+check(
+  "authored changes start expanded in artifact order",
+  JSON.stringify(pair.open) === JSON.stringify(["Data.List.map", "Data.List.singleton"]) &&
+    !pair.nodes.cards.innerHTML.includes("is-folded"),
+);
+pair.setAllExpanded(false);
+check(
+  "collapse all keeps both cards as collapsed headers",
+  (pair.nodes.cards.innerHTML.match(/aria-expanded="false"/g) ?? []).length === 2 &&
+    pair.open.length === 2,
+);
+pair.show("Data.List.map");
+check(
+  "navigating to a collapsed card reopens only that definition",
+  card(pair.nodes.cards.innerHTML, "Data.List.map").includes('aria-expanded="true"') &&
+    card(pair.nodes.cards.innerHTML, "Data.List.singleton").includes('aria-expanded="false"'),
+);
+pair.close("Data.List.singleton");
+pair.setAllExpanded(true);
+pair.setAllExpanded(true);
+check(
+  "expand all restores closed changes without duplicates or consequence cards",
+  JSON.stringify(pair.open) === JSON.stringify(["Data.List.map", "Data.List.singleton"]) &&
+    !pair.nodes.cards.innerHTML.includes("is-folded"),
+);
+const bulkStore = new Storage();
+const collapsedVisit = new Viewer(index, pair.revs, nodes(), bulkStore);
+collapsedVisit.start();
+collapsedVisit.setAllExpanded(false);
+const nextVisit = new Viewer(index, pair.revs, nodes(), bulkStore);
+nextVisit.start();
+check(
+  "a fresh visit always starts expanded after a previous collapse all",
+  nextVisit.open.length === 2 && !nextVisit.nodes.cards.innerHTML.includes("is-folded"),
+);
 check("the title counts what moved", pair.nodes.title.innerHTML.includes("1 changed"));
 check(
   "the change group is a header like any other",
@@ -794,6 +832,10 @@ const withRemoved = new Viewer(
   new Storage(),
 );
 withRemoved.start();
+check(
+  "removed definitions are included in the initial review",
+  card(withRemoved.nodes.cards.innerHTML, "Data.List.dropped").length > 0,
+);
 withRemoved.show("Data.List.dropped");
 const removedCard = card(withRemoved.nodes.cards.innerHTML, "Data.List.dropped");
 check("a removed definition opens from the rail", removedCard.length > 0);

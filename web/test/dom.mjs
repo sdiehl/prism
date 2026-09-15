@@ -71,6 +71,7 @@ export function nodes() {
     main: new El("main"),
     railToggle: new El("button"),
     mode: new El("span"),
+    expansion: new El("span"),
   };
 }
 
