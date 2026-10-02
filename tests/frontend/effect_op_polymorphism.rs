@@ -37,6 +37,18 @@ const PERFORMED_AT_TWO_TYPES: &str = "effect Ask\n  ask(a) : Int\n\n\
 fn one() : Int = ask(1)\n\
 fn two() : Int = ask(\"x\")\n";
 
+/// The same, but the operation's variable is its *result* as well as its parameter,
+/// performed at two different result types inside one row. This is what a capability
+/// needs — one unparameterised effect answering whatever each call site asked for —
+/// and what an effect *parameter* cannot express, being fixed once per row.
+///
+/// The body's indent must sit inside one Rust line: a `\` line-continuation strips the
+/// next line's leading whitespace, and the offside rule then ends the statement at the
+/// `=`.
+const TWO_RESULT_TYPES_IN_ONE_ROW: &str = "type Key(a) = Key { id : String }\n\n\
+effect Read\n  read(Key(a)) : a\n\n\
+fn both() : (Int, String) ! {Read} =\n  ( read(Key { id = \"clock\" }), read(Key { id = \"url\" }) )\n";
+
 /// A monomorphic operation, unaffected by any of this.
 const MONOMORPHIC: &str = "effect Ask\n  ask(Int) : Int\n\nfn one() : Int = ask(1)\n";
 
@@ -104,6 +116,13 @@ fn neither_half_refuses_on_its_own() {
 fn the_operation_is_polymorphic_at_each_perform_site() {
     if let Err(e) = check(PERFORMED_AT_TWO_TYPES) {
         panic!("one op performed at two types: {e}");
+    }
+}
+
+#[test]
+fn an_operation_variable_is_instantiated_at_each_result_type() {
+    if let Err(e) = check(TWO_RESULT_TYPES_IN_ONE_ROW) {
+        panic!("one op at two result types in one row: {e}");
     }
 }
 
