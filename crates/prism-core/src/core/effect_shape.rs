@@ -239,6 +239,10 @@ fn tail_resumptive(comp: &Comp, aliases: &Rc<BTreeSet<Sym>>) -> bool {
 pub enum FoldAKind {
     Unit,
     Acc,
+    /// Anything else the clause computes for the resumption. Neither the
+    /// accumulator nor the resumed value can be rebuilt from the other, so the
+    /// clause answers with the two side by side.
+    Value,
 }
 
 /// Whether a forwarding handler has the identity return clause.
@@ -248,6 +252,24 @@ pub fn is_id_return(return_var: Option<Sym>, return_body: Option<&Comp>) -> bool
         (return_var, return_body),
         (Some(expected), Some(Comp::Return(Value::Var(actual)))) if *actual == expected
     )
+}
+
+/// Whether a forwarding handler's return clause passes the source's final
+/// value through.
+///
+/// The identity clause does so by name. A clause that returns unit does so as
+/// well when the value it discards is itself unit: both spellings denote the
+/// one inhabitant, and a producer answering unit is written both ways, by the
+/// binder in the stream combinators and by the constant where a surface form
+/// synthesizes the handler.
+#[must_use]
+pub fn passes_return(
+    return_var: Option<Sym>,
+    return_body: Option<&Comp>,
+    unit_source: bool,
+) -> bool {
+    is_id_return(return_var, return_body)
+        || (unit_source && matches!(return_body, Some(Comp::Return(Value::Unit))))
 }
 
 /// Whether a fold has the identity state-transformer return clause.
@@ -268,8 +290,12 @@ pub fn is_state_transformer(return_body: &Comp) -> bool {
 }
 
 /// Classify a parameter-passing fold clause.
+///
+/// `paired` admits a clause that resumes with a value of its own, which the
+/// accumulator-only conventions cannot carry; without it only the two shapes
+/// the accumulator alone rebuilds are folds.
 #[must_use]
-pub fn is_fold(op: &HandleOp, resume: ResumeUse) -> Option<FoldAKind> {
+pub fn is_fold(op: &HandleOp, resume: ResumeUse, paired: bool) -> Option<FoldAKind> {
     if resume.tail {
         return None;
     }
@@ -282,18 +308,41 @@ pub fn is_fold(op: &HandleOp, resume: ResumeUse) -> Option<FoldAKind> {
     let [accumulator] = params.as_slice() else {
         return None;
     };
-    fold_kind(body, Rc::new(resume_set(op.resume)), *accumulator)
+    fold_kind(
+        body,
+        Rc::new(resume_set(op.resume)),
+        Some(*accumulator),
+        paired,
+    )
+}
+
+/// Classify a tail-resumptive clause by what it resumes with.
+///
+/// Such a clause is a fold clause which leaves the accumulator alone: it takes
+/// no accumulator of its own, so nothing it resumes with can be one.
+#[must_use]
+pub fn direct_kind(op: &HandleOp, resume: ResumeUse, paired: bool) -> Option<FoldAKind> {
+    if !resume.tail {
+        return None;
+    }
+    resume_argument_kind(
+        &op.body,
+        &Rc::new(resume_set(op.resume)),
+        &Rc::new(BTreeMap::new()),
+        None,
+        paired,
+    )
 }
 
 fn resume_set(resume: Sym) -> BTreeSet<Sym> {
     BTreeSet::from([resume])
 }
 
-fn fold_argument(value: &Value, accumulator: Sym) -> Option<FoldAKind> {
+fn fold_argument(value: &Value, accumulator: Option<Sym>, paired: bool) -> Option<FoldAKind> {
     match value {
         Value::Unit => Some(FoldAKind::Unit),
-        Value::Var(name) if *name == accumulator => Some(FoldAKind::Acc),
-        _ => None,
+        Value::Var(name) if Some(*name) == accumulator => Some(FoldAKind::Acc),
+        _ => paired.then_some(FoldAKind::Value),
     }
 }
 
@@ -311,7 +360,12 @@ enum FoldFrame<'a> {
     },
 }
 
-fn fold_kind(comp: &Comp, aliases: Rc<BTreeSet<Sym>>, accumulator: Sym) -> Option<FoldAKind> {
+fn fold_kind(
+    comp: &Comp,
+    aliases: Rc<BTreeSet<Sym>>,
+    accumulator: Option<Sym>,
+    paired: bool,
+) -> Option<FoldAKind> {
     let mut frames = vec![FoldFrame::Comp {
         comp,
         aliases,
@@ -340,7 +394,7 @@ fn fold_kind(comp: &Comp, aliases: Rc<BTreeSet<Sym>>, accumulator: Sym) -> Optio
                     }
 
                     if let Some(kind) =
-                        resume_argument_kind(bound, &aliases, &substitutions, accumulator)
+                        resume_argument_kind(bound, &aliases, &substitutions, accumulator, paired)
                     {
                         let Comp::App(function, args) = body.as_ref() else {
                             return None;
@@ -437,7 +491,8 @@ fn resume_argument_kind<'a>(
     mut comp: &'a Comp,
     initial_aliases: &Rc<BTreeSet<Sym>>,
     initial_substitutions: &Rc<Substitutions<'a>>,
-    accumulator: Sym,
+    accumulator: Option<Sym>,
+    paired: bool,
 ) -> Option<FoldAKind> {
     let mut aliases = Rc::clone(initial_aliases);
     let mut substitutions = Rc::clone(initial_substitutions);
@@ -455,7 +510,7 @@ fn resume_argument_kind<'a>(
                 if !fv::value(argument).is_disjoint(&aliases) {
                     return None;
                 }
-                return resolve_fold_argument(argument, &substitutions, accumulator);
+                return resolve_fold_argument(argument, &substitutions, accumulator, paired);
             }
             Comp::Bind(bound, binder, body) => {
                 if matches!(bound.as_ref(), Comp::Return(Value::Var(name))
@@ -485,7 +540,8 @@ fn resume_argument_kind<'a>(
 fn resolve_fold_argument<'a>(
     mut value: &'a Value,
     substitutions: &Substitutions<'a>,
-    accumulator: Sym,
+    accumulator: Option<Sym>,
+    paired: bool,
 ) -> Option<FoldAKind> {
     let mut seen = BTreeSet::new();
     while let Value::Var(name) = value {
@@ -497,7 +553,7 @@ fn resolve_fold_argument<'a>(
         }
         value = inner;
     }
-    fold_argument(value, accumulator)
+    fold_argument(value, accumulator, paired)
 }
 
 fn thunks_in_value<'a>(value: &'a Value, thunks: &mut Vec<&'a Comp>) {
@@ -765,7 +821,8 @@ mod tests {
                             tail: false,
                             multishot: false,
                             in_thunk: false,
-                        }
+                        },
+                        false
                     ),
                     Some(FoldAKind::Acc)
                 );

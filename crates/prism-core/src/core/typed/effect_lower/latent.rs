@@ -11,7 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use prism_common::sym::Sym;
 
 use super::super::{
-    TypedComp, TypedCompKind, TypedCoreFn, TypedHandler, TypedValue, TypedValueKind,
+    CoreType, TypedComp, TypedCompKind, TypedCoreFn, TypedHandler, TypedValue, TypedValueKind,
 };
 
 /// Hard ceiling on the mask depth the analysis will track. A real program's
@@ -52,6 +52,14 @@ pub fn latent_map(fns: &[TypedCoreFn]) -> Latent {
 /// When a mask ladder exceeds `MAX_MASK_DEPTH`, the signature of a call
 /// cycle re-masking its own latent op (see the assert for the reasoning).
 pub fn latent(c: &TypedComp, fl: &Latent, out: &mut BTreeSet<MaskOp>) {
+    // A thunk answering with an effect cell is forced by a driver with
+    // nothing in hand, so its body runs on the evidence in scope where it was
+    // built: what it performs is the enclosing function's.
+    super::walk::each_value(c, &mut |value| {
+        for body in cell_bodies(value) {
+            latent(body, fl, out);
+        }
+    });
     match c.kind() {
         TypedCompKind::Do { operation, .. } => {
             out.insert(MaskOp {
@@ -105,6 +113,34 @@ pub fn latent(c: &TypedComp, fl: &Latent, out: &mut BTreeSet<MaskOp>) {
             }));
         }
         _ => {}
+    }
+}
+
+/// The bodies of the effect-cell thunks a value holds, through the bridges
+/// and aggregates it is built from. A lambda's body is the lambda's, so the
+/// evidence it reads is the scope's whatever its parameters are.
+fn cell_bodies(value: &TypedValue) -> Vec<&TypedComp> {
+    match value.kind() {
+        TypedValueKind::Thunk(body) => match value.ty() {
+            CoreType::Thunk(sig) if super::abi::answers_with_effect_cell(sig.result()) => {
+                match body.kind() {
+                    TypedCompKind::Lam(_, inner) => vec![inner],
+                    _ => vec![body],
+                }
+            }
+            _ => Vec::new(),
+        },
+        TypedValueKind::Reinterpret(inner)
+        | TypedValueKind::LoweredRepr { value: inner, .. }
+        | TypedValueKind::NewtypeRepr { value: inner, .. } => cell_bodies(inner),
+        TypedValueKind::Ctor { fields, .. }
+        | TypedValueKind::Tuple(fields)
+        | TypedValueKind::UnboxedTuple(fields) => fields.iter().flat_map(cell_bodies).collect(),
+        TypedValueKind::UnboxedRecord(fields) => fields
+            .iter()
+            .flat_map(|(_, field)| cell_bodies(field))
+            .collect(),
+        _ => Vec::new(),
     }
 }
 

@@ -319,7 +319,12 @@ impl EffectPlan {
     /// cells are ordered by name, not by interning order, so the artifact is a
     /// function of the program alone.
     #[must_use]
-    pub fn render(&self, strategy: EffectStrategy, declined: Option<Decline>) -> String {
+    pub fn render(
+        &self,
+        strategy: EffectStrategy,
+        declined: Option<Decline>,
+        state_declined: Option<&str>,
+    ) -> String {
         let mut out = String::new();
         let mut row = |label: &str, value: &str| {
             writeln!(out, "{label:<LABEL_WIDTH$}{value}").unwrap();
@@ -332,6 +337,8 @@ impl EffectPlan {
             "confined-decline",
             &declined.map_or_else(|| NOTHING.to_string(), |declined| declined.cell()),
         );
+        // Why the state engine declined, when it was tried and did.
+        row("state-decline", state_declined.unwrap_or(NOTHING));
         row("opaque-thunks", &self.opaque_thunks().to_string());
         row("escaping", &names(&self.escaping));
         row("thunk-effects", &names(self.thunk_effects()));

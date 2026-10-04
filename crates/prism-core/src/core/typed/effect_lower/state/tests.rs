@@ -11,7 +11,7 @@ use super::*;
 
 const FIRST_EVIDENCE_ID: i64 = 0;
 
-fn env_with(ops: &[(&str, &str, Type)]) -> VerifyEnv {
+pub(super) fn env_with(ops: &[(&str, &str, Type)]) -> VerifyEnv {
     let mut env = VerifyEnv::new();
     for (op, effect, result) in ops {
         env.insert_operation(
@@ -39,6 +39,16 @@ fn plan_over(entries: &[(&str, FoldAKind)], env: &VerifyEnv) -> FoldPlan {
         kinds,
         answer: StateAnswerMode::Accumulator,
         early: EarlyExitMode::Continue,
+        aborts: BTreeSet::new(),
+        taint: BTreeMap::new(),
+        by_value: BTreeSet::new(),
+        folded_aborts: BTreeSet::new(),
+        stepped: BTreeMap::new(),
+        folded_directs: BTreeSet::new(),
+        entry: BTreeSet::new(),
+        widen: true,
+        reify: false,
+        reified: BTreeSet::new(),
     }
 }
 
@@ -314,12 +324,14 @@ fn a_quantified_escaping_thunk_keeps_its_source_scheme() {
     let flow = ThunkFlow {
         ret: BTreeMap::new(),
         param: BTreeMap::new(),
+        carriers: flow::Carriers::none(),
     };
     let mut fresh = Fresh::new();
     let mut threader = Threader {
         plan: &plan,
         ids: &ids,
         env: &env,
+        declared: &env,
         latent: &Latent::new(),
         flow: &flow,
         drift: &DriftLog::new(true),
@@ -327,14 +339,20 @@ fn a_quantified_escaping_thunk_keeps_its_source_scheme() {
         evidence_types: BTreeMap::new(),
         signatures: BTreeMap::new(),
         step: None,
+        abort: None,
         row: EffRow::Empty,
+        returning: false,
+        scheme_row: None,
+        cells: BTreeMap::new(),
+        reified: BTreeSet::new(),
+        why: None,
         fresh: &mut fresh,
     };
 
     let rewritten = threader
         .rewrite_value(&thunk, &Loc::new(), &evs)
         .expect("the quantified producer thunk threads");
-    let expected = threaded_thunk_type(thunk.ty(), &plan.ops, &plan, &ids, &env)
+    let expected = threaded_thunk_type(thunk.ty(), &plan.ops, &plan, &ids, &env, None, None)
         .expect("the signature prepass types the same thunk");
 
     assert_eq!(rewritten.ty(), &expected);
@@ -389,7 +407,7 @@ fn an_unlabelled_forwarded_thunk_does_not_guess_from_a_same_spelled_binder() {
         EffRow::Empty,
     )));
 
-    let threaded = threaded_thunk_type(&declared, &plan.ops, &plan, &ids, &env)
+    let threaded = threaded_thunk_type(&declared, &plan.ops, &plan, &ids, &env, None, None)
         .expect("the forwarded thunk has a threaded type");
     let CoreType::Thunk(thunk) = threaded else {
         panic!("the result remains a thunk: {threaded:?}");
@@ -464,7 +482,7 @@ fn top_level_instantiation_preserves_a_nested_same_spelled_thunk_scheme() {
         ))),
         EffRow::Empty,
     )));
-    let threaded = threaded_thunk_type(&declared, &plan.ops, &plan, &ids, &env)
+    let threaded = threaded_thunk_type(&declared, &plan.ops, &plan, &ids, &env, None, None)
         .expect("the nested thunk receives typed evidence");
     let top = CoreFnSig::new(
         vec![CoreQuantifier::Type(outer_element)],
@@ -686,8 +704,14 @@ fn a_producer_takes_its_evidence_then_the_accumulator() {
     assert_eq!(names, ["ev@0", "ev@1", "st@"]);
 
     // A read pins the accumulator, so it is concrete and adds no quantifier.
-    assert_eq!(out.accumulator.ty(), &CoreType::Source(Type::Int));
-    assert_eq!(out.quantifiers, [CoreQuantifier::Row(out.ambient)]);
+    assert_eq!(
+        out.accumulator.as_ref().map(TypedBinder::ty),
+        Some(&CoreType::Source(Type::Int))
+    );
+    let EffRow::Var(ambient) = &out.row else {
+        panic!("a state producer runs at a bare ambient row: {:?}", out.row);
+    };
+    assert_eq!(out.quantifiers, [CoreQuantifier::Row(*ambient)]);
 }
 
 // A nullary operation's clause is not padded with a unit parameter the way an
@@ -729,12 +753,14 @@ fn a_read_in_tail_position_forces_its_evidence_on_the_accumulator() {
     let flow = ThunkFlow {
         ret: BTreeMap::new(),
         param: BTreeMap::new(),
+        carriers: flow::Carriers::none(),
     };
     let ids = OpIds::assign(&plan.ops).expect("ids");
     let mut threader = Threader {
         plan: &plan,
         ids: &ids,
         env: &env,
+        declared: &env,
         latent: &Latent::new(),
         flow: &flow,
         drift: &DriftLog::new(true),
@@ -742,7 +768,13 @@ fn a_read_in_tail_position_forces_its_evidence_on_the_accumulator() {
         evidence_types: BTreeMap::new(),
         signatures: BTreeMap::new(),
         step: None,
+        abort: None,
         row: EffRow::Empty,
+        returning: false,
+        scheme_row: None,
+        cells: BTreeMap::new(),
+        reified: BTreeSet::new(),
+        why: None,
         fresh: &mut Fresh::new(),
     };
     let read = TypedComp::new(
@@ -833,7 +865,8 @@ fn stripping_a_write_clause_leaves_the_new_accumulator() {
     let mut aliases: BTreeSet<Sym> = BTreeSet::new();
     aliases.insert(resume);
 
-    let (stripped, kind) = strip_state(&clause, &aliases, acc).expect("a write clause strips");
+    let (stripped, kind) =
+        strip_state(&clause, &aliases, acc, false).expect("a write clause strips");
 
     assert_eq!(kind, FoldAKind::Unit, "resuming with unit is a write");
     let TypedCompKind::Return(v) = stripped.kind() else {
@@ -858,28 +891,27 @@ fn a_clause_resuming_with_the_accumulator_is_a_read() {
     assert_eq!(
         a_kind(
             &binder_var(&TypedBinder::new(acc, CoreType::Source(Type::Int))),
-            acc
+            acc,
+            false
         ),
         Some(FoldAKind::Acc)
     );
     assert_eq!(
         a_kind(
             &TypedValue::new(CoreType::Source(Type::Unit), TypedValueKind::Unit),
-            acc
+            acc,
+            false
         ),
         Some(FoldAKind::Unit)
     );
-    // Resuming with anything else is not a fold this engine admits.
-    assert_eq!(
-        a_kind(
-            &binder_var(&TypedBinder::new(
-                Sym::new("other"),
-                CoreType::Source(Type::Int)
-            )),
-            acc
-        ),
-        None
-    );
+    // Resuming with anything else is a fold only where the pair carries the
+    // value, and no fold at all where the accumulator has to stand for it.
+    let other = binder_var(&TypedBinder::new(
+        Sym::new("other"),
+        CoreType::Source(Type::Int),
+    ));
+    assert_eq!(a_kind(&other, acc, false), None);
+    assert_eq!(a_kind(&other, acc, true), Some(FoldAKind::Value));
 }
 
 // A read whose result the tail reads: `let n = get() in return n` threads to
@@ -901,12 +933,14 @@ fn a_read_binds_the_accumulator_that_was_live_before_it() {
     let flow = ThunkFlow {
         ret: BTreeMap::new(),
         param: BTreeMap::new(),
+        carriers: flow::Carriers::none(),
     };
     let ids = OpIds::assign(&plan.ops).expect("ids");
     let mut threader = Threader {
         plan: &plan,
         ids: &ids,
         env: &env,
+        declared: &env,
         latent: &Latent::new(),
         flow: &flow,
         drift: &DriftLog::new(true),
@@ -914,7 +948,13 @@ fn a_read_binds_the_accumulator_that_was_live_before_it() {
         evidence_types: BTreeMap::new(),
         signatures: BTreeMap::new(),
         step: None,
+        abort: None,
         row: EffRow::Empty,
+        returning: false,
+        scheme_row: None,
+        cells: BTreeMap::new(),
+        reified: BTreeSet::new(),
+        why: None,
         fresh: &mut Fresh::new(),
     };
     let n = TypedBinder::new(Sym::new("n"), int.clone());
@@ -988,4 +1028,83 @@ fn independent_chains_pin_their_own_accumulators() {
         plan.accumulator_for(&ops(&["peek"])),
         Some(Accumulator::Pinned(CoreType::Source(Type::Bool)))
     );
+}
+
+// Widening a stored type happens once, on the declaration the source wrote,
+// and never compounds. The thunk spelling of a widened carrier is a fixed
+// point of a second pass. The source spelling of one is a quantified arrow at
+// a bare row, which a second pass beside a value operation refuses outright
+// rather than handing a second evidence parameter. A carrier whose one row
+// mixes the accumulator and value channels, and a buried arrow at a bare row
+// beside a value operation, are refused on the first pass.
+#[test]
+fn stored_widening_never_compounds_across_field_shapes() {
+    let env = env_with(&[("emit", "Emit", Type::Unit), ("pick", "Pick", Type::Int)]);
+    let mut plan = plan_over(
+        &[("emit", FoldAKind::Unit), ("pick", FoldAKind::Value)],
+        &env,
+    );
+    plan.by_value = ops(&["pick"]);
+    let ids = OpIds::assign(&plan.ops).expect("ids");
+    let arrow = |row: EffRow| Type::Fun(vec![Type::Int], row, Box::new(Type::Int));
+    let emit = || EffRow::singleton("Emit");
+    let pick = || EffRow::singleton("Pick");
+    let stored_thunk = CoreType::Thunk(Box::new(CompSig::new(
+        CoreType::Function(Box::new(CoreFnSig::new(
+            Vec::new(),
+            vec![CoreType::Source(Type::Int)],
+            CompSig::new(CoreType::Source(Type::Int), emit()),
+        ))),
+        EffRow::Empty,
+    )));
+    let shapes = [
+        (stored_thunk, true),
+        (
+            CoreType::Source(Type::Con(Sym::new("Box"), vec![arrow(emit())])),
+            false,
+        ),
+        (
+            CoreType::Source(Type::Tuple(vec![arrow(emit()), arrow(pick())])),
+            false,
+        ),
+        (
+            CoreType::Source(Type::Fun(
+                Vec::new(),
+                EffRow::Empty,
+                Box::new(arrow(emit())),
+            )),
+            false,
+        ),
+    ];
+    for (ty, fixed_point) in shapes {
+        let once = widen_stored(&ty, &plan, &ids, &env).expect("a carrier widens");
+        assert_ne!(once, ty, "the shape carries and must widen");
+        match widen_stored(&once, &plan, &ids, &env) {
+            Ok(twice) => {
+                assert!(fixed_point, "a source spelling must not widen twice");
+                assert_eq!(once, twice, "the thunk spelling is a fixed point");
+            }
+            Err(why) => {
+                assert!(!fixed_point, "the thunk spelling must widen again: {why}");
+                assert!(why.contains("polymorphic"), "{why}");
+            }
+        }
+    }
+    let mixed = CoreType::Source(Type::Con(
+        Sym::new("Box"),
+        vec![arrow(EffRow::canonical(
+            [Label::bare(Sym::new("Emit")), Label::bare(Sym::new("Pick"))],
+            EffRow::Empty,
+        ))],
+    ));
+    let refused = widen_stored(&mixed, &plan, &ids, &env)
+        .expect_err("one carrier cannot serve both channels");
+    assert!(refused.contains("share no channel"), "{refused}");
+    let polymorphic = CoreType::Source(Type::Con(
+        Sym::new("Box"),
+        vec![arrow(EffRow::Var(Sym::new("e")))],
+    ));
+    let refused = widen_stored(&polymorphic, &plan, &ids, &env)
+        .expect_err("a bare row beside a value operation has no one convention");
+    assert!(refused.contains("polymorphic"), "{refused}");
 }

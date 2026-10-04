@@ -684,6 +684,7 @@ mod tests {
                     (function.name(), slots)
                 })
                 .collect(),
+            carriers: flow::Carriers::none(),
         }
     }
 

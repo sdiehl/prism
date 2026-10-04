@@ -15,7 +15,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use prism::{build_on, default_roots, Config, EffectTier, ObservationTrace, Root};
+use prism::driver::{effect_strategy_on, ArtifactField};
+use prism::{
+    build_on, default_roots, BackendOpt, Config, EffectStrategy, EffectTier, ObservationTrace,
+    OptLevel, Root,
+};
 
 use super::{effect_plan, forced};
 use crate::support::{
@@ -26,11 +30,18 @@ use crate::support::{
 
 /// Gate-cache tag for a cross-tier verdict: one marker covers the whole grid
 /// for a program, since the verdict is a pure function of source and compiler.
-const CROSS_TAG: &str = "tier-cross";
+const CROSS_TAG: &str = "tier-cross-reification";
+const REIFIED_POSITION: &str = ArtifactField::Reify.label();
+const REIFIED_FORWARDING_CASE: &str = "tests/fixtures/tier_cross/reified_forwarded_resume.pr";
+const REIFIED_FORWARDING_OUTPUT: &[u8] = b"15\n";
 
 /// Committed adversarial programs this gate must always exercise; their output
 /// bytes sit on the seams (NUL, multibyte boundaries) where tiers could
-/// disagree without any ordinary corpus program noticing.
+/// disagree without any ordinary corpus program noticing, and the two deep
+/// resumption loops on the seam where a tier could disagree about whether the
+/// program terminates at all. Those two run long enough to exhaust the stack
+/// under a lowering that keeps a resumption hop on it, so an exit code is the
+/// observation that moves.
 const FIXTURE_CASES: &[&str] = &[
     "tests/fixtures/tier_cross/nul_byte.pr",
     "tests/fixtures/tier_cross/non_ascii.pr",
@@ -38,6 +49,21 @@ const FIXTURE_CASES: &[&str] = &[
     "tests/fixtures/tier_cross/thunk_param.pr",
     "tests/fixtures/tier_cross/convention_split_map.pr",
     "tests/fixtures/tier_cross/convention_split_map_unrolled.pr",
+    "tests/fixtures/tier_cross/deep_mixed_arms.pr",
+    "tests/fixtures/tier_cross/deep_forwarded_resume.pr",
+    "tests/fixtures/tier_cross/stream_guard_consumer.pr",
+    "tests/fixtures/tier_cross/branch_forwarded_resume.pr",
+    "tests/fixtures/tier_cross/abort_split_handlers.pr",
+    "tests/fixtures/tier_cross/abort_nested_payloads.pr",
+    "tests/fixtures/tier_cross/abort_skips_effects.pr",
+    "tests/fixtures/tier_cross/abort_crowded_state.pr",
+    "tests/fixtures/tier_cross/stored_generic_carrier.pr",
+    "tests/fixtures/tier_cross/adapter_island.pr",
+    "tests/fixtures/tier_cross/producer_residual_io.pr",
+    "tests/fixtures/tier_cross/effect_param_forwarder.pr",
+    "tests/fixtures/tier_cross/payload_forwarder_generic_clause.pr",
+    "tests/fixtures/tier_cross/payload_forcing_threaded_row.pr",
+    "tests/fixtures/tier_cross/stored_cells_thunk.pr",
 ];
 
 /// The convention-split three-way control. All three receive ordinary native
@@ -59,21 +85,43 @@ fn grid() -> Vec<(String, Config)> {
     let mut auto_cfg = Config::from_env();
     auto_cfg.update_flags(|flags| flags.compiler_cache = false);
     auto_cfg.update_flags(|flags| flags.quiet = true);
+    auto_cfg.update_flags(|flags| {
+        flags.effect_tier = EffectTier::Auto;
+        flags.consolidate = true;
+        flags.reify = false;
+        flags.trampoline = true;
+    });
+    let mut reified_cfg = auto_cfg.clone();
+    reified_cfg.update_flags(|flags| flags.reify = true);
     let mut points = vec![("auto".to_string(), auto_cfg)];
     for tier in EffectTier::ALL
         .into_iter()
         .filter(|tier| *tier != EffectTier::Auto)
     {
-        points.push((tier.label().to_string(), forced(tier, true)));
+        let mut cfg = forced(tier, true);
+        cfg.update_flags(|flags| {
+            flags.reify = false;
+            flags.trampoline = true;
+        });
+        points.push((tier.label().to_string(), cfg));
     }
+    let mut whole = forced(EffectTier::WholeProgramFreeMonad, false);
+    whole.update_flags(|flags| {
+        flags.reify = false;
+        flags.trampoline = true;
+    });
     points.push((
         format!("{}-no-erasures", EffectTier::WholeProgramFreeMonad.label()),
-        forced(EffectTier::WholeProgramFreeMonad, false),
+        whole,
     ));
+    points.push((REIFIED_POSITION.to_string(), reified_cfg));
     points
 }
 
-/// One configuration per distinct effect plan. A planning error is kept as its
+/// One configuration per distinct effect plan and reification setting. The
+/// state strategy label alone cannot distinguish direct threading from the
+/// queue-backed implementation, so the explicit reification position survives
+/// even when its plan text matches. A planning error is kept as its
 /// own "plan" so the survivor's build surfaces the real error: a program that
 /// plans under one configuration and not another has already diverged.
 fn survivors<'g>(
@@ -86,11 +134,20 @@ fn survivors<'g>(
     for (label, cfg) in grid {
         let plan =
             effect_plan(full, roots, cfg).unwrap_or_else(|error| format!("plan error: {error}"));
-        if seen.insert(plan) {
+        if seen.insert((cfg.flags().reify, plan)) {
             out.push((label.as_str(), cfg));
         }
     }
     out
+}
+
+/// The existing tier-engagement floor counts changes within the old grid,
+/// independently of the extra reification position retained above.
+fn distinct_tiers(points: &[(&str, &Config)]) -> usize {
+    points
+        .iter()
+        .filter(|(label, _)| *label != REIFIED_POSITION)
+        .count()
 }
 
 /// Everything a tier run observes: the trace the contract pins plus the leak
@@ -194,7 +251,9 @@ fn check_case(
         // parity oracle already pins the one binary that exists.
         return Ok(());
     }
-    exercised.fetch_add(1, Ordering::Relaxed);
+    if distinct_tiers(&points) >= MIN_DISTINCT_TIER_PLANS {
+        exercised.fetch_add(1, Ordering::Relaxed);
+    }
     with_gate_cache(&full, CROSS_TAG, || {
         diff_survivors(case, &full, roots, &points)
     })
@@ -243,7 +302,7 @@ fn tiers_match_each_other_on_adversarial_fixtures() {
     let fails = parallel_check(&cases, |case| {
         let full = source(case);
         let points = survivors(&full, &roots, &grid);
-        if points.len() < MIN_DISTINCT_TIER_PLANS {
+        if distinct_tiers(&points) < MIN_DISTINCT_TIER_PLANS {
             return Err(format!(
                 "{}: fixture's effect plan no longer moves under forcing; it has stopped exercising the cascade",
                 case.display()
@@ -286,4 +345,39 @@ fn convention_split_controls_match_the_interpreter_and_do_not_leak() {
         cases.len(),
         fails.join("\n")
     );
+}
+
+#[test]
+fn reified_forwarded_resumptions_run_in_constant_stack() {
+    require_cc();
+    let case = Path::new(env!("CARGO_MANIFEST_DIR")).join(REIFIED_FORWARDING_CASE);
+    let roots = default_roots(Path::new("."));
+    let full = source(&case);
+    let expected = ObservationTrace::from_process(REIFIED_FORWARDING_OUTPUT, b"", 0);
+    for (opt, backend) in [
+        (OptLevel::O0, BackendOpt::O0),
+        (OptLevel::default(), BackendOpt::default()),
+    ] {
+        for reify in [false, true] {
+            let mut cfg = Config::default();
+            cfg.update_flags(|flags| {
+                flags.opt_level = opt;
+                flags.backend_opt = backend;
+                flags.compiler_cache = false;
+                flags.quiet = true;
+                flags.reify = reify;
+            });
+            let strategy = effect_strategy_on(&full, Path::new("."), &cfg).unwrap();
+            let wanted = if reify {
+                EffectStrategy::StateFusion
+            } else {
+                EffectStrategy::WholeProgramFreeMonad
+            };
+            assert_eq!(strategy, wanted, "reify={reify}, {opt:?}/{backend:?}");
+            let label = format!("forwarding-{reify}-{opt:?}-{backend:?}");
+            let run = tier_run(&case, &full, &roots, &label, &cfg).unwrap();
+            assert_eq!(run.trace, expected, "{label}: wrong observation trace");
+            assert!(run.leak_clean, "{label}: {}", run.leak_report);
+        }
+    }
 }

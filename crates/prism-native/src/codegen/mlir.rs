@@ -274,6 +274,8 @@ impl Isa for MlirText {
             "llvm.func @prism_frame_handle(i64, i64, i64) -> i64",
             "llvm.func @prism_frame_mask(i64, i64) -> i64",
             "llvm.func @prism_kont_splice(i64, i64) -> i64",
+            "llvm.func @prism_drive_enter() -> i64",
+            "llvm.func @prism_drive_leave(i64, i64) -> i64",
             "llvm.func @prism_box(i64) -> i64",
             "llvm.func @prism_unbox(i64) -> i64",
             "llvm.func @prism_print_int(i64)",

@@ -1,5 +1,5 @@
-fip fn inc(x) = x + 1
+fip fn identity(x : Int) : Int = x
 
 fn apply(f : ((Int) -> Int) @ noalloc, x : Int) : Int = f(x)
 
-fn drive(x : Int) : Int = apply(\(y) -> inc(y), x)
+fn drive(x : Int) : Int = apply(\(y) -> identity(y), x)

@@ -36,6 +36,21 @@ impl ConstructorSig {
     pub fn quantifiers(&self) -> &[CoreQuantifier] {
         &self.quantifiers
     }
+
+    #[must_use]
+    pub const fn tag(&self) -> usize {
+        self.tag
+    }
+
+    #[must_use]
+    pub fn fields(&self) -> &[CoreType] {
+        &self.fields
+    }
+
+    #[must_use]
+    pub const fn result(&self) -> &CoreType {
+        &self.result
+    }
 }
 
 /// The declared signature and owning effect of an operation.
@@ -136,6 +151,11 @@ impl VerifyEnv {
 
     pub fn insert_builtin_override(&mut self, op: Builtin, sig: CoreFnSig) {
         self.builtin_overrides.insert(op.wire(), sig);
+    }
+
+    /// Every declared constructor, by name.
+    pub fn constructors(&self) -> impl Iterator<Item = (Sym, &ConstructorSig)> {
+        self.constructors.iter().map(|(name, sig)| (*name, sig))
     }
 
     #[must_use]

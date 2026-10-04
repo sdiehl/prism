@@ -1,0 +1,43 @@
+-- State producers whose declared rows keep labels the fold never answers.
+-- `count_up` prints at its own top level and loops on a condition that
+-- reads the state, so its scope carries the accumulator beside the value the
+-- condition produces; `main` reads a `var` cell under a handler whose
+-- clauses resume directly while another scope folds the same operations
+-- over an Int. Every tier must print the loop's trace, the final count, the
+-- doubled count and the cell's total.
+
+effect Counter
+  get() : Int
+  bump() : Unit
+
+fn count_up() : Unit ! {Counter, IO} =
+  println(get() * 10)
+  while get() < 4 do
+    bump()
+    println(get())
+
+fn counted() : Int =
+  let run =
+    with handler
+      get() resume k => \(s) -> k(s)(s)
+      bump() resume k => \(s) -> k(())(s + 1)
+      return r => \(_s) -> r
+    bump()
+    bump()
+    get() * 2
+  run(0)
+
+fn main() =
+  let f =
+    handle count_up() with
+      get() resume k => \(s) -> k(s)(s)
+      bump() resume k => \(s) -> k(())(s + 1)
+      return r => \(s) -> s
+  println(f(1))
+  var total := counted()
+  with handler
+    get() resume k => k(7)
+    bump() resume k => k(())
+  bump()
+  total := total + get()
+  println(total)

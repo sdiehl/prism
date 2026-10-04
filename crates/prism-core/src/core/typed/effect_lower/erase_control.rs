@@ -108,6 +108,18 @@ impl StepAt {
         CoreType::Source(step_type(&self.more, &self.done))
     }
 
+    /// The instantiation a `Step` witness carries, or `None` for any other
+    /// type.
+    pub fn of(ty: &CoreType) -> Option<Self> {
+        let CoreType::Source(Type::Con(name, args)) = ty else {
+            return None;
+        };
+        let [more, done] = args.as_slice() else {
+            return None;
+        };
+        (*name == Sym::new(STEP)).then(|| Self::new(more.clone(), done.clone()))
+    }
+
     /// `SMore(v)` at this instantiation.
     pub fn smore(&self, v: TypedValue) -> TypedValue {
         TypedValue::new(

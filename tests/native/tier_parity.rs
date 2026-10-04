@@ -64,6 +64,14 @@ fn run_forced(tier: EffectTier, erasures: bool, floor_count: usize) {
     let mut auto_cfg = Config::from_env();
     auto_cfg.update_flags(|flags| flags.compiler_cache = false);
     auto_cfg.update_flags(|flags| flags.quiet = true);
+    // A program has two natural lowerings, and the plan has to move away from
+    // both before the forced build is one parity.rs already covers. The
+    // consolidated state route is the default and takes most effectful
+    // programs whole, so against it alone the state point would select nothing
+    // and go vacuous; the cascade behind it is what the other points move away
+    // from.
+    let mut cascade_cfg = auto_cfg.clone();
+    cascade_cfg.update_flags(|flags| flags.consolidate = false);
     let forced_cfg = forced(tier, erasures);
     let base = Path::new(".");
     let roots = default_roots(base);
@@ -72,9 +80,10 @@ fn run_forced(tier: EffectTier, erasures: bool, floor_count: usize) {
         .filter(|case| {
             let full = source(case);
             let auto = effect_plan(&full, &roots, &auto_cfg);
+            let cascade = effect_plan(&full, &roots, &cascade_cfg);
             let hard = effect_plan(&full, &roots, &forced_cfg);
-            match (auto, hard) {
-                (Ok(a), Ok(h)) => a != h,
+            match (auto, cascade, hard) {
+                (Ok(a), Ok(c), Ok(h)) => a != h || c != h,
                 // A planning error under exactly one config is itself a tier
                 // divergence; keep the case so the build surfaces it.
                 _ => true,
@@ -119,7 +128,7 @@ fn native_output(case: &Path, tag: &str, cfg: &Config) -> Result<Output, String>
 
 fn sub_lowering_cases() -> Vec<PathBuf> {
     [
-        // Evidence and evidence fusion.
+        // Handler clauses threaded as values.
         "tests/cases/run/eff_fuse.pr",
         "tests/cases/run/eff_two_handlers.pr",
         // State-fusion paths.
@@ -352,7 +361,14 @@ fn summary_consumer_cases() -> Vec<PathBuf> {
 #[test]
 fn summary_consumers_toggle_matches_native() {
     let probe = source(Path::new("tests/cases/run/reified_under_world.pr"));
-    let tier = prism::dump("tier", &probe).expect("the promoted case dumps its lowering tier");
+    // The promotion the probe watches is a cascade one, and the consolidated
+    // route reaches past it, so the probe asks the cascade while the diff
+    // below runs the default build.
+    let mut probe_cfg = Config::from_env();
+    probe_cfg.update_flags(|flags| flags.consolidate = false);
+    probe_cfg.update_flags(|flags| flags.quiet = true);
+    let tier = prism::dump_on("tier", &probe, &default_roots(Path::new(".")), &probe_cfg)
+        .expect("the promoted case dumps its lowering tier");
     assert_eq!(
         tier.trim(),
         "local-partial",

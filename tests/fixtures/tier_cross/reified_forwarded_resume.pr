@@ -1,0 +1,29 @@
+-- Forwarding a tail resumption through a handler whose outer continuation
+-- resumes twice must not retain one native frame per hop. The deep loop
+-- distinguishes a heap queue with a stack-safe driver from a queue that
+-- recursively re-enters its drivers on the native stack.
+
+effect Tick
+  tick() : Int
+
+effect Note
+  note() : Int
+
+fn spin(n : Int) : Int ! {Tick, Note} =
+  if n == 0 then
+    note()
+  else
+    tick()
+    spin(n - 1)
+
+fn forwarded(n : Int) : Int ! {Note} =
+  handle spin(n) with
+    tick() resume k => k(1)
+    return x => x
+
+fn main() : Unit ! {IO} =
+  let total =
+    handle forwarded(1000000) with
+      note() resume k => k(7) + k(8)
+      return x => x
+  println(show(total))

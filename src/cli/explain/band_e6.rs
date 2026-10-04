@@ -839,8 +839,9 @@ pub(super) const ENTRIES: &[Explanation] = &[
         prose: "`fip` and `fbip` declare an allocation budget per call: the bare \
                 keyword declares zero, and a parenthesized grade (`fip(2)`) \
                 allows that many fresh heap cells. The check walks the body \
-                after reuse lowering, so a constructor rebuilt through a `reuse` \
-                token costs nothing while one built fresh costs one cell, and it \
+                after reuse lowering. Constructors, tuples, closures, and boxed \
+                scalar literals cost cells; a reuse token can be empty for a \
+                shared input, so its fresh-allocation fallback counts too. It \
                 charges every call the callee's own declared budget in full, \
                 recursive calls included, so the per-call figure holds over the \
                 whole dynamic extent. A call to a function carrying no \
@@ -849,9 +850,10 @@ pub(super) const ENTRIES: &[Explanation] = &[
                 unbounded. The message lists the witness sites that add up past \
                 the declaration.",
         example: "type Lst = Nil | Cons(Int, Lst)\n\nfip fn wrap(xs) = Cons(0, xs)",
-        fix: "Match the allocation with a `reuse` of a cell the function already \
-              owns, certify the callees the message names, raise the declared \
-              budget (`fip(1)`), or drop the annotation.",
+        fix: "Avoid the reported allocations, certify the callees the message \
+              names, raise the budget for sites with a known cell count, or drop \
+              the annotation. An unknown runtime cost cannot satisfy any finite \
+              budget, and reuse alone does not prove zero allocation.",
     },
     Explanation {
         code: "E6076",
@@ -859,15 +861,17 @@ pub(super) const ENTRIES: &[Explanation] = &[
         prose: "`@ noalloc` claims the allocation half of `fip` on its own: this \
                 call, and everything it reaches, runs without taking a fresh \
                 heap cell. It is checked by the same walk as the keyword form at \
-                a budget of zero, so every constructor, tuple, or closure cell \
-                built outside a `reuse`, every primitive that is not on the \
-                allocation-free allow-list, and every call to a function \
-                carrying no zero-allocation certificate of its own is a \
-                rejection. `alloc` counts too: carving a cell from an arena is \
+                a budget of zero, so fresh constructors, tuples, closures, boxed \
+                scalars, and shared-input reuse fallbacks count. Primitives \
+                without a proven allocation bound and every call to a function \
+                carrying no zero-allocation certificate of its own are \
+                rejected. `alloc` counts too: carving a cell from an arena is \
                 cheaper than the heap, not free.",
         example: "type Box = Box(Int)\n\nfn boxit(x : Int) : Box @ noalloc = Box(x)",
-        fix: "Rewrite the body to work in place, certify the callees the message \
-              names (`@ noalloc`, `fip`, or `fbip`), or drop the claim.",
+        fix: "Return existing values, avoid the reported allocation sites, \
+              certify the callees the message names (`@ noalloc`, `fip`, or \
+              `fbip`), or drop the claim. Integer arithmetic can allocate bignums \
+              and machine-word results can require fresh boxes.",
     },
     Explanation {
         code: "E6077",

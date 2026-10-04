@@ -9,7 +9,7 @@
 // renders an unforgeable name (containing `@`, which no source identifier can),
 // so a fresh binder can never capture a user name.
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Fresh(u32);
 
 impl Fresh {

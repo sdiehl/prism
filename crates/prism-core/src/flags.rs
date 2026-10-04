@@ -57,9 +57,10 @@ pub enum EffectTier {
     /// The full cascade: every rung tried in cost order (the shipping default).
     #[default]
     Auto,
-    /// Skip evidence fusion: state fusion is the first rung tried.
+    /// State fusion is the first rung tried, the cheapest one that reifies
+    /// nothing.
     StateFusion,
-    /// Skip evidence and state fusion: local confinement is the first rung tried.
+    /// Skip state fusion: local confinement is the first rung tried.
     LocalPartial,
     /// Skip every fusion rung: effects reify into the free monad, confined to
     /// handler regions where the plan finds them closed.
@@ -201,6 +202,9 @@ pub struct EffectLowerOptions {
     tier: EffectTier,
     excluded: RungExclude,
     erasures: bool,
+    thread_nontail: bool,
+    consolidate: bool,
+    reify: bool,
 }
 
 impl Default for EffectLowerOptions {
@@ -212,6 +216,9 @@ impl Default for EffectLowerOptions {
             tier: EffectTier::default(),
             excluded: RungExclude::default(),
             erasures: true,
+            thread_nontail: true,
+            consolidate: true,
+            reify: true,
         }
     }
 }
@@ -247,6 +254,27 @@ impl EffectLowerOptions {
         self.erasures
     }
 
+    /// Whether the state rung reads off-tail resumptions threaded as an answer
+    /// transformer.
+    #[must_use]
+    pub const fn thread_nontail(self) -> bool {
+        self.thread_nontail
+    }
+
+    /// Whether the state rung runs as the consolidated route: the entry point's
+    /// undischarged operations handled there, and every widening that follows.
+    #[must_use]
+    pub const fn consolidate(self) -> bool {
+        self.consolidate
+    }
+
+    /// Whether the state rung reifies a clause that needs its continuation as
+    /// a value instead of declining it.
+    #[must_use]
+    pub const fn reify(self) -> bool {
+        self.reify
+    }
+
     /// Return the same lowering policy with presentation noise suppressed.
     #[must_use]
     pub const fn silently(mut self) -> Self {
@@ -264,6 +292,9 @@ impl From<&DynFlags> for EffectLowerOptions {
             tier: flags.effect_tier,
             excluded: flags.effect_exclude,
             erasures: flags.erasures,
+            thread_nontail: flags.thread_nontail,
+            consolidate: flags.consolidate,
+            reify: flags.reify,
         }
     }
 }
@@ -526,6 +557,29 @@ pub struct DynFlags {
     /// run can move the erasures and the floor one at a time; like the floor,
     /// turning it off is a cost decision the output must not reveal.
     pub erasures: bool,
+    /// `PRISM_THREAD_NONTAIL` (default on): show the state rung a clause that
+    /// resumes off the tail with its pending work threaded as an answer
+    /// transformer, so the handler folds instead of reifying a continuation.
+    /// Only that rung reads the rewrite, because the composed closure it buys
+    /// per resumption pays for itself in the fold and nowhere below it. Off
+    /// leaves such a handler to the general lowering, which is what measuring
+    /// the rewrite's marginal value asks for; like the floor, a cost decision
+    /// the output must not reveal.
+    pub thread_nontail: bool,
+    /// `PRISM_CONSOLIDATE` (default on): run the state rung as the consolidated
+    /// lowering route, with the operations still latent at the entry point
+    /// handled there by the runtime's unhandled-effect fault and with every
+    /// widening that route gains. Off runs the same rung without those
+    /// widenings, which is what the fixtures written against the narrower gate
+    /// still ask for. Like the floor, a cost decision the output must not
+    /// reveal.
+    pub consolidate: bool,
+    /// `PRISM_REIFY` (default on): let the state rung accept a clause that
+    /// needs its continuation as a value, lowering the operation it handles
+    /// into effect cells and driving the queue at the handle site, instead of
+    /// declining to the free monad. Set to `0` to measure the free-monad
+    /// route under it; the knob goes away when reification is the only route.
+    pub reify: bool,
     /// `PRISM_COMPILER_CACHE` (default on): reuse byte-identical compiler
     /// artifacts from the content-addressed query store. Set to `0` for the
     /// from-scratch oracle or when investigating invalidation.
@@ -618,6 +672,9 @@ impl Default for DynFlags {
             effect_tier: EffectTier::default(),
             effect_exclude: RungExclude::default(),
             erasures: true,
+            thread_nontail: true,
+            consolidate: true,
+            reify: true,
             compiler_cache: true,
             store: false,
             store_path: None,
@@ -698,6 +755,9 @@ impl DynFlags {
             effect_exclude: env::var("PRISM_EFFECT_EXCLUDE")
                 .map_or(base.effect_exclude, |s| RungExclude::parse(&s)),
             erasures: env_bool("PRISM_ERASURES", base.erasures),
+            thread_nontail: env_bool("PRISM_THREAD_NONTAIL", base.thread_nontail),
+            consolidate: env_bool("PRISM_CONSOLIDATE", base.consolidate),
+            reify: env_bool("PRISM_REIFY", base.reify),
             compiler_cache: env_bool("PRISM_COMPILER_CACHE", base.compiler_cache),
             store: base.store || env_present("PRISM_STORE"),
             store_path: env::var_os("PRISM_STORE_PATH")
@@ -778,6 +838,8 @@ impl DynFlags {
             "scheduler" => self.scheduler = toml_parsed(key, val, Scheduler::parse)?,
             "effect-tier" => self.effect_tier = toml_parsed(key, val, EffectTier::parse)?,
             "erasures" => self.erasures = toml_bool(key, val)?,
+            "thread-nontail" => self.thread_nontail = toml_bool(key, val)?,
+            "consolidate" => self.consolidate = toml_bool(key, val)?,
             "sign-mode" => self.sign_mode = toml_parsed(key, val, SignMode::parse)?,
             "warn-dupes" => self.warn_dupes = toml_parsed(key, val, WarnDupes::parse)?,
             "warn-stdlib-dupes" => {

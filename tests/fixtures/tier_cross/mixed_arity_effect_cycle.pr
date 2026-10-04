@@ -1,0 +1,31 @@
+-- A native tail hop can connect two growing calls into a recursive cycle.
+-- The operation occurs only at the end, so no intervening handler dispatch
+-- can accidentally bound the stack during the deep traversal.
+
+effect Peek
+  peek() : Int
+
+fn first(n : Int) : Int ! {Peek} =
+  if n == 0 then
+    peek()
+  else
+    second(n - 1)
+
+fn second(n : Int) : Int ! {Peek} =
+  if n == 0 then
+    peek()
+  else
+    third(n - 1, 1)
+
+fn third(n : Int, step : Int) : Int ! {Peek} =
+  if n == 0 then
+    peek()
+  else
+    first(n - step)
+
+fn main() : Unit ! {IO} =
+  let total =
+    handle first(1000000) with
+      peek() resume k => k(7) + k(8)
+      return x => x
+  println(show(total))

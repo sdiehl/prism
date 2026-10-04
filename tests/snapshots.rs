@@ -270,19 +270,19 @@ fn fip_tail_recursion_lowers_to_a_loop() {
 }
 
 // The realistic payoff: a recursive accumulator (`rev_onto`, a tail call) and a
-// spine map (`bump`, tail-modulo-constructor) both accepted as `fip` and both
+// spine map (`bump`, tail-modulo-constructor) both
 // lowered to constant-stack loops. `rev_onto`'s self-call is a `musttail` jump;
 // `bump` is split into a `.trmc` hole-passing loop. Neither leaves a plain
 // self-call frame in its own body.
 #[cfg(feature = "native")]
 #[test]
-fn recursive_fip_examples_lower_to_loops() {
+fn recursive_reuse_examples_lower_to_loops() {
     let src = prism::with_prelude(
-        "fip fn rev_onto(xs, acc) =\n  match xs of\n    Nil => acc\n    Cons(h, t) => rev_onto(t, Cons(h, acc))\n\
-         fip fn bump(xs) =\n  match xs of\n    Nil => Nil\n    Cons(h, t) => Cons(h + 1, bump(t))\n\
+        "fn rev_onto(xs, acc) =\n  match xs of\n    Nil => acc\n    Cons(h, t) => rev_onto(t, Cons(h, acc))\n\
+         fn bump(xs) =\n  match xs of\n    Nil => Nil\n    Cons(h, t) => Cons(h + 1, bump(t))\n\
          fn main() = println(sum(rev_onto([1,2,3], Nil)) + sum(bump([1,2,3])))",
     );
-    let ir = prism::emit_ir(&src).expect("recursive accumulator/TRMC fip must be accepted");
+    let ir = prism::emit_ir(&src).expect("recursive accumulator/TRMC examples must be accepted");
     let block = |sym: &str| {
         let start = ir
             .find(&format!("define i64 @{sym}("))
@@ -442,6 +442,26 @@ fn exit_code_and_stdout() {
     assert_eq!(out.status.code(), Some(7));
 }
 
+// The cascade with the consolidated state route off. A fixture that has to
+// reach the free monad, or a rung the route reaches past, is asked of the
+// cascade: the route is offered every effectful program first and takes these
+// whole, which is the behaviour the default-flag gates below check.
+fn cascade_config() -> prism::Config {
+    let mut cfg = prism::Config::from_env();
+    cfg.update_flags(|flags| flags.consolidate = false);
+    cfg
+}
+
+fn cascade_dump(phase: &str, full: &str) -> String {
+    prism::dump_on(
+        phase,
+        full,
+        &prism::default_roots(Path::new(".")),
+        &cascade_config(),
+    )
+    .unwrap_or_else(|e| panic!("{phase} dumps under the cascade: {e}"))
+}
+
 // Local monadification partitions the lowered program: the escaping Log
 // component reifies into the free monad (EOp cells threaded by `ebind`), while
 // the unrelated stream pipeline stays fused (its producers thread evidence/state
@@ -451,7 +471,7 @@ fn exit_code_and_stdout() {
 fn local_monadification_partition() {
     let root = env!("CARGO_MANIFEST_DIR");
     let src = fs::read_to_string(format!("{root}/tests/cases/run/local_mono_combined.pr")).unwrap();
-    let lowered = prism::dump("lowered", &prism::with_prelude(&src)).unwrap();
+    let lowered = cascade_dump("lowered", &prism::with_prelude(&src));
     // Extract a top-level function body (from `fn name(` to the next `\nfn `).
     let fn_body = |name: &str| -> String {
         let start = lowered
@@ -508,8 +528,12 @@ fn local_monadification_partition() {
 #[test]
 fn free_monad_warning_is_opt_in_and_proportionate() {
     let root = env!("CARGO_MANIFEST_DIR");
+    // The warning is the cascade's, raised where a component reifies; the
+    // consolidated route takes this program whole and has nothing to warn
+    // about, so both spawns ask the cascade.
     let stderr = |case: &str| {
         let out = Command::new(env!("CARGO_BIN_EXE_prism"))
+            .env("PRISM_CONSOLIDATE", "0")
             .arg("run")
             .arg("--verbose")
             .arg(format!("{root}/{case}"))
@@ -519,6 +543,7 @@ fn free_monad_warning_is_opt_in_and_proportionate() {
     };
     // Off by default: the escaping program stays silent without `--verbose`.
     let quiet = Command::new(env!("CARGO_BIN_EXE_prism"))
+        .env("PRISM_CONSOLIDATE", "0")
         .arg("run")
         .arg(format!("{root}/tests/cases/run/local_mono_combined.pr"))
         .output()
@@ -994,15 +1019,21 @@ fn optimization_coverage() {
 }
 
 fn optimization_coverage_on_compiler_stack() {
+    // Breadth is a property of the cascade. The consolidated route is offered
+    // every effectful program first and takes most of them, so under the
+    // default flags one rung would witness the whole corpus and every other
+    // fast path would read as lost while its code is still live.
+    let cascade = cascade_config();
     let mut seen = std::collections::BTreeSet::new();
     for path in corpus_files() {
         let src = fs::read_to_string(&path).unwrap();
-        if let Ok(s) = prism::effect_strategy_full(&prism::with_prelude(&src), Path::new(".")) {
+        if let Ok(s) =
+            prism::effect_strategy_on(&prism::with_prelude(&src), Path::new("."), &cascade)
+        {
             seen.insert(s);
         }
     }
     for strategy in [
-        prism::EffectStrategy::Evidence,
         prism::EffectStrategy::StateFusion,
         prism::EffectStrategy::LocalPartial,
     ] {

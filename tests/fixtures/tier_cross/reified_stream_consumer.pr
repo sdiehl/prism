@@ -1,0 +1,31 @@
+effect Gen
+  yield(Int) : Unit
+
+type Tree = Leaf(Int) | Node(Tree, Tree)
+
+type Step(e : Row) = Done | More(Int, () -> Step(e) ! {e})
+
+fn leaves(t) : Unit ! {Gen} =
+  match t of
+    Leaf(n) => yield(n)
+    Node(l, r) =>
+      leaves(l)
+      leaves(r)
+
+fn to_stream(thunk : () -> a ! {| e}) : Step(e) =
+  handle thunk() with
+    yield(v) resume k => More(v, \() -> k(()))
+    return r => Done
+
+fn same(s1, s2) =
+  match (s1, s2) of
+    (Done, Done) => true
+    (More(a, k1), More(b, k2)) => a == b && same(k1(), k2())
+    _ => false
+
+fn main() =
+  let t1 = Node(Leaf(1), Node(Leaf(2), Leaf(3)))
+  let t2 = Node(Node(Leaf(1), Leaf(2)), Leaf(3))
+  let t3 = Node(Leaf(1), Leaf(3))
+  println(same(to_stream(\() -> leaves(t1)), to_stream(\() -> leaves(t2))))
+  println(same(to_stream(\() -> leaves(t1)), to_stream(\() -> leaves(t3))))

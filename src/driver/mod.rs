@@ -885,6 +885,7 @@ struct TierFacts {
     // is read off the lowering that made the decision rather than re-derived
     // beside it.
     declined: Option<Decline>,
+    state_declined: Option<String>,
 }
 
 /// Solve the tier facts for one program.
@@ -912,6 +913,7 @@ fn tier_facts(src: &str, roots: &[Root], cfg: &Config) -> Result<TierFacts, Erro
         plan,
         strategy: lowering.strategy(),
         declined: lowering.confined_decline().copied(),
+        state_declined: lowering.state_decline().map(str::to_string),
     })
 }
 
@@ -922,7 +924,11 @@ fn tier_facts(src: &str, roots: &[Root], cfg: &Config) -> Result<TierFacts, Erro
 /// Fails on front-end or typed effect-lowering verification errors.
 pub(crate) fn typed_effect_plan(src: &str, roots: &[Root], cfg: &Config) -> Result<String, Error> {
     let facts = tier_facts(src, roots, cfg)?;
-    Ok(facts.plan.render(facts.strategy, facts.declined))
+    Ok(facts.plan.render(
+        facts.strategy,
+        facts.declined,
+        facts.state_declined.as_deref(),
+    ))
 }
 
 /// The same facts as prose: one sentence per region naming the rung it lowered

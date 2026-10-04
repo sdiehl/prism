@@ -1,0 +1,1 @@
+fn word() : U64 @ noalloc = to_u64(7)

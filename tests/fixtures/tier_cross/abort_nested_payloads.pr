@@ -1,0 +1,41 @@
+-- Two abort operations with distinct payload types, handled at different
+-- depths. `halt` carries an Int and is caught by the inner handler; `bail`
+-- carries a String and passes through that handler to the outer one. Each
+-- tier must deliver each payload to its own clause and agree on which of the
+-- inner handler's frames the passing abort discards.
+
+effect Halt
+  never halt(Int) : Int
+
+effect Bail
+  never bail(String) : Int
+
+fn step(n) =
+  if n > 8 then
+    bail("too big")
+  elif n % 2 == 0 then
+    halt(n)
+  else
+    n * 10
+
+fn guarded(n) =
+  handle step(n) + 1 with
+    never halt(code) => code * 100
+    return r => r
+
+fn report(n) =
+  let r =
+    handle guarded(n) with
+      never bail(msg) =>
+        if msg == "too big" then
+          0 - 1
+        else
+          0 - 2
+      return r => r
+  println(r)
+
+fn main() =
+  report(1)
+  report(2)
+  report(9)
+  report(3)

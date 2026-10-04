@@ -355,8 +355,8 @@ fn main() =
 ; ModuleID = 'prism'
 source_filename = "prism"
 
-@prism_native_kont_table = constant [871 x i8] c"scheme  prism-core-hash-v2\0Abundle  4988fa66fa21c6ce96e5d76d1c6c526a3c53ed90d32c8d39ec458b06eb82948e\0Acompiler  <version>\0Atarget  <target>\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v2:4988fa66fa21c6ce96e5d76d1c6c526a3c53ed90d32c8d39ec458b06eb82948e\0Aflag  stdlib-root  <stdlib-root>\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  erasures  true\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  borrow-infer  true\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prismfn_fst  0c794ffc4b6d79856a941321cd04eb90758d0a2c94b3f2c352a2b1e62ef7941d  fst\0Afn      prismfn_main  7a61ada4c91dd0ba60386d7952f41628b6f01b11f1d8b685c4ad4991e684be69  main\0Afn      prismfn_quad  9e55865a39ff20a9aa4e28ad3828624a249f3769da5d1e241fb067f3e8eb6139  quad\0A\00", section ",.prism_kont", align 1
-@prism_native_kont_state_map = constant [1009 x i8] c"state-map 1\0Ascheme  prism-core-hash-v2\0Abundle  4988fa66fa21c6ce96e5d76d1c6c526a3c53ed90d32c8d39ec458b06eb82948e\0Acompiler  <version>\0Atarget  <target>\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v2:4988fa66fa21c6ce96e5d76d1c6c526a3c53ed90d32c8d39ec458b06eb82948e\0Aflag  stdlib-root  <stdlib-root>\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  erasures  true\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  borrow-infer  true\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prismfn_fst 0c794ffc4b6d79856a941321cd04eb90758d0a2c94b3f2c352a2b1e62ef7941d fst arity 1 slots abi-word[arg0=%a0:word]\0Astate prismfn_main 7a61ada4c91dd0ba60386d7952f41628b6f01b11f1d8b685c4ad4991e684be69 main arity 0 slots abi-word[]\0Astate prismfn_quad 9e55865a39ff20a9aa4e28ad3828624a249f3769da5d1e241fb067f3e8eb6139 quad arity 1 slots abi-word[arg0=%a0:word]\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_table = constant [889 x i8] c"scheme  prism-core-hash-v2\0Abundle  4988fa66fa21c6ce96e5d76d1c6c526a3c53ed90d32c8d39ec458b06eb82948e\0Acompiler  <version>\0Atarget  <target>\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v2:4988fa66fa21c6ce96e5d76d1c6c526a3c53ed90d32c8d39ec458b06eb82948e\0Aflag  stdlib-root  <stdlib-root>\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  reify  true\0Aflag  erasures  true\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  borrow-infer  true\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prismfn_fst  0c794ffc4b6d79856a941321cd04eb90758d0a2c94b3f2c352a2b1e62ef7941d  fst\0Afn      prismfn_main  7a61ada4c91dd0ba60386d7952f41628b6f01b11f1d8b685c4ad4991e684be69  main\0Afn      prismfn_quad  9e55865a39ff20a9aa4e28ad3828624a249f3769da5d1e241fb067f3e8eb6139  quad\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_state_map = constant [1027 x i8] c"state-map 1\0Ascheme  prism-core-hash-v2\0Abundle  4988fa66fa21c6ce96e5d76d1c6c526a3c53ed90d32c8d39ec458b06eb82948e\0Acompiler  <version>\0Atarget  <target>\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v2:4988fa66fa21c6ce96e5d76d1c6c526a3c53ed90d32c8d39ec458b06eb82948e\0Aflag  stdlib-root  <stdlib-root>\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  reify  true\0Aflag  erasures  true\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  borrow-infer  true\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prismfn_fst 0c794ffc4b6d79856a941321cd04eb90758d0a2c94b3f2c352a2b1e62ef7941d fst arity 1 slots abi-word[arg0=%a0:word]\0Astate prismfn_main 7a61ada4c91dd0ba60386d7952f41628b6f01b11f1d8b685c4ad4991e684be69 main arity 0 slots abi-word[]\0Astate prismfn_quad 9e55865a39ff20a9aa4e28ad3828624a249f3769da5d1e241fb067f3e8eb6139 quad arity 1 slots abi-word[arg0=%a0:word]\0A\00", section ",.prism_kont", align 1
 @.kont_symbol1 = private constant [13 x i8] c"prismfn_main\00"
 @.kont_hash1 = private constant [65 x i8] c"7a61ada4c91dd0ba60386d7952f41628b6f01b11f1d8b685c4ad4991e684be69\00"
 @.kont_name1 = private constant [5 x i8] c"main\00"
@@ -367,81 +367,16 @@ source_filename = "prism"
 ; Function Attrs: nounwind
 define i64 @prismfn_main() #0 {
 entry:
-  %t3 = call ptr @prism_alloc(i64 2)
-  %t4 = getelementptr inbounds i8, ptr %t3, i64 8
-  store i64 0, ptr %t4, align 8
-  %t6 = getelementptr inbounds i8, ptr %t3, i64 24
-  store i64 7, ptr %t6, align 8
-  %t7 = getelementptr inbounds i8, ptr %t3, i64 32
-  store i64 7, ptr %t7, align 8
-  %t8 = ptrtoint ptr %t3 to i64
-  %t12 = call ptr @prism_alloc(i64 2)
-  %t13 = getelementptr inbounds i8, ptr %t12, i64 8
-  store i64 0, ptr %t13, align 8
-  %t15 = getelementptr inbounds i8, ptr %t12, i64 24
-  store i64 7, ptr %t15, align 8
-  %t16 = getelementptr inbounds i8, ptr %t12, i64 32
-  store i64 7, ptr %t16, align 8
-  %t17 = ptrtoint ptr %t12 to i64
-  %t19 = call ptr @prism_alloc(i64 2)
-  %t20 = getelementptr inbounds i8, ptr %t19, i64 8
-  store i64 0, ptr %t20, align 8
-  %t22 = getelementptr inbounds i8, ptr %t19, i64 24
-  store i64 %t8, ptr %t22, align 8
-  %t23 = getelementptr inbounds i8, ptr %t19, i64 32
-  store i64 %t17, ptr %t23, align 8
-  %t24 = ptrtoint ptr %t19 to i64
-  %t25 = inttoptr i64 %t24 to ptr
-  br label %b2
-
-b2:                                               ; preds = %entry
-  %t26 = getelementptr inbounds i8, ptr %t25, i64 24
-  %t27 = load i64, ptr %t26, align 8
-  %t28 = getelementptr inbounds i8, ptr %t25, i64 32
-  %t29 = load i64, ptr %t28, align 8
-  call void @prism_rc_inc(i64 %t27)
-  call void @prism_rc_dec(i64 %t24)
-  %t32 = inttoptr i64 %t27 to ptr
-  br label %b5
-
-b1:                                               ; No predecessors!
-  call void @prism_match_error()
-  unreachable
-
-b5:                                               ; preds = %b2
-  %t33 = getelementptr inbounds i8, ptr %t32, i64 24
-  %t34 = load i64, ptr %t33, align 8
-  %t35 = getelementptr inbounds i8, ptr %t32, i64 32
-  %t36 = load i64, ptr %t35, align 8
-  call void @prism_rc_inc(i64 %t34)
-  call void @prism_rc_dec(i64 %t27)
-  br label %b3
-
-b4:                                               ; No predecessors!
-  call void @prism_match_error()
-  unreachable
-
-b3:                                               ; preds = %b5
-  %t39 = phi i64 [ %t34, %b5 ]
-  call void @prism_print_int(i64 %t39)
-  call void @prism_rc_dec(i64 %t39)
+  call void @prism_print_int(i64 7)
+  call void @prism_rc_dec(i64 7)
   ret i64 0
 }
 
 ; Function Attrs: nounwind
-declare ptr @prism_alloc(i64) #0
-
-; Function Attrs: nounwind
-declare void @prism_match_error() #0
-
-; Function Attrs: nounwind
-declare void @prism_rc_inc(i64) #0
+declare void @prism_print_int(i64) #0
 
 ; Function Attrs: nounwind
 declare void @prism_rc_dec(i64) #0
-
-; Function Attrs: nounwind
-declare void @prism_print_int(i64) #0
 
 attributes #0 = { nounwind }
 

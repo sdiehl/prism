@@ -1,22 +1,15 @@
--- Zero-allocation certificates. gcd carries `@ noalloc` on its return type:
--- the body and its whole call tree (here, itself) allocate no fresh heap
--- cell, checked statically. horner asserts the same for a region by giving it
--- a function of its own: the free locals become parameters, so the identical
--- whole-call-tree check covers exactly that region.
-
-fn gcd(a : Int, b : Int) : Int @ noalloc =
-  if b == 0 then
+-- A comparison selects an existing value without allocating. Arithmetic in
+-- the caller may allocate a bignum; the certified region only chooses a value.
+fn larger(a : Int, b : Int) : Int @ noalloc =
+  if a > b then
     a
   else
-    gcd(b, a % b)
+    b
 
-fn horner_core(a : Int, b : Int, c : Int, scaled : Int) : Int @ noalloc =
-  (a * scaled + b) * scaled + c
-
-fn horner(a : Int, b : Int, c : Int, x : Int) : Int =
-  let scaled = x * 2
-  horner_core(a, b, c, scaled)
+fn choose_scaled(a : Int, b : Int) : Int =
+  let scaled = a * 2
+  larger(scaled, b)
 
 fn main() =
-  println(gcd(48, 18))
-  println(horner(1, 2, 3, 5))
+  println(larger(48, 18))
+  println(choose_scaled(5, 3))

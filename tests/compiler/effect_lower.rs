@@ -26,7 +26,7 @@ use prism::core::typed::effect_lower::{
 use prism::core::typed::effect_lower::{LocalDeclinePoint, LocalSplit, LoweringAnalysis};
 use prism::core::typed::*;
 use prism::core::EffectStrategy::{
-    Evidence, LocalPartial, Pure, SelectiveFreeMonad, StateFusion, WholeProgramFreeMonad,
+    LocalPartial, Pure, SelectiveFreeMonad, StateFusion, WholeProgramFreeMonad,
 };
 use prism::core::{
     audit_typed_core, verify_typed_core, EffectStrategy, OpGrades, UncheckedTypedCore,
@@ -213,6 +213,17 @@ fn int_fn(name: &str, params: &[&str], body: TypedComp) -> TypedCoreFn {
     )
 }
 
+// The cascade with the consolidated state route off. The fixtures below pin
+// the rung a program reaches when the state route is not offered the whole
+// program first; with the route on, every one of them is threaded state and
+// the rung they are written to exercise is never asked.
+fn cascade_flags() -> DynFlags {
+    DynFlags {
+        consolidate: false,
+        ..DynFlags::default()
+    }
+}
+
 // Verify both sides of the typed phase transition and its erased residual
 // invariant. Individual fixtures pin the strategy and structure they are
 // intended to exercise.
@@ -223,7 +234,7 @@ fn assert_lowering(
 ) -> TypedLowering {
     let input = verify_typed_core(UncheckedTypedCore::new(functions), env)
         .unwrap_or_else(|violations| panic!("input fixture is invalid: {violations:#?}"));
-    assert_typed_lowering(input, env, ctors, &DynFlags::default(), &OpGrades::new())
+    assert_typed_lowering(input, env, ctors, &cascade_flags(), &OpGrades::new())
 }
 
 fn assert_typed_lowering(
@@ -339,11 +350,11 @@ fn every_effect_strategy_and_lowering_flag_boundary_is_accounted_for() {
             expected: [Pure, Pure, Pure, Pure, Pure],
         },
         Fixture {
-            name: "evidence",
+            name: "reader",
             source: include_str!("../../examples/eff_reader.pr"),
             expected: [
-                Evidence,
-                SelectiveFreeMonad,
+                StateFusion,
+                StateFusion,
                 SelectiveFreeMonad,
                 SelectiveFreeMonad,
                 WholeProgramFreeMonad,
@@ -417,7 +428,7 @@ fn every_effect_strategy_and_lowering_flag_boundary_is_accounted_for() {
                             trampoline,
                             quiet,
                             effect_tier,
-                            ..DynFlags::default()
+                            ..cascade_flags()
                         };
                         let out =
                             assert_typed_lowering(typed.clone(), &env, &ctors, &flags, &grades);
@@ -474,7 +485,7 @@ fn every_effect_strategy_and_lowering_flag_boundary_is_accounted_for() {
 fn direct_io_survives_selective_free_monad_reification() {
     let flags = DynFlags {
         effect_tier: EffectTier::FreeMonad,
-        ..DynFlags::default()
+        ..cascade_flags()
     };
     let compiled = typed_from_source(
         "effect Ask\n  ask() : Int\n\nfn main() =\n  let answer = ask()\n  println(answer)\n",
@@ -488,7 +499,7 @@ fn direct_io_survives_selective_free_monad_reification() {
 fn an_open_callback_row_coalesces_into_the_monadic_ambient() {
     let flags = DynFlags {
         effect_tier: EffectTier::FreeMonad,
-        ..DynFlags::default()
+        ..cascade_flags()
     };
     let (typed, env, ctors, grades) = typed_from_source(
             "effect Ask\n  ask() : Int\n\nfn apply(f : (Int) -> Int ! {| e}, x : Int) = f(x)\n\nfn use(f : (Int) -> Int ! {IO}) : Int ! {Ask, IO} =\n  let answer = ask()\n  apply(f, answer)\n\nfn main() = use(\\(n) -> let _ = println(n) in n)\n",
@@ -570,7 +581,7 @@ fn assert_compiled_lowering(
     if let Err(violations) = audit_typed_core(&typed, &env) {
         panic!("compiled fixture is invalid: {violations:#?}");
     }
-    let flags = DynFlags::default();
+    let flags = cascade_flags();
     let out = lower_effects(typed, &env, &ctors, &flags, &grades).expect("typed lowering succeeds");
     if let Err(violations) = audit_typed_core(out.core(), out.env()) {
         panic!("lowered typed Core is invalid: {violations:#?}");
@@ -651,41 +662,42 @@ fn break_loop_erases_to_a_driver() {
     );
 }
 
-// The evidence rung on a real handler: a tail-resumptive reader whose
-// clause becomes the evidence its perform site forces.
+// A tail-resumptive reader: the clause answers its operation and resumes in
+// tail position, so no continuation is ever reified and the consolidated state
+// route takes the whole program.
 #[test]
-fn tail_resumptive_handler_lowers_by_evidence() {
-    let out = assert_program_lowering(
-            "effect Ask\n  ask() : Int\n\nfn reader() : Int ! {Ask} = ask() + 1\n\nfn main() : Int =\n  handle reader() with {\n    ask() resume k => k(41),\n    return x => x\n  }\n",
-        );
-    assert_eq!(out.strategy(), EffectStrategy::Evidence);
+fn the_default_route_is_the_consolidated_state_route() {
+    let (typed, env, ctors, grades) = typed_from_program(
+        "effect Ask\n  ask() : Int\n\nfn reader() : Int ! {Ask} = ask() + 1\n\nfn main() : Int =\n  handle reader() with {\n    ask() resume k => k(41),\n    return x => x\n  }\n",
+    );
+    let out = assert_typed_lowering(typed, &env, &ctors, &DynFlags::default(), &grades);
+    assert_eq!(out.strategy(), EffectStrategy::StateFusion);
 }
 
-// The evidence signature prepass replaces `run`'s source residual row with a
-// fresh ambient row. An unchanged polymorphic call retains that row in its
-// explicit Core instantiation, both inside a handler clause and after the
-// handle, so the substitution has to cover the entire typed body before the
-// threading rewrite. Both programs also compile from a lower ladder start;
-// the default evidence result and the forced fallback must independently
-// verify.
+// The signature prepass replaces `run`'s source residual row with a fresh
+// ambient row. An unchanged polymorphic call retains that row in its explicit
+// Core instantiation, both inside a handler clause and after the handle, so
+// the substitution has to cover the entire typed body before the threading
+// rewrite. Both programs are lowered at the default position and with the
+// state rung forced, and both results must independently verify.
 #[test]
-fn evidence_rewrites_residual_rows_through_the_whole_body() {
+fn residual_rows_are_rewritten_through_the_whole_body() {
     let fixtures = [
         include_str!("../cases/run/evidence_residual_row_clause.pr"),
         include_str!("../cases/run/evidence_residual_row_after_handle.pr"),
     ];
     for src in fixtures {
         let (typed, env, ctors, grades) = typed_from_program(src);
-        let evidence =
+        let default =
             assert_typed_lowering(typed.clone(), &env, &ctors, &DynFlags::default(), &grades);
-        assert_eq!(evidence.strategy(), EffectStrategy::Evidence);
+        assert_eq!(default.strategy(), EffectStrategy::StateFusion);
 
         let state_flags = DynFlags {
             effect_tier: EffectTier::StateFusion,
-            ..DynFlags::default()
+            ..cascade_flags()
         };
         let state = assert_typed_lowering(typed, &env, &ctors, &state_flags, &grades);
-        assert_eq!(state.strategy(), EffectStrategy::SelectiveFreeMonad);
+        assert_eq!(state.strategy(), EffectStrategy::StateFusion);
     }
 }
 
@@ -714,7 +726,7 @@ fn assert_hidden_callbacks_route_whole() {
         let (typed, env, ctors, grades) = typed_from_program(src);
         let flags = DynFlags {
             effect_tier,
-            ..DynFlags::default()
+            ..cascade_flags()
         };
         let lowered = assert_typed_lowering(typed, &env, &ctors, &flags, &grades);
         assert_eq!(lowered.strategy(), EffectStrategy::WholeProgramFreeMonad);
@@ -725,21 +737,22 @@ fn assert_hidden_callbacks_route_whole() {
 // the producer call itself. The signature plan must widen that returned
 // thunk from `flow.ret`, then carry the new witness through map/filter
 // calls and their handler clauses. Otherwise the eventual force site adds
-// an evidence row to the stale monomorphic thunk and the entire pipeline
+// an ambient row to the stale monomorphic thunk and the entire pipeline
 // falls onto the allocating whole-program free monad.
 #[test]
-fn returned_stream_thunks_lower_by_evidence() {
-    let out = assert_program_lowering(include_str!(
+fn returned_stream_thunks_thread_by_value() {
+    let (typed, env, ctors, grades) = typed_from_program(include_str!(
         "../../examples/fixtures/compiler/stream_fuse.pr"
     ));
-    assert_eq!(out.strategy(), EffectStrategy::Evidence);
+    let out = assert_typed_lowering(typed, &env, &ctors, &DynFlags::default(), &grades);
+    assert_eq!(out.strategy(), EffectStrategy::StateFusion);
 }
 
 // A whole arena program through the real cascade, and the first higher-order
 // handler program to lower exactly. Preparation rewrites the constructors
 // `build` and `scratch` allocate into `alloc`/`init_at` and re-verifies; the
-// evidence engine then threads the `Alloc` clause `with_arena` installs down
-// to them, including through `body`, the thunk parameter `with_arena` forces.
+// threading then carries the `Alloc` clause `with_arena` installs down to
+// them, including through `body`, the thunk parameter `with_arena` forces.
 //
 // That last step is what this pins. `body : () -> a ! {Alloc}` is a rank-2
 // position: its ambient row is bound inside the parameter's own type, and the
@@ -748,15 +761,16 @@ fn returned_stream_thunks_lower_by_evidence() {
 // by the operations it carries rather than by a counter.
 #[test]
 fn arena_program_lowers_exactly() {
-    let out = assert_program_lowering("import Arena (..)\n\nfn build(n : Int, acc : List(Int)) : List(Int) =\n  if n == 0 then\n    acc\n  else\n    build(n - 1, Cons(n, acc))\n\nfn total(xs : List(Int)) : Int =\n  match xs of\n    Nil => 0\n    Cons(h, t) => h + total(t)\n\nfn scratch() : Int = total(build(3, Nil))\n\nfn main() : Int = with_arena(scratch)\n");
-    assert_eq!(out.strategy(), EffectStrategy::Evidence);
+    let (typed, env, ctors, grades) = typed_from_program("import Arena (..)\n\nfn build(n : Int, acc : List(Int)) : List(Int) =\n  if n == 0 then\n    acc\n  else\n    build(n - 1, Cons(n, acc))\n\nfn total(xs : List(Int)) : Int =\n  match xs of\n    Nil => 0\n    Cons(h, t) => h + total(t)\n\nfn scratch() : Int = total(build(3, Nil))\n\nfn main() : Int = with_arena(scratch)\n");
+    let out = assert_typed_lowering(typed, &env, &ctors, &DynFlags::default(), &grades);
+    assert_eq!(out.strategy(), EffectStrategy::StateFusion);
 }
 
 #[test]
 fn arena_program_forced_to_the_free_monad_lowers_exactly() {
     let flags = DynFlags {
         effect_tier: EffectTier::WholeProgramFreeMonad,
-        ..DynFlags::default()
+        ..cascade_flags()
     };
     let (typed, env, ctors, grades) = typed_from_program(include_str!("../../examples/arena.pr"));
     let out = assert_typed_lowering(typed, &env, &ctors, &flags, &grades);
@@ -822,7 +836,7 @@ fn assert_state_fusion_routes(src: &str) {
 fn threading_eff_state_verifies_and_eliminates_effects() {
     let src = "effect State\n  get() : Int\n  put(Int) : Unit\n\nfn tick() : Int ! {State} =\n  let n = get()\n  put(n + 1)\n  n\n\nfn counter() : Int ! {State} =\n  tick()\n  tick()\n  tick()\n  get()\n\nfn run_counter(init) =\n  let f =\n    handle counter() with\n      get() resume k => \\(s) -> k(s)(s)\n      put(s2) resume k => \\(_s) -> k(())(s2)\n      return r => \\(_s) -> r\n  f(init)\n\nfn main() = println(run_counter(0))\n";
     let (typed, env, ctors, grades) = typed_from_program(src);
-    let flags = DynFlags::default();
+    let flags = cascade_flags();
     let (threaded, threaded_env) = threaded_state_typed(typed, &env, &ctors, &flags, &grades)
         .expect("the typed cascade classifies")
         .expect("and the state engine threads this program");
@@ -907,7 +921,7 @@ fn production_state_corpus_routes_and_eliminates_effects() {
     for path in corpus {
         let src = fs::read_to_string(root.join(path)).unwrap_or_else(|e| panic!("{path}: {e}"));
         let (typed, env, ctors, grades) = typed_from_program(&src);
-        let flags = DynFlags::default();
+        let flags = cascade_flags();
         let threaded = lower_effects(typed, &env, &ctors, &flags, &grades)
             .unwrap_or_else(|e| panic!("{path}: the typed production rung fails: {e:?}"));
         assert_eq!(threaded.strategy(), EffectStrategy::StateFusion);
@@ -943,7 +957,7 @@ fn threaded_state_corpus_verifies() {
     for path in corpus {
         let src = fs::read_to_string(root.join(path)).unwrap_or_else(|e| panic!("{path}: {e}"));
         let (typed, env, ctors, grades) = typed_from_program(&src);
-        let flags = DynFlags::default();
+        let flags = cascade_flags();
         let (threaded, env2) = threaded_state_typed(typed, &env, &ctors, &flags, &grades)
             .unwrap_or_else(|e| panic!("{path}: cascade fails: {e:?}"))
             .unwrap_or_else(|| panic!("{path}: declines"));
@@ -964,10 +978,9 @@ fn threaded_state_bind_rows_cover_transformed_children() {
     for path in ["examples/eff_state.pr", "examples/param_effects.pr"] {
         let src = fs::read_to_string(root.join(path)).unwrap_or_else(|e| panic!("{path}: {e}"));
         let (typed, env, ctors, grades) = typed_from_program(&src);
-        let (threaded, env2) =
-            threaded_state_typed(typed, &env, &ctors, &DynFlags::default(), &grades)
-                .unwrap_or_else(|e| panic!("{path}: cascade fails: {e:?}"))
-                .unwrap_or_else(|| panic!("{path}: state engine declines"));
+        let (threaded, env2) = threaded_state_typed(typed, &env, &ctors, &cascade_flags(), &grades)
+            .unwrap_or_else(|e| panic!("{path}: cascade fails: {e:?}"))
+            .unwrap_or_else(|| panic!("{path}: state engine declines"));
         if let Err(violations) = audit_typed_core(&threaded, &env2) {
             panic!("{path}: transformed Bind hides child effects: {violations:#?}");
         }
@@ -978,7 +991,7 @@ fn threaded_state_bind_rows_cover_transformed_children() {
 // residual invariants.
 fn assert_threading_verifies(src: &str) {
     let (typed, env, ctors, grades) = typed_from_program(src);
-    let flags = DynFlags::default();
+    let flags = cascade_flags();
     let (threaded, threaded_env) = threaded_state_typed(typed, &env, &ctors, &flags, &grades)
         .expect("the typed cascade classifies")
         .expect("and the state engine threads this program");
@@ -1005,7 +1018,7 @@ fn native_function_answer_region_matches_the_typed_production_route() {
         effect_tier: EffectTier::FreeMonad,
         native_effects: true,
         quiet: true,
-        ..DynFlags::default()
+        ..cascade_flags()
     };
     let out = assert_typed_lowering(source.clone(), &env, &ctors, &flags, &grades);
     assert_eq!(out.strategy(), EffectStrategy::SelectiveFreeMonad);
@@ -1045,7 +1058,7 @@ fn native_function_answer_region_matches_the_typed_production_route() {
         effect_tier: EffectTier::FreeMonad,
         native_effects: false,
         quiet: true,
-        ..DynFlags::default()
+        ..cascade_flags()
     };
     let off_source = typed_from_program(src).0;
     let off_out = assert_typed_lowering(off_source, &env, &ctors, &off_flags, &grades);
@@ -1088,7 +1101,7 @@ fn whole_program_trampoline_is_deterministic_and_verifies() {
     let flags = DynFlags {
         effect_tier: EffectTier::WholeProgramFreeMonad,
         quiet: true,
-        ..DynFlags::default()
+        ..cascade_flags()
     };
     let out = assert_typed_lowering(source.clone(), &env, &ctors, &flags, &grades);
     assert_eq!(out.strategy(), EffectStrategy::WholeProgramFreeMonad);
@@ -1211,7 +1224,7 @@ fn main() =
     let flags = DynFlags {
         effect_tier: EffectTier::WholeProgramFreeMonad,
         quiet: true,
-        ..DynFlags::default()
+        ..cascade_flags()
     };
     let out = assert_typed_lowering(source, &env, &ctors, &flags, &grades);
     assert_eq!(out.strategy(), EffectStrategy::WholeProgramFreeMonad);
@@ -1253,7 +1266,7 @@ fn one_producer_answer_chain_sets_the_convention_for_the_whole_program() {
     let (typed, env, ctors, grades) = typed_from_program(&format!(
         "{writer}\n{state}\nfn main() =\n  println(sum(run_writer()))\n  println(run_counter(0))\n"
     ));
-    let flags = DynFlags::default();
+    let flags = cascade_flags();
     let recognized = recognized_strategy(typed.clone(), &env, &ctors, &flags, &grades)
         .expect("the typed cascade classifies")
         .expect("the typed cascade selects a strategy");
@@ -1286,7 +1299,7 @@ fn a_read_whose_value_is_computed_with_declines_below_the_gate() {
     assert_state_fusion_routes(&program("get()"));
 
     let (typed, env, ctors, grades) = typed_from_program(&program("let n = get()\n  n + 100"));
-    let flags = DynFlags::default();
+    let flags = cascade_flags();
     let recognized = recognized_strategy(typed.clone(), &env, &ctors, &flags, &grades)
         .expect("the typed cascade classifies")
         .expect("the typed cascade selects a strategy");
@@ -1358,14 +1371,18 @@ fn main() : Int ! {} =
     if let Err(violations) = audit_typed_core(&typed, &env) {
         panic!("compiled fixture is invalid: {violations:#?}");
     }
-    let flags = DynFlags::default();
+    // With reification off, so the fold is the state gate's only answer.
+    let flags = DynFlags {
+        reify: false,
+        ..cascade_flags()
+    };
     let recognized = recognized_strategy(typed.clone(), &env, &ctors, &flags, &grades)
         .expect("the typed cascade classifies")
         .expect("the typed cascade selects a strategy");
     assert_ne!(recognized, EffectStrategy::Pure, "var state must not erase");
     // The declining half of the state gate: a multishot clause is no kind of
-    // fold, so the typed gate must decline rather than recognize a program
-    // that cannot thread an accumulator.
+    // fold, so without a reified continuation the typed gate must decline
+    // rather than recognize a program that cannot thread an accumulator.
     assert_ne!(recognized, EffectStrategy::StateFusion);
     let out = assert_typed_lowering(typed, &env, &ctors, &flags, &grades);
     assert_eq!(out.strategy(), recognized);
@@ -1397,7 +1414,7 @@ fn main() : Int ! {} =
 ";
     let (typed, env, ctors, mut grades) = typed_from_source(src);
     grades.insert(sym("flip"), Grade::Once);
-    let flags = DynFlags::default();
+    let flags = cascade_flags();
     let recognized = recognized_strategy(typed, &env, &ctors, &flags, &grades)
         .expect("the typed cascade classifies")
         .expect("the typed cascade selects a strategy");
@@ -1443,7 +1460,7 @@ fn raw_effects_sees_through_thunks() {
 fn local_partial_region_matches_the_pinned_program_split() {
     let src = include_str!("../cases/run/local_mono_combined.pr");
     let (typed, env, ctors, grades) = typed_from_program(src);
-    let flags = DynFlags::default();
+    let flags = cascade_flags();
     let prepared = prepare(typed, &env, &ctors, &flags, &grades).expect("typed preparation");
     let effects = EffectPlan::analyze(prepared.functions());
     let (region, entries) =
@@ -1622,7 +1639,7 @@ fn answered() =
 fn main() = println(logged() + answered())
 ";
     let (typed, env, ctors, grades) = typed_from_program(src);
-    let out = assert_typed_lowering(typed, &env, &ctors, &DynFlags::default(), &grades);
+    let out = assert_typed_lowering(typed, &env, &ctors, &cascade_flags(), &grades);
     assert_eq!(out.strategy(), EffectStrategy::LocalPartial);
     assert_eq!(audit_typed_core(out.core(), out.env()), Ok(()));
 }
@@ -1741,7 +1758,7 @@ fn local_partial_composition(
     BTreeSet<Sym>,
 ) {
     let (typed, env, ctors, grades) = typed_from_program(src);
-    let flags = DynFlags::default();
+    let flags = cascade_flags();
     let prepared = prepare(typed, &env, &ctors, &flags, &grades).expect("typed preparation");
     let effects = EffectPlan::analyze(prepared.functions());
     let (latent, flow) = (effects.latent(), effects.flow());
@@ -1755,20 +1772,15 @@ fn local_partial_composition(
         .collect();
     let ops = operation_ids(prepared.functions()).expect("operation ids");
     let mut fresh = Fresh::new();
-    assert!(
-        evidence::try_lower_ev(
-            &rest,
-            latent,
-            flow,
-            &ops,
-            prepared.env(),
-            &DriftLog::new(true),
-            &mut fresh,
-        )
-        .is_none(),
-        "the fused rest takes the State rung"
+    let state_analysis = state::StateAnalysis::new(
+        &ops,
+        latent,
+        flow,
+        prepared.env(),
+        BTreeSet::new(),
+        false,
+        false,
     );
-    let state_analysis = state::StateAnalysis::new(&ops, latent, flow, prepared.env());
     let state_plan = state::fold_uniform(&rest, &state_analysis).expect("state rest plan");
     assert!(state::threads(&state_plan, &rest, &state_analysis));
     let lowered = state::thread_program(
@@ -1778,7 +1790,8 @@ fn local_partial_composition(
         &DriftLog::new(true),
         &mut fresh,
     )
-    .expect("fused rest threads");
+    .expect("fused rest threads")
+    .functions;
     let artifacts = assemble_local_partial(
         prepared.functions(),
         lowered,
@@ -1806,7 +1819,7 @@ fn local_partial_composition(
 
 fn typed_local_decline_digests(point: LocalDeclinePoint) -> (String, String) {
     let src = include_str!("../cases/run/local_mono_combined.pr");
-    let flags = DynFlags::default();
+    let flags = cascade_flags();
 
     let (typed, env, ctors, grades) = typed_from_program(src);
     let probed = with_local_decline(point, || {
@@ -1878,11 +1891,11 @@ fn local_partial_rest_fusion_decline_preserves_the_typed_name_supply() {
     let (probed, clean) = typed_local_decline_digests(LocalDeclinePoint::AfterRestFusion);
     assert_eq!(
         probed,
-        "9be4e15036553dcb820daac96e29cd87c194eaa84097f20871d4a92420126a55"
+        "e73bf8e4ab8d3360f86388b28c7dcbf75b45591b2c2131640319ed919e6e82c2"
     );
     assert_eq!(
         clean,
-        "a9f365f86b080fb3b5a665f5837a2860a77128cb8fdbb4cf0c8950f404e5d3c9"
+        "0a1157600d1b35eb81adf19c0b99b23baac38bb11868f9d4eecf7b5b74400979"
     );
 }
 
@@ -1891,10 +1904,977 @@ fn local_partial_boundary_decline_preserves_the_typed_name_supply() {
     let (probed, clean) = typed_local_decline_digests(LocalDeclinePoint::AfterBoundaryAssembly);
     assert_eq!(
         probed,
-        "b248766afb51b84b77d8326dc9ab3cb2c7a674341b45173af8f85f0843a8638b"
+        "259565ef116161952c5fb87273740c407a1dbf783f397a1aa59c9190be1d498b"
     );
     assert_eq!(
         clean,
-        "a9f365f86b080fb3b5a665f5837a2860a77128cb8fdbb4cf0c8950f404e5d3c9"
+        "0a1157600d1b35eb81adf19c0b99b23baac38bb11868f9d4eecf7b5b74400979"
+    );
+}
+
+// The state route with reified continuations: a clause that resumes twice
+// answers with a cell instead of folding, and the program still reaches
+// threaded state. With the knob off the same program falls to the free monad.
+fn reify_flags() -> DynFlags {
+    DynFlags {
+        reify: true,
+        quiet: true,
+        ..DynFlags::default()
+    }
+}
+
+fn assert_reified_landing(src: &str) -> TypedLowering {
+    let (source, env, ctors, grades) = typed_from_program(src);
+    let off = assert_typed_lowering(
+        source.clone(),
+        &env,
+        &ctors,
+        &DynFlags {
+            reify: false,
+            quiet: true,
+            ..DynFlags::default()
+        },
+        &grades,
+    );
+    assert_ne!(
+        off.strategy(),
+        StateFusion,
+        "the fixture must need a reified continuation"
+    );
+    let out = assert_typed_lowering(source, &env, &ctors, &reify_flags(), &grades);
+    assert_eq!(out.strategy(), StateFusion);
+    out
+}
+
+#[test]
+fn multishot_clause_reifies_on_the_state_route() {
+    assert_reified_landing(
+        "effect Peek\n  peek(Int) : Int\n\nfn ask() : Int ! {Peek} = peek(4) + peek(7)\n\nfn peeked() =\n  handle ask() with\n    peek(n) resume k => k(n) + k(n * 2)\n    return r => r\n\nfn main() = println(peeked())\n",
+    );
+}
+
+#[test]
+fn threaded_operation_beside_a_reified_one_lands() {
+    assert_reified_landing(
+        "effect Ask\n  ask() : Int\n\neffect Peek\n  peek(Int) : Int\n\nfn once() : Int ! {Ask} = ask() + 1\n\nfn twice() : Int ! {Peek} = peek(3) * 10\n\nfn main() =\n  let a =\n    handle once() with\n      ask() resume k => k(1)\n      return r => r\n  let b =\n    handle twice() with\n      peek(n) resume k => k(n) + k(n + 1)\n      return r => r\n  println(a + b)\n",
+    );
+}
+
+#[test]
+fn thunk_valued_performer_reifies_at_its_declared_type() {
+    assert_reified_landing(
+        "effect Peek\n  peek(Int) : Int\n\nfn run_thunks(fs, acc) =\n  match fs of\n    Nil => acc\n    Cons(f, rest) => run_thunks(rest, acc + f())\n\nfn peeked() =\n  let fs = [\\() -> peek(4), \\() -> peek(7)]\n  handle run_thunks(fs, 0) with\n    peek(n) resume k => k(n) + k(n * 2)\n    return r => r\n\nfn main() = println(peeked())\n",
+    );
+}
+
+// A handler over a thunk parameter typed over a bare row variable, whose
+// result mentions that variable: the parameter is read as cells because the
+// flow says every thunk reaching it is rebuilt, and the driver is quantified
+// as the function it is minted inside.
+#[test]
+fn row_polymorphic_handle_site_reifies_with_a_quantified_driver() {
+    assert_reified_landing(
+        "effect Gen\n  yield(Int) : Unit\n\ntype Step(e : Row) = Done | More(Int, () -> Step(e) ! {e})\n\nfn count(n) : Unit ! {Gen} =\n  if n > 0 then\n    yield(n)\n    count(n - 1)\n  else\n    ()\n\nfn to_stream(thunk : () -> a ! {| e}) : Step(e) =\n  handle thunk() with\n    yield(v) resume k => More(v, \\() -> k(()))\n    return r => Done\n\nfn total(s) =\n  match s of\n    Done => 0\n    More(x, k) => x + total(k())\n\nfn main() = println(total(to_stream(\\() -> count(4))))\n",
+    );
+}
+
+// A `var` handler that runs under a multishot operation: the operation
+// arrives in a thunk parameter, so the state handle is met inside cells and
+// becomes a driver over cells of its own, forwarding the multishot operation
+// outward. Each resumption then gets its own state, printing [1, 1].
+#[test]
+fn state_handle_nested_under_a_multishot_operation_reifies() {
+    assert_reified_landing(
+        "effect Amb\n  choose(Int) : Int\n\nfn worker(k) : Int =\n  var s := 0\n  k()\n  s := s + 1\n  s\n\nfn main() =\n  println(handle worker(\\() -> choose(2)) with {\n    choose(m) resume k => flatten(map(\\(i) -> k(i), range(0, m))),\n    return r => Cons(r, Nil)\n  })\n",
+    );
+}
+
+// A scheduler host quantified over a row tail beyond the reified effect and
+// `IO`: the island row is spelled under that tail, calls back into the host
+// from cells subtract the labels the extension added and close the tail, and
+// a command value whose row argument is a representation phantom passes to a
+// consumer spelling the residual row.
+#[test]
+fn row_tailed_scheduler_host_reifies_over_a_phantom_row_carrier() {
+    assert_reified_landing(
+        "effect Async\n  yield() : Unit\n\ntype Cmd(a, e : Row) = Done(a) | Yielded(() -> Cmd(a, e) ! {e})\n\ntype Sched(a, e : Row) = Sched(List(() -> Cmd(a, e) ! {e}))\n\nfn step(t : () -> a ! {Async, IO | e}) : Cmd(a, {IO | e}) ! {IO | e} =\n  handle t() with\n    yield() resume k => Yielded(\\() -> k(()))\n    return r => Done(r)\n\nfn run_next(s : Sched(Int, {IO})) : Unit ! {IO} =\n  match s of\n    Sched(Nil) => ()\n    Sched(Cons(k, rest)) =>\n      match k() of\n        Done(r) =>\n          println(r)\n          run_next(Sched(rest))\n        Yielded(k2) => run_next(Sched(append(rest, [k2])))\n\nfn tick(name : String, n : Int) : Int ! {Async, IO} =\n  if n > 0 then\n    println(name)\n    yield()\n    tick(name, n - 1)\n  else\n    n\n\nfn main() =\n  run_next(Sched([\n      \\() -> step(\\() -> tick(\"a\", 2)),\n      \\() -> step(\\() -> tick(\"b\", 1)),\n    ]))\n",
+    );
+}
+
+// A latent operation at the entry point wraps `main` in a fault handle, and
+// that handle is promoted because its body reaches the reified `yield`: the
+// whole of `main` becomes cells at its own site row, which carries the `IO`
+// its prints perform while the island's row is empty. The scheduler's cells
+// are read at the wider row through a representation conversion.
+#[test]
+fn entry_fault_handle_reads_island_cells_at_the_site_row() {
+    assert_reified_landing("effect Async\n  yield() : Unit\n\ntype Cmd(a, e : Row) = Done(a) | Yielded(() -> Cmd(a, e) ! {e})\n\nfn step(t : () -> a ! {Async}) : Cmd(a, {}) =\n  handle t() with\n    yield() resume k => Yielded(\\() -> k(()))\n    return r => Done(r)\n\nfn run_all(ks : List(() -> Cmd(Int, {}))) : Int =\n  match ks of\n    Nil => 0\n    Cons(k, rest) =>\n      match k() of\n        Done(r) => r + run_all(rest)\n        Yielded(k2) => run_all(append(rest, [k2]))\n\nfn tick(n : Int) : Int ! {Async} =\n  if n > 0 then\n    yield()\n    n + tick(n - 1)\n  else\n    0\n\nfn main() =\n  let total = run_all([\\() -> step(\\() -> tick(2)), \\() -> step(\\() -> tick(1))])\n  println(total)\n  if total < 0 then fail()\n");
+}
+
+// Every capability operation is reified by the replay handlers, so no named
+// function is a member of the island: the only performer is the thunk `main`
+// hands the world handler, and its body performs real IO through `record`.
+// A thunk literal handed to a cells position is a member without a name, and
+// the island's row names what its body keeps.
+#[test]
+fn a_handed_thunk_literal_contributes_its_row_to_the_island() {
+    assert_reified_landing("import Replay (..)\n\nfn main() =\n  let (r, t) = record(\\(_u) -> rng_rand() + env_argc())\n  let r2 = replay(t, \\(_u) -> rng_rand() + env_argc())\n  if r == r2 then\n    println(\"same\")\n  else\n    println(\"different\")\n");
+}
+
+// A forwarding wrapper around a reified body: its resuming arms re-perform the
+// operation and its never-arm runs a cleanup before re-raising. The handle is
+// promoted because its body reaches the reified `yield`, so how its arms agree
+// is never asked of the threaded fold. The cleanup thunk is typed over the row
+// variable the carrying body also spells, but the flow says nothing reified
+// reaches it, so its force is direct code.
+#[test]
+fn a_forwarding_wrapper_with_a_never_arm_and_a_direct_cleanup_reifies() {
+    assert_reified_landing("effect Async\n  yield() : Unit\n  never stop() : b\n\ntype Cmd(a, e : Row) = Done(a) | Stopped | Yielded(() -> Cmd(a, e) ! {e})\n\nfn step(t : () -> a ! {Async, IO}) : Cmd(a, {IO}) ! {IO} =\n  handle t() with\n    yield() resume k => Yielded(\\() -> k(()))\n    never stop() => Stopped\n    return r => Done(r)\n\nfn on_stop(cleanup : () -> Unit ! {| e}, body : () -> a ! {Async | e}) : a ! {Async | e} =\n  handle body() with\n    yield() resume k => k(yield())\n    never stop() =>\n      cleanup()\n      stop()\n    return r => r\n\nfn run_all(ks : List(() -> Cmd(Int, {IO}) ! {IO})) : Int ! {IO} =\n  match ks of\n    Nil => 0\n    Cons(k, rest) =>\n      match k() of\n        Done(r) => r + run_all(rest)\n        Stopped => run_all(rest)\n        Yielded(k2) => run_all(append(rest, [k2]))\n\nfn tick(n : Int) : Int ! {Async, IO} =\n  if n > 0 then\n    println(n)\n    yield()\n    n + tick(n - 1)\n  else\n    stop()\n\nfn main() =\n  let total = run_all([\\() -> step(\\() -> on_stop(\\() -> println(\"cleanup\"), \\() -> tick(2)))])\n  println(total)\n");
+}
+
+// A reified island resumes by applying its queue and re-entering its driver,
+// and its cells compose through `ebind`: every hop is a call, so without the
+// trampoline a long forwarding chain runs the stack out. The route requires
+// the trampoline and refuses explicitly when the option is off, rather than
+// lowering a program whose termination depends on its depth.
+#[test]
+fn a_reified_island_declines_without_the_trampoline() {
+    let src = "effect Tick\n  tick() : Int\n\neffect Note\n  note() : Int\n\nfn spin(n : Int) : Int ! {Tick, Note} =\n  if n == 0 then\n    note()\n  else\n    tick()\n    spin(n - 1)\n\nfn forwarded(n : Int) : Int ! {Note} =\n  handle spin(n) with\n    tick() resume k => k(1)\n    return x => x\n\nfn main() =\n  let total =\n    handle forwarded(1000) with\n      note() resume k => k(7) + k(8)\n      return x => x\n  println(show(total))\n";
+    let landed = assert_reified_landing(src);
+    assert!(
+        landed
+            .core()
+            .functions()
+            .iter()
+            .any(|f| f.name().as_str() == "prism_drive"),
+        "the landed island is driven by the trampoline loop"
+    );
+    let (source, env, ctors, grades) = typed_from_program(src);
+    let refused = assert_typed_lowering(
+        source,
+        &env,
+        &ctors,
+        &DynFlags {
+            reify: true,
+            trampoline: false,
+            quiet: true,
+            ..DynFlags::default()
+        },
+        &grades,
+    );
+    assert_ne!(refused.strategy(), StateFusion);
+    assert_eq!(
+        refused.state_decline(),
+        Some("a reified island without the trampoline")
+    );
+}
+
+// The reified set is keyed by operation, not by handler: a multishot handler
+// of `peek` in one function makes every performer of `peek` cells code, and a
+// tail-resumptive handler of the same operation over a direct loop elsewhere
+// is promoted rather than folded. The loop's lowered signature answers a
+// cell, which pins the boundary as measured, not as local.
+#[test]
+fn an_independent_multishot_handler_reifies_a_direct_loop_over_the_same_operation() {
+    let landed = assert_reified_landing(
+        "effect Peek\n  peek(Int) : Int\n\nfn ask() : Int ! {Peek} = peek(4) + peek(7)\n\nfn peeked() =\n  handle ask() with\n    peek(n) resume k => k(n) + k(n * 2)\n    return r => r\n\nfn count(n : Int, acc : Int) : Int ! {Peek} =\n  if n == 0 then acc else count(n - 1, acc + peek(n))\n\nfn counted() =\n  handle count(3, 0) with\n    peek(n) resume k => k(n + 1)\n    return r => r\n\nfn main() = println(peeked() + counted())\n",
+    );
+    let count = landed
+        .core()
+        .functions()
+        .iter()
+        .find(|f| f.name().as_str() == "count")
+        .expect("the direct loop survives lowering under its own name");
+    assert!(
+        matches!(
+            count.sig().body().result(),
+            CoreType::Lowered(LoweredType::Eff(_))
+        ),
+        "the direct loop over a reified operation answers a cell: {:?}",
+        count.sig().body().result()
+    );
+}
+
+// A stream handler whose answer is typed over its own row quantifier, read by
+// a consumer that is quantified the same way: the caller instantiates both
+// quantifiers at the reified effect, so the thunks the driver's clauses build
+// and the reads the consumer performs are cells on both sides, and the host
+// that instantiates them reads the consumer's answer through a runner. The
+// consumer being direct while the handler consumed the effect gave native
+// output that disagreed with the interpreter (a cell read as a step tag).
+#[test]
+fn a_handler_answering_over_its_quantifier_and_its_consumer_are_members() {
+    let out = assert_reified_landing(
+        "effect Gen\n  yield(Int) : Unit\n\ntype Tree = Leaf(Int) | Node(Tree, Tree)\n\ntype Step(e : Row) = Done | More(Int, () -> Step(e) ! {e})\n\nfn leaves(t) : Unit ! {Gen} =\n  match t of\n    Leaf(n) => yield(n)\n    Node(l, r) =>\n      leaves(l)\n      leaves(r)\n\nfn to_stream(thunk : () -> a ! {| e}) : Step(e) =\n  handle thunk() with\n    yield(v) resume k => More(v, \\() -> k(()))\n    return r => Done\n\nfn same(s1, s2) =\n  match (s1, s2) of\n    (Done, Done) => true\n    (More(a, k1), More(b, k2)) => a == b && same(k1(), k2())\n    _ => false\n\nfn main() =\n  let t1 = Node(Leaf(1), Node(Leaf(2), Leaf(3)))\n  let t2 = Node(Node(Leaf(1), Leaf(2)), Leaf(3))\n  let t3 = Node(Leaf(1), Leaf(3))\n  println(same(to_stream(\\() -> leaves(t1)), to_stream(\\() -> leaves(t2))))\n  println(same(to_stream(\\() -> leaves(t1)), to_stream(\\() -> leaves(t3))))\n",
+    );
+    let answers_cells: BTreeMap<&str, bool> = out
+        .core()
+        .functions()
+        .iter()
+        .map(|f| {
+            (
+                f.name().as_str(),
+                abi::answers_with_effect_cell(f.sig().body().result()),
+            )
+        })
+        .collect();
+    for member in ["leaves", "to_stream", "same"] {
+        assert_eq!(
+            answers_cells.get(member),
+            Some(&true),
+            "{member} answers cells"
+        );
+    }
+    assert_eq!(
+        answers_cells.get("main"),
+        Some(&false),
+        "the entry is read by the runtime"
+    );
+}
+
+fn answers_cells_by_name(out: &TypedLowering) -> BTreeMap<&str, bool> {
+    out.core()
+        .functions()
+        .iter()
+        .map(|f| {
+            (
+                f.name().as_str(),
+                abi::answers_with_effect_cell(f.sig().body().result()),
+            )
+        })
+        .collect()
+}
+
+const STREAM_HOST: &str = "effect Gen\n  yield(Int) : Unit\n\ntype Step(e : Row) = Done | More(Int, () -> Step(e) ! {e})\n\nfn count(n) : Unit ! {Gen} =\n  if n > 0 then\n    yield(n)\n    count(n - 1)\n  else\n    ()\n\nfn to_stream(thunk : () -> a ! {| e}) : Step(e) =\n  handle thunk() with\n    yield(v) resume k => More(v, \\() -> k(()))\n    return r => Done\n\nfn total(s) =\n  match s of\n    Done => 0\n    More(x, k) => x + total(k())\n";
+
+// A mutually recursive pair of direct functions with different arities,
+// reached only from an unexecuted branch under a multishot handler: the pair
+// answers plain values, so its tail calls are a native loop and not bounces,
+// and the island lands. Seeding the trampoline's bounce set with every
+// function declined this program as an island the trampoline refuses.
+#[test]
+fn a_direct_cycle_behind_an_unexecuted_multishot_branch_is_not_bounced() {
+    let out = assert_reified_landing(
+        "effect Peek\n  peek() : Int\n\nfn direct_a() : Int = direct_b(1)\n\nfn direct_b(n) : Int = direct_a()\n\nfn probe_it() : Int ! {Peek} =\n  if peek() == 0 then\n    direct_a()\n  else\n    7\n\nfn main() =\n  println(handle probe_it() with {\n    peek() resume k => k(1) + k(2),\n    return r => r\n  })\n",
+    );
+    let answers_cells = answers_cells_by_name(&out);
+    assert_eq!(answers_cells.get("probe_it"), Some(&true));
+    for direct in ["direct_a", "direct_b"] {
+        assert_eq!(
+            answers_cells.get(direct),
+            Some(&false),
+            "{direct} stays direct code"
+        );
+    }
+}
+
+// A closed-row forwarder: a handler declared over `{Gen, Peek}` that answers
+// `yield` and lets `peek` pass to the multishot handler outside it. The
+// forwarder is a member by its spelled label, with no row quantifier
+// involved, and the outer driver resumes it twice.
+#[test]
+fn a_forwarder_over_a_closed_row_lands() {
+    let out = assert_reified_landing(
+        "effect Gen\n  yield(Int) : Unit\n\neffect Peek\n  peek() : Int\n\nfn work() : Int ! {Gen, Peek} =\n  yield(1)\n  yield(2)\n  peek()\n\nfn count_yields(body : () -> Int ! {Gen, Peek}) : Int ! {Peek} =\n  handle body() with\n    yield(v) resume k => k(()) + 1\n    return r => r\n\nfn main() =\n  println(handle count_yields(\\() -> work()) with {\n    peek() resume k => k(10) + k(20),\n    return r => r\n  })\n",
+    );
+    let answers_cells = answers_cells_by_name(&out);
+    assert_eq!(answers_cells.get("work"), Some(&true));
+    assert_eq!(answers_cells.get("count_yields"), Some(&true));
+    assert_eq!(answers_cells.get("main"), Some(&false));
+}
+
+// A host quantified over the reified effect is instantiated once at the
+// reified row and once at the empty row, in either order. Both
+// instantiations of the host answer cells, and the pure one is read through a
+// runner rather than folded.
+#[test]
+fn a_reifying_and_a_pure_instantiation_of_one_host_land_in_either_order() {
+    for tail in [
+        "fn main() =\n  println(total(to_stream(\\() -> count(3))))\n  println(total(to_stream(\\() -> ())))\n",
+        "fn main() =\n  println(total(to_stream(\\() -> ())))\n  println(total(to_stream(\\() -> count(3))))\n",
+    ] {
+        let out = assert_reified_landing(&format!("{STREAM_HOST}\n{tail}"));
+        let answers_cells = answers_cells_by_name(&out);
+        assert_eq!(answers_cells.get("to_stream"), Some(&true));
+        assert_eq!(answers_cells.get("total"), Some(&true));
+        assert_eq!(answers_cells.get("main"), Some(&false));
+    }
+}
+
+// The calling convention is recorded per named call. A host answering cells
+// that is passed as a function value reaches the lowering as a lambda that
+// calls the host by name at the reader's instantiation, so the edge the
+// convention needs is there, and the reader is cloned at that row. The
+// program lands, and the host is a member on both of its uses.
+#[test]
+fn a_cells_answering_host_passed_as_a_value_calls_it_by_name() {
+    let out = assert_reified_landing(&format!(
+        "{STREAM_HOST}\nfn apply(f, t) = f(t)\n\nfn main() =\n  println(total(to_stream(\\() -> count(3))))\n  println(total(apply(to_stream, \\() -> count(2))))\n"
+    ));
+    let answers_cells = answers_cells_by_name(&out);
+    assert_eq!(answers_cells.get("to_stream"), Some(&true));
+    assert_eq!(answers_cells.get("main"), Some(&false));
+}
+
+fn contains_bind_of(comp: &TypedComp, name: &str) -> bool {
+    if matches!(comp.kind(), TypedCompKind::Bind(_, binder, _) if binder.name().as_str() == name) {
+        return true;
+    }
+    let mut found = false;
+    walk::each_subterm(comp, &mut |child| found |= contains_bind_of(child, name));
+    found
+}
+
+// A parameter read as direct code, applied through a `let` alias that shares
+// the driver's row quantifier with the cells. The alias is read by its type,
+// not by the parameter's reading: giving the alias the parameter's reading
+// made the record clauses of the replay corpus fail verification, because
+// their resume thunks are bound to a name before they are applied and that
+// name is the site the native corpus validated. The alias survives to the
+// typed lowering, so the shape is exercised rather than folded away.
+#[test]
+fn a_direct_parameter_applied_through_an_alias_lands() {
+    let out = assert_reified_landing(
+        "effect Gen\n  yield(Int) : Unit\n\nfn count(n) : Unit ! {Gen} =\n  if n > 0 then\n    yield(n)\n    count(n - 1)\n  else\n    ()\n\nfn with_cleanup(body : () -> Unit ! {Gen | e}, cleanup : () -> Int ! {| e}) : Int ! {| e} =\n  let c = cleanup\n  handle body() with\n    yield(v) resume k => k(()) + k(()) + v\n    return r => c()\n\nfn main() = println(with_cleanup(\\() -> count(2), \\() -> 100))\n",
+    );
+    let with_cleanup = out
+        .core()
+        .functions()
+        .iter()
+        .find(|f| f.name().as_str() == "with_cleanup")
+        .expect("the driver survives under its own name");
+    assert!(
+        contains_bind_of(with_cleanup.body(), "c"),
+        "the alias of the direct parameter is still bound in the lowered driver"
+    );
+}
+
+/// A landed driver whose parameters keep their declared thunk types over the
+/// quantifier, read at each instantiation, and whose answer is cells.
+fn assert_answers_cells(out: &TypedLowering, name: &str) {
+    let f = out
+        .core()
+        .functions()
+        .iter()
+        .find(|f| f.name().as_str() == name)
+        .expect("the driver survives under its own name");
+    assert!(
+        matches!(f.sig().body().result(), CoreType::Lowered(_)),
+        "`{name}` answers cells, not the declared word"
+    );
+    for param in f.params() {
+        assert!(
+            matches!(param.ty(), CoreType::Thunk(_)),
+            "`{name}` keeps its thunk parameters at their declared types"
+        );
+    }
+}
+
+// The alias fixture with a second reified effect instantiating the driver's
+// quantifier from outside: `cleanup` is typed over `e`, carries nothing, and
+// is built by its caller at a row naming `Tick`. The driver must read it at
+// that row.
+#[test]
+fn an_alias_of_a_parameter_over_an_instantiated_quantifier_lands() {
+    let out = assert_reified_landing(
+        "effect Gen\n  yield(Int) : Unit\n\neffect Tick\n  tick() : Int\n\nfn down(n) : Unit ! {Gen} =\n  if n > 0 then\n    yield(n)\n    down(n - 1)\n  else\n    ()\n\nfn with_cleanup(body : () -> Unit ! {Gen | e}, cleanup : () -> Int ! {| e}) : Int ! {| e} =\n  let c = cleanup\n  handle body() with\n    yield(v) resume k => k(()) + k(()) + v\n    return r => c()\n\nfn main() =\n  let r =\n    handle with_cleanup(\\() -> down(tick()), \\() -> 100) with\n      tick() resume k => k(1) + k(2)\n      return r => r\n  println(r)\n",
+    );
+    assert_answers_cells(&out, "with_cleanup");
+}
+
+// The replay recorder: its one parameter over the quantifier is the thunk
+// its handle drives, forced once, and its answer is not typed over the
+// quantifier, so the handle consumes the operations it answers and the
+// recorder's clauses stay direct, with the threaded evidence in the
+// resumption's type out of cells code. Read from the tree so the pin follows
+// the stdlib.
+#[test]
+fn the_replay_recorder_consumes_on_its_driven_quantifier() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let src =
+        fs::read_to_string(root.join("examples/record_replay.pr")).expect("the corpus program");
+    let (source, env, ctors, grades) = typed_from_program(&src);
+    assert_typed_lowering(source, &env, &ctors, &reify_flags(), &grades);
+    assert_reified_landing(&src);
+}
+
+// A parameter typed over the driver's own quantifier, read after the handle
+// that answers the reified effect. Its caller builds it at a row naming the
+// effect, so the callee reads cells there even though its own handle has
+// already answered them: subtracting the handled effect from the quantifier
+// read `b` as direct code and returned a heap cell as the `Int`.
+#[test]
+fn a_parameter_read_past_a_driver_on_its_own_quantifier_lands() {
+    let out = assert_reified_landing(
+        "effect Tick\n  tick() : Int\n\nfn run_both(a : () -> Int ! {| e}, b : () -> Int ! {| e}) : Int ! {| e} =\n  let x =\n    handle a() with\n      tick() resume k => k(1) + k(2)\n      return r => r\n  x + b()\n\nfn main() =\n  println(run_both(\\() -> tick() * 100, \\() -> 5))\n",
+    );
+    assert_answers_cells(&out, "run_both");
+}
+
+// The same parameter read inside the handle's body, beside the one the
+// clauses answer.
+#[test]
+fn a_parameter_read_beside_a_driver_on_its_own_quantifier_lands() {
+    assert_reified_landing(
+        "effect Tick\n  tick() : Int\n\nfn run_both(a : () -> Int ! {| e}, b : () -> Int ! {| e}) : Int ! {| e} =\n  handle a() + b() with\n    tick() resume k => k(1) + k(2)\n    return r => r\n\nfn main() =\n  println(run_both(\\() -> tick() * 100, \\() -> 5))\n",
+    );
+}
+
+// The driver instantiated at two rows from one caller: the one naming the
+// reified effect reads its parameters as cells, the empty one as direct code.
+#[test]
+fn a_driver_instantiated_at_two_rows_lands_at_each() {
+    assert_reified_landing(
+        "effect Tick\n  tick() : Int\n\nfn run_both(a : () -> Int ! {| e}, b : () -> Int ! {| e}) : Int ! {| e} =\n  let x =\n    handle a() with\n      tick() resume k => k(1) + k(2)\n      return r => r\n  x + b()\n\nfn main() =\n  println(run_both(\\() -> tick() * 100, \\() -> 5) + run_both(\\() -> 7, \\() -> 5))\n",
+    );
+}
+
+// The parameter read on the branch the driver does not take.
+#[test]
+fn two_drivers_forcing_different_parameters_over_one_quantifier_land() {
+    let src = r"
+effect Tick
+  tick() : Int
+
+effect Tock
+  tock() : Int
+
+fn run_two(a : () -> Int ! {| e}, b : () -> Int ! {| e}) : Int ! {| e} =
+  let x =
+    handle a() with
+      tick() resume k => k(1) + k(2)
+      return r => r
+  let y =
+    handle b() with
+      tock() resume k => k(10)
+      return r => r
+  x + y
+
+fn main() =
+  let r =
+    handle run_two(\() -> tick() * 100 + tock(), \() -> tock() + 1) with
+      tock() resume k => k(3)
+      return r => r
+  println(r)
+";
+    let out = assert_reified_landing(src);
+    assert_answers_cells(&out, "run_two");
+}
+
+#[test]
+fn a_branch_reading_a_parameter_past_a_driver_lands() {
+    assert_reified_landing(
+        "effect Tick\n  tick() : Int\n\nfn run_either(c : Bool, a : () -> Int ! {| e}, b : () -> Int ! {| e}) : Int ! {| e} =\n  if c then\n    handle a() with\n      tick() resume k => k(1) + k(2)\n      return r => r\n  else\n    b()\n\nfn main() =\n  println(run_either(false, \\() -> tick() * 100, \\() -> 5) + run_either(true, \\() -> tick() * 100, \\() -> 5))\n",
+    );
+}
+
+// A second effect the outer scope handles reaching the same parameter: the
+// state route has no spelling for the threaded value and declines, and the
+// program runs on the next rung.
+#[test]
+fn a_foreign_effect_beside_a_driver_declines_without_a_spelling() {
+    for (src, reason) in [
+        (
+            "effect Tick\n  tick() : Int\n\neffect Peek\n  peek(Int) : Int\n\nfn run_both(a : () -> Int ! {| e}, b : () -> Int ! {| e}) : Int ! {| e} =\n  let x =\n    handle a() with\n      tick() resume k => k(1) + k(2)\n      return r => r\n  x + b()\n\nfn main() =\n  let total =\n    handle run_both(\\() -> tick() * 100, \\() -> peek(2)) with\n      peek(n) resume k => k(n) * 10\n      return r => r\n  println(total)\n",
+            "`run_both`: a threaded value with no source spelling",
+        ),
+        (
+            "effect Tick\n  tick() : Int\n\neffect Peek\n  peek(Int) : Int\n\nfn run_either(c : Bool, a : () -> Int ! {| e}, b : () -> Int ! {| e}) : Int ! {| e} =\n  if c then\n    handle a() with\n      tick() resume k => k(1) + k(2)\n      return r => r\n  else\n    b()\n\nfn main() =\n  let total =\n    handle run_either(false, \\() -> tick() * 100, \\() -> peek(2)) + run_either(true, \\() -> tick() * 100, \\() -> peek(2)) with\n      peek(n) resume k => k(n) * 10\n      return r => r\n  println(total)\n",
+            "`run_either`: a threaded value with no source spelling",
+        ),
+    ] {
+        let (source, env, ctors, grades) = typed_from_program(src);
+        let refused = assert_typed_lowering(source, &env, &ctors, &reify_flags(), &grades);
+        assert_ne!(refused.strategy(), StateFusion);
+        assert_eq!(refused.state_decline(), Some(reason));
+    }
+}
+
+// Branches threaded at distinct open tails: one answers the reified effect
+// on the quantifier, the other forwards a foreign one. The producer's own
+// residual joins the receiver's row, so both branches run at one row and
+// the single-resume driver threads as plain state.
+#[test]
+fn branches_threaded_at_distinct_tails_land() {
+    let (source, env, ctors, grades) = typed_from_program(
+        "effect Tick\n  tick() : Int\n\neffect Peek\n  peek(Int) : Int\n\nfn run_either(c : Bool, a : () -> Int ! {| e}, b : () -> Int ! {| e}) : Int ! {| e} =\n  if c then\n    handle a() with\n      tick() resume k => k(1)\n      return r => r\n  else\n    b()\n\nfn main() =\n  let total =\n    handle run_either(false, \\() -> tick() * 100, \\() -> peek(2)) + run_either(true, \\() -> tick() * 100, \\() -> peek(2)) with\n      peek(n) resume k => k(n) * 10\n      return r => r\n  println(total)\n",
+    );
+    let out = assert_typed_lowering(source, &env, &ctors, &reify_flags(), &grades);
+    assert_eq!(out.state_decline(), None);
+    assert_eq!(out.strategy(), StateFusion);
+}
+
+// A foreign effect read past a single-resume driver on the driver's own
+// quantifier: the handle's residual row keeps the quantifier and the scope
+// it is threaded in runs at the receiver's row, which the residual joins.
+#[test]
+fn a_handle_at_a_row_its_scope_joins_lands() {
+    let (source, env, ctors, grades) = typed_from_program(
+        "effect Tick\n  tick() : Int\n\neffect Peek\n  peek(Int) : Int\n\nfn both(a : () -> Int ! {| e}, b : () -> Int ! {| e}) : Int ! {| e} =\n  let x =\n    handle a() with\n      tick() resume k => k(1)\n      return r => r\n  x + b()\n\nfn main() =\n  let total =\n    handle both(\\() -> tick() * 100, \\() -> peek(2)) with\n      peek(n) resume k => k(n) * 10\n      return r => r\n  println(total)\n",
+    );
+    let out = assert_typed_lowering(source, &env, &ctors, &reify_flags(), &grades);
+    assert_eq!(out.state_decline(), None);
+    assert_eq!(out.strategy(), StateFusion);
+}
+
+// The parameter counts of every callable stored in a `ctor` cell of the
+// lowered program, in construction order.
+fn stored_callable_arities(out: &TypedLowering, ctor: &str) -> Vec<usize> {
+    fn callable_arity(ty: &CoreType) -> Option<usize> {
+        match ty {
+            CoreType::Thunk(inner) => match inner.result() {
+                CoreType::Function(fun) => Some(fun.params().len()),
+                _ => None,
+            },
+            CoreType::Source(Type::Fun(params, _, _)) => Some(params.len()),
+            _ => None,
+        }
+    }
+    fn in_value(value: &TypedValue, ctor: &str, out: &mut Vec<usize>) {
+        let TypedValueKind::Ctor { name, fields, .. } = value.kind() else {
+            return;
+        };
+        if name.as_str() == ctor {
+            out.extend(fields.iter().filter_map(|f| callable_arity(f.ty())));
+        }
+        for field in fields {
+            in_value(field, ctor, out);
+        }
+    }
+    fn in_comp(comp: &TypedComp, ctor: &str, out: &mut Vec<usize>) {
+        walk::each_value(comp, &mut |value| in_value(value, ctor, out));
+        walk::each_subcomp(comp, &mut |child| in_comp(child, ctor, out));
+    }
+    let mut arities = Vec::new();
+    for f in out.core().functions() {
+        in_comp(f.body(), ctor, &mut arities);
+    }
+    arities
+}
+
+const GEN: &str = "effect Gen\n  gen() : Int\n\n";
+
+// A callable stored in a constructor cell and forced after projection takes
+// exactly one evidence parameter beyond its source arity, whether the cell
+// is a newtype or a field nested inside another constructor. The lowered
+// program is audited by the independent verifier against the widened
+// declarations, so the store and the force site agree by construction.
+#[test]
+fn stored_callables_take_one_evidence_parameter_at_landing() {
+    for (src, ctor, arity) in [
+        (
+            format!("{GEN}newtype Act = Act(() -> Int ! {{Gen}})\n\nfn make() : Act = Act(\\() -> gen() * 2)\n\nfn run(a : Act) : Int ! {{Gen}} =\n  match a of\n    Act(f) => f()\n\nfn main() =\n  let total =\n    handle run(make()) with\n      gen() resume k => k(3)\n      return r => r\n  println(total)\n"),
+            "Act",
+            1,
+        ),
+        (
+            format!("{GEN}type Inner = Inner(() -> Int ! {{Gen}})\n\ntype Outer = Outer(Inner, Int)\n\nfn build() : Outer = Outer(Inner(\\() -> gen() + 1), 10)\n\nfn run_outer(o : Outer) : Int ! {{Gen}} =\n  match o of\n    Outer(i, n) =>\n      match i of\n        Inner(f) => f() + n\n\nfn main() =\n  let total =\n    handle run_outer(build()) with\n      gen() resume k => k(3)\n      return r => r\n  println(total)\n"),
+            "Inner",
+            1,
+        ),
+        // A carrier stored through a generic type argument is declared by
+        // the constructor's scheme at that argument, so the store widens it
+        // exactly as a field the constructor spells itself.
+        (
+            format!("{GEN}type Box(a) = Box(a)\n\nfn stored() : Box(() -> Int ! {{Gen}}) = Box(\\() -> gen() + gen())\n\nfn force(b : Box(() -> Int ! {{Gen}})) : Int ! {{Gen}} =\n  match b of\n    Box(f) => f()\n\nfn main() =\n  let total =\n    handle force(stored()) with\n      gen() resume k => k(3)\n      return r => r\n  println(total)\n"),
+            "Box",
+            1,
+        ),
+        // The same beside a second operation on the accumulator channel: the
+        // stored carrier takes both operations' evidence and the accumulator.
+        (
+            format!("{GEN}effect Tick\n  tick() : Int\n\ntype Box(a) = Box(a)\n\nfn stored() : Box(() -> Int ! {{Gen, Tick}}) = Box(\\() -> gen() + tick())\n\nfn force(b : Box(() -> Int ! {{Gen, Tick}})) : Int ! {{Gen, Tick}} =\n  match b of\n    Box(f) => f()\n\nfn inner() : Int ! {{Gen}} =\n  handle force(stored()) with\n    tick() resume k => k(1) + 1\n    return r => r\n\nfn main() =\n  let total =\n    handle inner() with\n      gen() resume k => k(3)\n      return r => r\n  println(total)\n"),
+            "Box",
+            3,
+        ),
+        // A value-channel carrier forced inside a scope threading an
+        // accumulator takes its one evidence and no accumulator: the force
+        // site hands what the carrier's own type declares, not what the
+        // scope around it threads.
+        (
+            format!("{GEN}effect Tick\n  tick() : Int\n\ntype Box(a) = Box(a)\n\nfn stored() : Box(() -> Int ! {{Gen}}) = Box(\\() -> gen() + gen())\n\nfn force(b : Box(() -> Int ! {{Gen}})) : Int ! {{Gen, Tick}} =\n  match b of\n    Box(f) => f() + tick()\n\nfn inner() : Int ! {{Gen}} =\n  handle force(stored()) with\n    tick() resume k => k(1) + 1\n    return r => r\n\nfn main() =\n  let total =\n    handle inner() with\n      gen() resume k => k(3)\n      return r => r\n  println(total)\n"),
+            "Box",
+            1,
+        ),
+    ] {
+        let (source, env, ctors, grades) = typed_from_program(&src);
+        let out = assert_typed_lowering(source, &env, &ctors, &reify_flags(), &grades);
+        assert_eq!(
+            out.strategy(),
+            StateFusion,
+            "{ctor}: {:?}",
+            out.state_decline()
+        );
+        assert_eq!(stored_callable_arities(&out, ctor), vec![arity], "{ctor}");
+    }
+}
+
+// A head or tail inside a scope threading an accumulator that performs only
+// a value-channel operation, through a named producer or a stored carrier,
+// takes that operation's evidence exactly as it would in a value scope: the
+// accumulator passes through it, and its answer is read beside it.
+// An operation's parameter is not a store position. A carrier handed
+// through one reads back in the clause at the row the clause was elaborated
+// at, while the store that keeps it and the perform sites that hand it name
+// their own, and widened carriers at different rows are different types with
+// no subtyping between them. A payload carrying the operation's own effect
+// mentions the operation's own row quantifier, which makes the operation
+// reified: the payload is cells, and the fold threads what is left.
+#[test]
+fn a_carrier_payload_over_the_operation_own_effect_reifies() {
+    assert_reified_landing(
+        "effect Reg\n  reg_memo(() -> Int ! {Reg | e}) : Int\n  reg_get(Int) : Int\n\ntype Node(e : Row) = MemoN(() -> Int ! {Reg | e}, Int)\n\nfn run_thunk(s : Option(Node(e)), action : () -> a ! {Reg | e}) : (Option(Node(e)), a) =\n  let f =\n    handle action() with\n      reg_memo(th) resume k => \\(st) -> k(1)(Some(MemoN(th, 0)))\n      reg_get(n) resume k => \\(st) -> k(n + 1)(st)\n      return x => \\(st) -> (st, x)\n  f(s)\n\nfn main() =\n  let r = run_thunk(None, \\() -> reg_get(reg_memo(\\() -> reg_get(4))))\n  println(snd(r))\n",
+    );
+}
+
+// A payload carrying another fused effect names no quantifier of its own
+// operation, so nothing makes the operation reified, and the store the
+// clause keeps it in is refused by name before anything is threaded.
+#[test]
+fn a_carrier_payload_over_another_fused_effect_declines_by_name() {
+    let src = "effect Tick\n  tick() : Int\n\neffect Reg\n  reg_memo(() -> Int ! {Tick | e}) : Int\n\ntype Node(e : Row) = MemoN(() -> Int ! {Tick | e}, Int)\n\nfn run_thunk(s : Option(Node(e)), action : () -> a ! {Reg | e}) : (Option(Node(e)), a) =\n  let f =\n    handle action() with\n      reg_memo(th) resume k => \\(st) -> k(1)(Some(MemoN(th, 0)))\n      return x => \\(st) -> (st, x)\n  f(s)\n\nfn force_all(s : Option(Node(e))) : Int ! {Tick | e} =\n  match s of\n    Some(MemoN(f, _)) => f() + tick()\n    None => 0\n\nfn main() =\n  let r = run_thunk(None, \\() -> reg_memo(\\() -> tick() + 4))\n  let total = handle force_all(fst(r)) with\n    tick() resume k => k(10)\n  println(snd(r) + total)\n";
+    let (source, env, ctors, grades) = typed_from_program(src);
+    let out = assert_typed_lowering(source, &env, &ctors, &reify_flags(), &grades);
+    assert_eq!(out.state_decline(), Some("`reg_memo`: a carrier payload"));
+}
+
+#[test]
+fn value_channel_heads_inside_a_state_scope_take_their_evidence() {
+    const TICK: &str = "effect Tick\n  tick() : Int\n\nfn inner() : Int ! {Gen} =\n  handle force() with\n    tick() resume k => k(1) + 1\n    return r => r\n\nfn main() =\n  let total =\n    handle inner() with\n      gen() resume k => k(3)\n      return r => r\n  println(total)\n";
+    for (name, body) in [
+        (
+            "named head",
+            "fn g() : Int ! {Gen} = gen() + gen()\n\nfn force() : Int ! {Gen, Tick} =\n  let a = g()\n  a + tick()\n\n",
+        ),
+        (
+            "named tail",
+            "fn g() : Int ! {Gen} = gen() + gen()\n\nfn force() : Int ! {Gen, Tick} =\n  let t = tick()\n  g() + t\n\n",
+        ),
+        (
+            "carrier tail",
+            "type Box(a) = Box(a)\n\nfn stored() : Box(() -> Int ! {Gen}) = Box(\\() -> gen() + gen())\n\nfn force() : Int ! {Gen, Tick} =\n  let t = tick()\n  match stored() of\n    Box(f) => f()\n\n",
+        ),
+    ] {
+        let src = format!("{GEN}{body}{TICK}");
+        let (source, env, ctors, grades) = typed_from_program(&src);
+        let out = assert_typed_lowering(source, &env, &ctors, &reify_flags(), &grades);
+        assert_eq!(
+            out.strategy(),
+            StateFusion,
+            "{name}: {:?}",
+            out.state_decline()
+        );
+    }
+}
+
+// A store the state route has no single convention for declines by name
+// rather than landing at a guessed one: a row-parameterised field whose two
+// instantiations would widen to two different arities. A conservative
+// decline the verifier never has to refuse.
+#[test]
+fn stores_without_one_convention_decline_by_name() {
+    let src = format!("{GEN}type Cell(e : Row) = Cell(() -> Int ! {{e}})\n\nfn run_cell(c) =\n  match c of\n    Cell(f) => f()\n\nfn main() =\n  let quiet = Cell(\\() -> 5)\n  let loud = Cell(\\() -> gen())\n  let total =\n    handle run_cell(loud) + run_cell(quiet) with\n      gen() resume k => k(3)\n      return r => r\n  println(total)\n");
+    let reason =
+        "`main`: an argument the callee's parameter does not accept (Cell({Gen}) at Cell({}))";
+    let (source, env, ctors, grades) = typed_from_program(&src);
+    let out = assert_typed_lowering(source, &env, &ctors, &reify_flags(), &grades);
+    assert_ne!(out.strategy(), StateFusion, "{reason}");
+    assert_eq!(out.state_decline(), Some(reason));
+}
+
+// A producer under several aborts has no one stop to step onto, so the
+// aborts are reified: the handle answering them drives cells, and the
+// program still reaches threaded state.
+#[test]
+fn two_aborts_in_one_producer_land_on_the_reified_route() {
+    let src = "error NotFound(String)\n\nerror Malformed(String)\n\nfn lookup(k) =\n  if k == \"x\" then\n    7\n  else\n    throw NotFound(k)\n\nfn parse_num(s) =\n  if s == \"1\" then\n    1\n  else\n    throw Malformed(s)\n\nfn both(k, s) : Int ! {NotFound, Malformed} =\n  lookup(k) + parse_num(s)\n\nfn main() =\n  let c =\n    try\n      both(\"y\", \"1\")\n    catch\n      NotFound(k) => 100\n      Malformed(m) => 200\n  println(c)\n";
+    assert_reified_landing(src);
+}
+
+// Two aborts each raised by a producer of its own and joined only at the
+// handle answering both: the scope under that handle reaches two aborts, so
+// they are reified together.
+#[test]
+fn two_aborts_joined_at_one_handle_land_on_the_reified_route() {
+    let src = "error A(Int)\n\nerror B(Int)\n\nfn g(n) : Int ! {A} =\n  if n == 0 then\n    throw A(1)\n  else\n    n\n\nfn h(n) : Int ! {B} =\n  if n == 1 then\n    throw B(2)\n  else\n    n\n\nfn main() =\n  let r =\n    try\n      g(0) + h(1)\n    catch\n      A(x) => x + 10\n      B(y) => y + 20\n  println(r)\n";
+    assert_reified_landing(src);
+}
+
+// A handle inside a live scope that discharges the scope's abort has no
+// threading arm: the accumulator threaded past it cannot survive the abort
+// inside a step. The abort and the operation that accumulator is threaded
+// for are reified together, and the fold answering that operation drives
+// the cells.
+#[test]
+fn an_abort_discharged_inside_a_state_producer_lands_on_the_reified_route() {
+    let src = "effect Raise\n  raise(Int) : Int\n\neffect Tick\n  tick(Unit) : Int\n\nfn total(n) : Int ! {Raise, Tick} =\n  let a = tick(())\n  let b =\n    if n == 0 then\n      raise(a)\n    else\n      n * tick(())\n  a + b\n\nfn recover(n) : Int ! {Tick} =\n  handle total(n) with\n    never raise(c) => 0 - c\n    return r => r\n\nfn run_one(n) =\n  let f =\n    handle recover(n) with\n      tick(u) resume k => \\(s) -> k(s)(s + 1)\n      return r => \\(_s) -> r\n  f(1)\n\nfn main() =\n  println(run_one(0))\n  println(run_one(3))\n";
+    assert_reified_landing(src);
+}
+
+// The channel of an operation is decided once for the program, so a direct
+// consumer of an operation another handler folds over an Int has no seed of
+// that type to thread. Its operations are reified instead: each handle
+// answers its own performs from the queue.
+#[test]
+fn a_consumer_of_an_operation_pinned_elsewhere_lands_on_the_reified_route() {
+    let src = "effect Counter\n  get() : Int\n  bump() : Unit\n\nfn twice() : Int ! {Counter} =\n  bump()\n  get() * 2\n\nfn counted() : Int =\n  let run =\n    handle twice() with\n      get() resume k => \\(s) -> k(s)(s)\n      bump() resume k => \\(s) -> k(())(s + 1)\n      return r => \\(_s) -> r\n  run(0)\n\nfn add_get(total) : Int ! {Counter} =\n  bump()\n  total + get()\n\nfn main() =\n  let total = counted()\n  let more =\n    handle add_get(total) with\n      get() resume k => k(7)\n      bump() resume k => k(())\n  println(more)\n";
+    assert_reified_landing(src);
+}
+
+// A while loop's condition is a producing head of a thunk parameter: not a
+// read, not a write, and not unit, so an accumulator alone cannot rebuild
+// it. The scope carries the accumulator and the value side by side instead,
+// which needs no reified continuation.
+#[test]
+fn a_while_head_over_state_threads_a_pair() {
+    let src = "effect Counter\n  get() : Int\n  bump() : Unit\n\nfn count_up() : Unit ! {Counter, IO} =\n  while get() < 4 do\n    println(get() * 10)\n    bump()\n\nfn main() =\n  let f =\n    handle count_up() with\n      get() resume k => \\(s) -> k(s)(s)\n      bump() resume k => \\(s) -> k(())(s + 1)\n      return r => \\(s) -> s\n  println(f(0))\n";
+    let (source, env, ctors, grades) = typed_from_program(src);
+    for reify in [false, true] {
+        let flags = DynFlags {
+            reify,
+            quiet: true,
+            ..DynFlags::default()
+        };
+        let out = assert_typed_lowering(source.clone(), &env, &ctors, &flags, &grades);
+        assert_eq!(out.strategy(), StateFusion, "reify = {reify}");
+    }
+}
+
+// A producer's closed declared row keeps labels the fold does not answer.
+// Those labels stand ahead of the ambient in the producer's row, so the IO
+// it performs at its own top level types there, and a caller instantiates
+// the ambient at its row less what the producer already spells.
+#[test]
+fn a_state_producer_keeps_its_declared_residual_labels() {
+    let src = "effect Counter\n  get() : Int\n  bump() : Unit\n\nfn count_up() : Unit ! {Counter, IO} =\n  println(get() * 10)\n  bump()\n  println(get())\n\nfn main() =\n  let f =\n    handle count_up() with\n      get() resume k => \\(s) -> k(s)(s)\n      bump() resume k => \\(s) -> k(())(s + 1)\n      return r => \\(s) -> s\n  println(f(0))\n";
+    let (source, env, ctors, grades) = typed_from_program(src);
+    for reify in [false, true] {
+        let flags = DynFlags {
+            reify,
+            quiet: true,
+            ..DynFlags::default()
+        };
+        let out = assert_typed_lowering(source.clone(), &env, &ctors, &flags, &grades);
+        assert_eq!(out.strategy(), StateFusion, "reify = {reify}");
+    }
+}
+
+// A `var` is a cell by the time the reified rewrite sees the scope that
+// declares it: reading and writing the cell performs nothing reified, so a
+// direct scope carries those computations as it carries any other value
+// traffic.
+#[test]
+fn a_var_cell_read_in_a_direct_scope_lands_on_the_reified_route() {
+    let src = "effect Counter\n  get() : Int\n  bump() : Unit\n\nfn counted() : Int =\n  let run =\n    with handler\n      get() resume k => \\(s) -> k(s)(s)\n      bump() resume k => \\(s) -> k(())(s + 1)\n      return r => \\(_s) -> r\n    bump()\n    get() * 2\n  run(0)\n\nfn main() =\n  var total := counted()\n  with handler\n    get() resume k => k(7)\n    bump() resume k => k(())\n  bump()\n  total := total + get()\n  println(total)\n";
+    assert_reified_landing(src);
+}
+
+// A bare-row thunk parameter forced under a var-cell handler: nothing in
+// the forwarder's scope fixes `cput`'s effect parameter, so the forwarder
+// binds a quantifier for it and the call under the handler instantiates
+// that quantifier from the row it hands over. Both channels: the put-only
+// twin's clause has no result to keep generic.
+#[test]
+fn a_bare_row_carrier_with_an_unfixed_effect_parameter_lands() {
+    let run_cell = "effect Cell(s)\n  cget() : s\n  cput(s) : Unit\n\nfn run_cell(init : s, action : () -> a ! {Cell(s) | e}) : (a, s) ! {| e} =\n  var cell := init\n  let r =\n    handle action() with\n      cget() resume k => k(cell)\n      cput(s2) resume k =>\n        cell := s2\n        k(())\n      return r => r\n  (r, cell)\n\nfn apply(combine : (Int, Int) -> Int ! {| e}, a : Int, b : Int) : Int ! {| e} =\n  combine(a, b)\n\n";
+    for tick in [
+        "fn tick(v : Int) : Int ! {Cell(Int)} =\n  cput(cget() + 1)\n  v\n\n",
+        "fn tick(v : Int) : Int ! {Cell(Int)} =\n  cput(v)\n  v\n\n",
+        "fn tick(v : Int) : Int ! {Cell(Int)} =\n  v + cget()\n\n",
+    ] {
+        let src = format!(
+            "{run_cell}{tick}fn main() =\n  let r = run_cell(0, \\() -> apply(\\(a, b) -> tick(a + b), 1, 2))\n  println(r)\n"
+        );
+        let (source, env, ctors, grades) = typed_from_program(&src);
+        for reify in [false, true] {
+            let flags = DynFlags {
+                reify,
+                quiet: true,
+                ..DynFlags::default()
+            };
+            let out = assert_typed_lowering(source.clone(), &env, &ctors, &flags, &grades);
+            assert_eq!(out.strategy(), StateFusion, "reify = {reify}: {tick}");
+        }
+    }
+}
+
+// An operation whose parameter mentions the operation's own row quantifier:
+// no clause type fixes that quantifier from the forwarder's scope, so the
+// operation is reified and its payload is cells. The payload names an effect
+// the fold threads, whose evidence the forwarder's caller made: it runs at
+// the row that evidence is typed at, the caller is credited with what it
+// performs, and the forwarder reads it through its gained ambient.
+#[test]
+fn an_operation_own_row_quantifier_in_a_parameter_reifies() {
+    assert_reified_landing("effect Out\n  out(Int) : Unit\n\neffect Wrap\n  wrap(() -> Int ! {Wrap | e}) : Int\n\nfn run_wrap(action : () -> a ! {Wrap | e}) : a =\n  handle action() with\n    wrap(th) resume k => k(run_wrap(th))\n    return x => x\n\nfn inner() : Int ! {Out} =\n  out(7)\n  3\n\nfn driver() : Int ! {Wrap, Out} = wrap(inner)\n\nfn main() =\n  println(handle run_wrap(driver) with {\n    out(n) resume k => let _ = println(n) in k(()),\n    return r => r\n  })\n");
+}
+
+// The same forwarder with a generic clause row: the forwarder's own handle
+// answers the reified operation over its quantifier, the payload is written
+// where the caller's handler for the threaded effect lives, and a thunk
+// built there that performs nothing threaded runs at the island's row.
+#[test]
+fn a_payload_forwarder_with_a_generic_clause_row_reifies() {
+    assert_reified_landing("effect Out\n  out(Int) : Unit\n\neffect Wrap\n  wrap(() -> Int ! {Wrap | e}) : Int\n\nfn run_wrap(action : () -> a ! {Wrap | e}) : a ! {| e} =\n  handle action() with\n    wrap(th) resume k => k(run_wrap(th))\n    return x => x\n\nfn inner() : Int ! {Out} =\n  out(7)\n  3\n\nfn driver() : Int ! {Wrap, Out} = wrap(inner)\n\nfn main() =\n  println(handle run_wrap(driver) with {\n    out(n) resume k => let _ = println(n) in k(()),\n    return r => r\n  })\n");
+}
+
+// A mask has no threading arm yet: the program declines before any plan.
+#[test]
+fn a_masked_effect_declines_by_name() {
+    let src = "effect Tick\n  tick() : Int\n\nfn inner() : Int ! {Tick} = tick()\n\nfn outer() : Int ! {Tick} =\n  handle mask<Tick>(inner()) with\n    tick() resume k => k(100)\n    return r => r\n\nfn main() =\n  let r =\n    handle outer() with\n      tick() resume k => k(1)\n      return r => r\n  println(r)\n";
+    let (source, env, ctors, grades) = typed_from_program(src);
+    let out = assert_typed_lowering(source, &env, &ctors, &reify_flags(), &grades);
+    assert_ne!(out.strategy(), StateFusion);
+    assert_eq!(out.state_decline(), Some("the program masks an effect"));
+}
+
+// A state producer with an open declared row names its own ambient, so a
+// consumer it calls returns at that ambient rather than a second open tail.
+#[test]
+fn a_state_producer_with_an_open_row_calls_a_consumer_at_its_ambient() {
+    let src = "effect Warn\n  warn(String) : Unit\n\nfn capture(action : () -> a ! {Warn | r}) : (a, Int) =\n  let f =\n    handle action() with\n      warn(_m) resume k => \\(n) -> k(())(n + 1)\n      return v => \\(n) -> (v, n)\n  f(0)\n\nfn tolerate(action : () -> a ! {Warn | r}) : a ! {Warn | r} =\n  match capture(action) of\n    (v, n) =>\n      warn(\"captured\")\n      v\n\nfn branch() : Int ! {Warn} =\n  let x = tolerate(\\() -> warn(\"inner\"))\n  warn(\"after\")\n  7\n\nfn count(action : () -> a ! {Warn}) : Int =\n  let f =\n    handle action() with\n      warn(_m) resume k => \\(n) -> k(())(n + 1)\n      return v => \\(n) -> n\n  f(0)\n\nfn main() = println(count(branch))\n";
+    let (source, env, ctors, grades) = typed_from_program(src);
+    let out = assert_typed_lowering(source, &env, &ctors, &reify_flags(), &grades);
+    assert_eq!(out.state_decline(), None);
+    assert_eq!(out.strategy(), StateFusion);
+}
+
+// An open-row adapter whose direct clause performs an operation a downstream
+// handler threads as state: the clause holds no accumulator to hand that
+// operation, so its own operation reifies, and the island closes over the
+// state handler its clause performs into. Without reification the same
+// shape is the named decline.
+#[test]
+fn an_open_row_adapter_over_a_state_consumer() {
+    let src = "effect Ask\n  ask() : Int\n\neffect Tell\n  tell() : Int\n\nfn adapt(action : () -> a ! {Ask | e}) =\n  handle action() with\n    ask() resume k => k(tell() + 1)\n    return r => r\n\nfn serve(action) =\n  let f =\n    handle action() with\n      tell() resume k => \\(n) -> k(n)(n + 1)\n      return r => \\(_n) -> r\n  f(10)\n\nfn client() : Int ! {Ask} = ask() + ask()\n\nfn main() = println(serve(\\() -> adapt(client)))\n";
+    let (source, env, ctors, grades) = typed_from_program(src);
+    let off = assert_typed_lowering(
+        source,
+        &env,
+        &ctors,
+        &DynFlags {
+            reify: false,
+            quiet: true,
+            ..DynFlags::default()
+        },
+        &grades,
+    );
+    assert_ne!(off.strategy(), StateFusion);
+    assert_eq!(
+        off.state_decline(),
+        Some("`adapt`: a direct clause performing `tell`, which this scope threads as state")
+    );
+    assert_reified_landing(src);
+}
+
+// The same adapter resuming from inside a thunk: the clause is reified on
+// its own account, and the state operation it performs still joins its
+// island rather than leaving the driver's body at a row its signature lost.
+#[test]
+fn a_thunk_resuming_adapter_over_a_state_consumer() {
+    assert_reified_landing(
+        "effect Ask\n  ask() : Int\n\neffect Tell\n  tell() : Int\n\nfn adapt(action : () -> a ! {Ask | e}) =\n  handle action() with\n    ask() resume k => let th = \\() -> k(tell() + 1) in th()\n    return r => r\n\nfn serve(action) =\n  let f =\n    handle action() with\n      tell() resume k => \\(n) -> k(n)(n + 1)\n      return r => \\(_n) -> r\n  f(10)\n\nfn client() : Int ! {Ask} = ask() + ask()\n\nfn main() = println(serve(\\() -> adapt(client)))\n",
+    );
+}
+
+// A multishot adapter performing a state operation: the island closure is
+// what keeps the verifier from seeing a driver whose body keeps `Tell`.
+#[test]
+fn resuming_into_a_state_body_does_not_make_a_direct_clause_an_island() {
+    // The resumption's type carries the row of the rest of the handled body,
+    // here `tick`, which the outer handler folds. Resuming is not the clause
+    // performing `tick`: the inner handle stays threaded, and nothing is
+    // reified.
+    let src = "effect Ask\n  ask() : Int\n\neffect Tick\n  tick(Unit) : Unit\n\nfn inner() : Int =\n  var c := 0\n  tick(())\n  c := c + ask()\n  tick(())\n  c := c * 2\n  c + ask()\n\nfn middle() : Int =\n  handle inner() with\n    ask() resume k => k(5)\n    return x => x\n\nfn main() =\n  let r =\n    handle middle() with\n      tick(u) resume k => k(()) + 100\n      return x => x\n  println(r)\n";
+    let (source, env, ctors, grades) = typed_from_program(src);
+    for flags in [
+        DynFlags {
+            reify: false,
+            quiet: true,
+            ..DynFlags::default()
+        },
+        reify_flags(),
+    ] {
+        let out = assert_typed_lowering(source.clone(), &env, &ctors, &flags, &grades);
+        assert_eq!(out.strategy(), StateFusion);
+        assert_eq!(out.state_decline(), None);
+        assert!(
+            !functions_use_constructor(out.core().functions(), "EOp"),
+            "the direct clause was promoted to a cell under reify={}",
+            flags.reify
+        );
+    }
+}
+
+#[test]
+fn a_multishot_adapter_over_a_state_consumer() {
+    assert_reified_landing(
+        "effect Ask\n  ask() : Int\n\neffect Tell\n  tell() : Int\n\nfn adapt(action : () -> Int ! {Ask | e}) : Int =\n  handle action() with\n    ask() resume k => k(tell() + 1) + k(0)\n    return r => r\n\nfn serve(action) =\n  let f =\n    handle action() with\n      tell() resume k => \\(n) -> k(n)(n + 1)\n      return r => \\(_n) -> r\n  f(10)\n\nfn client() : Int ! {Ask} = ask() + ask()\n\nfn main() = println(serve(\\() -> adapt(client)))\n",
+    );
+}
+
+const SETTLED_READ: &str = "an operation cell reached a site whose row admits none";
+
+fn comp_mentions_str(comp: &TypedComp, needle: &str) -> bool {
+    let mut found = false;
+    walk::each_value(comp, &mut |value| {
+        found |= value_mentions_str(value, needle);
+    });
+    walk::each_subcomp(comp, &mut |child| found |= comp_mentions_str(child, needle));
+    found
+}
+
+fn value_mentions_str(value: &TypedValue, needle: &str) -> bool {
+    match value.kind() {
+        TypedValueKind::Str(text) => text.contains(needle),
+        TypedValueKind::Thunk(body) => comp_mentions_str(body, needle),
+        TypedValueKind::Ctor { fields, .. }
+        | TypedValueKind::Tuple(fields)
+        | TypedValueKind::UnboxedTuple(fields) => {
+            fields.iter().any(|field| value_mentions_str(field, needle))
+        }
+        TypedValueKind::UnboxedRecord(fields) => fields
+            .iter()
+            .any(|(_, field)| value_mentions_str(field, needle)),
+        TypedValueKind::Reinterpret(inner)
+        | TypedValueKind::LoweredRepr { value: inner, .. }
+        | TypedValueKind::NewtypeRepr { value: inner, .. } => value_mentions_str(inner, needle),
+        _ => false,
+    }
+}
+
+// The functions whose lowered bodies read a cells thunk through a settled
+// plain adapter: the adapter forces the cells thunk and reads the value out
+// of the pure cell, and its operation arm is the ICE no admitted row reaches.
+fn settled_readers(out: &TypedLowering) -> Vec<String> {
+    out.core()
+        .functions()
+        .iter()
+        .filter(|function| comp_mentions_str(function.body(), SETTLED_READ))
+        .map(|function| function.name().as_str().to_string())
+        .collect()
+}
+
+// A combinator (`rw_try`) quantified over the rule's row builds its result
+// thunk as cells where the row reifies, and `main` hands that result to a
+// reader (`rw_bottom_up` instantiated at a row admitting nothing reified)
+// whose own type spells a plain thunk. The hand-off must settle the cells
+// result rather than pass it plain: passing it plain read the pure cell as
+// the value natively while every verifier passed, since a cells thunk and a
+// plain one are the same machine word. The settled reader drives the cells
+// at the island's row and is bridged back to the declared type. The corpus
+// program is read from the tree (its imports are outside the compiler source
+// roots).
+#[test]
+fn a_cells_combinator_result_settles_at_its_plain_reader() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let src = fs::read_to_string(root.join("tests/cases/run/rewrite_strategies.pr")).unwrap();
+    let (typed, env, ctors, grades) = typed_from_program(&src);
+    let out = assert_typed_lowering(typed, &env, &ctors, &reify_flags(), &grades);
+    assert_eq!(out.strategy(), StateFusion, "{:?}", out.state_decline());
+    let readers = settled_readers(&out);
+    assert!(
+        readers.iter().any(|name| name == "main"),
+        "`main` must settle the combinator's cells result before handing it to a plain reader: {readers:?}"
     );
 }

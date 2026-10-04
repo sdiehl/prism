@@ -1,0 +1,26 @@
+effect Gen
+  yield(Int) : Unit
+
+effect Tick
+  tick() : Int
+
+fn down(n) : Unit ! {Gen} =
+  if n > 0 then
+    yield(n)
+    down(n - 1)
+
+fn with_cleanup(
+  body : () -> Unit ! {Gen | e},
+  cleanup : () -> Int ! {| e}
+) : Int ! { | e} =
+  let c = cleanup
+  handle body() with
+    yield(v) resume k => k(()) + k(()) + v
+    return r => c()
+
+fn main() =
+  let r =
+    handle with_cleanup(\() -> down(tick()), \() -> 100) with
+      tick() resume k => k(1) + k(2)
+      return r => r
+  println(r)

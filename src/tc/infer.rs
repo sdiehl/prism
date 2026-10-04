@@ -1120,7 +1120,7 @@ impl Tc<'_> {
                 }
             }
         }
-        let (body_ty, body_residual) =
+        let (body_ty, body_residual, body_row) =
             self.synth_handle_body(env, body, &scope, arms, mode, span)?;
         let ret_ex = self.push_ex();
         // With no return clause the implicit arm is the identity, so the
@@ -1220,6 +1220,33 @@ impl Tc<'_> {
                     reason = "Never is uninhabited in Core; arm is unreachable"
                 )]
                 HandlerArm::Sugar(never) => match *never {},
+            }
+        }
+        // The instantiation a clause binds is the one the handled action
+        // performs. An action whose row was still open when the handler
+        // discharged it has that row unified with the enclosing ambient, so the
+        // label reads back only here, once everything this handler's scope
+        // performs has landed in it. Unequated, a clause binds an element type
+        // the action never sends it: `smap`'s clause took its mapping
+        // function's argument type while its stream emitted another, and the
+        // mismatch reached the runtime as a builtin arity fault.
+        let performed = self.apply_row(&EffRow::Exist(body_row));
+        for (effect, args) in &scope {
+            let labels = performed.labels();
+            let Some(label) = labels.iter().find(|l| l.name == *effect).copied() else {
+                continue;
+            };
+            for (x, y) in label.args.iter().zip(args) {
+                self.equate(x, y).map_err(|e| {
+                    e.or(ErrKind::EffectInstMismatch {
+                        actual: self.show_label(label),
+                        expected: self.show_label(&Label {
+                            name: *effect,
+                            args: args.clone(),
+                        }),
+                    }
+                    .at(span))
+                })?;
             }
         }
         let residual = mem::take(&mut self.operation_uses);
@@ -1625,12 +1652,6 @@ impl Tc<'_> {
         Ok(())
     }
 
-    // Open every free effect-row variable in an operation signature to a fresh
-    // row existential, once per use. A row-polymorphic op such as
-    // `fork(() -> a ! {Async(a) | e})` carries `e` as a free row variable in its
-    // stored signature; a handler clause opens it fresh so it unifies downstream
-    // with the reified answer row instead of leaking a rigid variable. Ops with
-    // no free row variable are untouched.
     // The type-variable analogue of the row set `open_op_rows` collects: every type
     // variable the operation's own signature mentions, in a stable order. The
     // effect declaration's parameters have been substituted out by then, so what is
@@ -1638,12 +1659,18 @@ impl Tc<'_> {
     fn op_signature_vars(params: &[Type], ret: &Type) -> BTreeSet<Sym> {
         let mut vars = BTreeSet::new();
         for p in params {
-            super::env::collect_type_vars(p, &mut vars);
+            collect_type_vars(p, &mut vars);
         }
-        super::env::collect_type_vars(ret, &mut vars);
+        collect_type_vars(ret, &mut vars);
         vars
     }
 
+    // Open every free effect-row variable in an operation signature to a fresh
+    // row existential, once per use. A row-polymorphic op such as
+    // `fork(() -> a ! {Async(a) | e})` carries `e` as a free row variable in its
+    // stored signature; a handler clause opens it fresh so it unifies downstream
+    // with the reified answer row instead of leaking a rigid variable. Ops with
+    // no free row variable are untouched.
     fn open_op_rows(&mut self, params: &mut [Type], ret: &mut Type) {
         let mut rows = BTreeSet::new();
         for p in params.iter() {
@@ -1836,7 +1863,7 @@ impl Tc<'_> {
         arms: &[HandlerArm<Core>],
         mode: HandlerMode,
         span: Span,
-    ) -> Result<(Type, OperationUses), TypeError> {
+    ) -> Result<(Type, OperationUses, u32), TypeError> {
         let handler_uses = mem::take(&mut self.operation_uses);
         let body_row = self.push_ex_row();
         // A handler scopes a fresh ambient tail for its body but keeps the
@@ -1918,7 +1945,7 @@ impl Tc<'_> {
         };
         let residual = body_uses.subtract(&handled_operations, opaque_discharge, &masked);
         self.operation_uses.merge(residual.clone());
-        Ok((body_ty, residual))
+        Ok((body_ty, residual, body_row))
     }
 }
 

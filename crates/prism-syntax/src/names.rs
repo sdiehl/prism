@@ -666,6 +666,8 @@ pub const OP_SKIP: &str = "sk@";
 pub const OP_ARG: &str = "a@";
 pub const RESUME_VAL: &str = "y@";
 pub const RESUME_KONT: &str = "kr@";
+/// The answer a queue-backed resumption drives its driver to.
+pub const RESUME_ANSWER: &str = "ya@";
 pub const FWD_SKIP: &str = "sk1@";
 pub const EBIND_FN: &str = "f@";
 
@@ -1039,6 +1041,13 @@ pub const DRIVE_ROW: &str = "rho_drive@";
 /// The accumulator-type quantifier state fusion appends to a producer whose
 /// accumulator no clause observes. Witness-only, like [`FRESH_EVIDENCE_ROW`].
 pub const FRESH_STATE_TYPE: &str = "%stt";
+/// The namespace of the done-payload type quantifier of a value-threaded
+/// producer. Witness-only, like [`FRESH_STATE_TYPE`].
+pub const FRESH_DONE_TYPE: &str = "%dnt";
+/// The namespace of the type quantifier a producer gains for an effect
+/// parameter that neither a label in its row nor a perform in view fixes.
+/// Witness-only, like [`FRESH_STATE_TYPE`].
+pub const FRESH_EFFECT_PARAM: &str = "%efp";
 /// The binder a subtype check renames each pair of aligned function
 /// quantifiers to before comparing their bodies structurally.
 ///
@@ -1086,6 +1095,59 @@ pub fn is_evidence_row(name: &str) -> bool {
 #[must_use]
 pub fn state_type(ids: &[i64]) -> String {
     qualified_by_ops(FRESH_STATE_TYPE, ids)
+}
+
+/// The done-payload type quantifier of a value-threaded producer that aborts.
+///
+/// Its result is a `Step` over that payload, and the payload's type is the
+/// handle site's to choose. Named by the operation ids for the reason
+/// [`state_type`] is.
+#[must_use]
+pub fn done_type(ids: &[i64]) -> String {
+    qualified_by_ops(FRESH_DONE_TYPE, ids)
+}
+
+/// Whether `name` is a [`done_type`] quantifier, which is what tells a force
+/// site which of a carrier thunk's two type quantifiers it is instantiating.
+#[must_use]
+pub fn is_done_type(name: &str) -> bool {
+    name.starts_with(FRESH_DONE_TYPE)
+}
+
+/// The type quantifier standing for the `index`th parameter of the effect
+/// whose planned operations have `ids`, in a producer that names no argument
+/// for it.
+///
+/// A generic helper that carries `State(s)` evidence only through a parameter
+/// binds `s` this way, and every edge instantiates it from the row argument
+/// it hands over. Named from the operation ids for the reason [`state_type`]
+/// is, with the position last so one effect's parameters stay distinct.
+/// `ids` must be ascending and deduplicated.
+#[must_use]
+pub fn effect_param(ids: &[i64], index: usize) -> String {
+    format!(
+        "{}{PRIVATE_SEP}{index}",
+        qualified_by_ops(FRESH_EFFECT_PARAM, ids)
+    )
+}
+
+/// Whether `name` is an [`effect_param`] quantifier.
+#[must_use]
+pub fn is_effect_param(name: &str) -> bool {
+    name.starts_with(FRESH_EFFECT_PARAM)
+}
+
+/// The first operation id and the parameter position an [`effect_param`]
+/// name spells, which is how an edge finds the effect it is instantiating.
+#[must_use]
+pub fn effect_param_slot(name: &str) -> Option<(i64, usize)> {
+    let mut parts = name
+        .strip_prefix(FRESH_EFFECT_PARAM)?
+        .split(PRIVATE_SEP)
+        .skip(1);
+    let id = parts.next()?.parse().ok()?;
+    let index = parts.last()?.parse().ok()?;
+    Some((id, index))
 }
 
 /// The rename binder for the `index`th aligned quantifier of the two signatures
@@ -1139,6 +1201,15 @@ pub fn ho_specialized_clone(function: &str, n: usize) -> String {
 #[must_use]
 pub fn exact_sized_clone(function: &str, n: usize) -> String {
     format!("{function}$xs{n}")
+}
+
+// The top-level clone emitted when a function's row-polymorphic carrier
+// parameter is instantiated against the labels one group of call sites names.
+// A distinct tag keeps these disjoint from every specializer clone, since the
+// pass runs during effect lowering and may clone their output.
+#[must_use]
+pub fn carrier_instance(function: &str, n: usize) -> String {
+    format!("{function}$ci{n}")
 }
 
 // The top-level definition a closed local lambda is hoisted into so its
@@ -1262,6 +1333,25 @@ mod tests {
         );
     }
 
+    // Carrier instantiation runs after every specializer and clones their
+    // output, so its tag must be disjoint from all three clone schemes.
+    #[test]
+    fn carrier_instance_names_are_disjoint_from_clone_namespaces() {
+        assert_eq!(super::carrier_instance("run_thunks", 1), "run_thunks$ci1");
+        assert_ne!(
+            super::carrier_instance("map", 7),
+            super::exact_sized_clone("map", 7)
+        );
+        assert_ne!(
+            super::carrier_instance("map", 7),
+            super::ho_specialized_clone("map", 7)
+        );
+        assert_ne!(
+            super::carrier_instance("map", 7),
+            super::specialized_clone("map", 7)
+        );
+    }
+
     // A lifted lambda is a moved definition, not a clone; its namespace must
     // still be disjoint from every clone scheme so counters can never collide.
     #[test]
@@ -1302,6 +1392,12 @@ mod tests {
     fn op_derived_quantifier_names_are_determined_and_disjoint() {
         assert_eq!(super::evidence_row(&[3, 12]), "%evr@3@12");
         assert_eq!(super::state_type(&[3, 12]), "%stt@3@12");
+        assert_eq!(super::done_type(&[3, 12]), "%dnt@3@12");
+        assert_eq!(super::effect_param(&[3, 12], 1), "%efp@3@12@1");
+        assert_eq!(super::effect_param_slot("%efp@3@12@1"), Some((3, 1)));
+        assert_eq!(super::effect_param_slot("%efp@3@0"), Some((3, 0)));
+        assert!(super::is_effect_param(&super::effect_param(&[3], 0)));
+        assert!(!super::is_effect_param(&super::done_type(&[3])));
         assert_ne!(super::state_type(&[3, 12]), super::evidence_row(&[3, 12]));
         assert_ne!(super::state_type(&[3, 12]), super::state_type(&[3, 1, 2]));
         assert!(is_synthesized(&super::state_type(&[3])));

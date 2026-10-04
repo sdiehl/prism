@@ -1,0 +1,51 @@
+-- Generic forwarders that carry state evidence only through a parameter.
+-- `apply2` and `fold_with` spell no `State` label, so nothing in their
+-- scope fixes the effect's parameter: each binds a quantifier for it and
+-- every call under a handler instantiates that quantifier from the row it
+-- hands over. The same forwarders serve an Int cell and a String cell,
+-- nest in each other, and are reached through `labelled`, whose own row
+-- fixes the parameter. Every tier must print the same four lines.
+
+import Control.State (..)
+
+fn apply2(f : (Int, Int) -> Int ! {| e}, a : Int, b : Int) : Int ! { | e} =
+  f(a, b)
+
+fn fold_with(
+  combine : (a, a) -> a ! {| e},
+  seed : a,
+  xs : List(a)
+) : a ! { | e} =
+  match xs of
+    Nil => seed
+    Cons(y, ys) => fold_with(combine, combine(seed, y), ys)
+
+fn tick(v : Int) : Int ! {State(Int)} =
+  put(get() + v)
+  v
+
+fn peek(v : Int) : Int ! {State(Int)} = v + get()
+
+fn tag(v : Int) : Int ! {State(String)} =
+  put(concat(get(), show(v)))
+  v
+
+fn labelled(v : Int) : Int ! {State(Int)} = apply2(\(a, b) -> tick(a * b), v, 2)
+
+fn main() =
+  println(run_state(0, \() -> apply2(\(a, b) -> tick(a + b), 3, 4)))
+  println(
+      run_state(
+          10,
+          \() -> apply2(\(a, b) -> apply2(\(c, d) -> peek(c - d), a, b), 9, 5),
+        ),
+    )
+  println(
+      run_state(
+          100,
+          \() -> fold_with(\(acc, x) -> labelled(acc + x), 0, [1, 2, 3]),
+        ),
+    )
+  println(
+      run_state("", \() -> fold_with(\(acc, x) -> tag(acc + x), 0, [1, 2, 3])),
+    )

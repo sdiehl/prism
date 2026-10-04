@@ -703,20 +703,12 @@ pub(crate) trait Rewrite {
         )
     }
 
-    /// Rewrite a computation iteratively using only the structural witness hooks.
+    /// Rewrite a function iteratively using only the structural witness hooks.
     ///
     /// This entry point deliberately bypasses the `value`, `comp`, and
     /// `function` overrides. It is for context-neutral policies whose only
     /// custom behavior lives in the type, signature, instantiation,
     /// forwarding, binder, or pattern hooks.
-    fn rewrite_comp_from_hooks(&mut self, comp: &TypedComp, cx: &Self::Ctx) -> TypedComp
-    where
-        Self: Sized,
-    {
-        rewrite_from_hooks(self, RebuildFrame::Comp(comp, 1), cx).into_comp()
-    }
-
-    /// Rewrite a function iteratively using only the structural witness hooks.
     fn rewrite_function_from_hooks(&mut self, function: &TypedCoreFn, cx: &Self::Ctx) -> TypedCoreFn
     where
         Self: Sized,
@@ -987,13 +979,6 @@ impl Rebuilt {
             panic!("typed rewrite root is not a function")
         };
         *function
-    }
-
-    fn into_comp(self) -> TypedComp {
-        let Self::Comp(comp) = self else {
-            panic!("typed rewrite root is not a computation")
-        };
-        *comp
     }
 }
 

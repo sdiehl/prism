@@ -1,0 +1,1 @@
+fn output(x : Int) : Unit @ noalloc ! {IO} = println(x)

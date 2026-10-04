@@ -1,0 +1,36 @@
+-- An abort raised part way through a body whose remaining statements perform
+-- effects. The `tick` handler counts every resumption it answers, so a tier
+-- that ran the statements after `halt`, or answered the tick they perform,
+-- would print a different count and a line that must never appear.
+
+effect Count
+  tick() : Int
+
+effect Halt
+  never halt(Int) : Int
+
+fn work(n) =
+  let a = tick()
+  println("before {n}")
+  if n > 2 then
+    let stop = halt(n)
+    println("after {n}")
+    stop + tick()
+  else
+    a + tick()
+
+fn counted(n) =
+  handle work(n) with
+    tick() resume k => k(1) + 1
+    return r => r
+
+fn safe(n) =
+  handle counted(n) with
+    never halt(code) => code * 1000
+    return r => r
+
+fn main() =
+  println(safe(1))
+  println(safe(3))
+  println(safe(2))
+  println(safe(4))

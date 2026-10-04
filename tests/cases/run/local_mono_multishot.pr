@@ -1,0 +1,25 @@
+-- The confined region that survives the answer-transformer rewrite. Work left
+-- after a single resumption composes into an accumulator, so a non-tail clause
+-- folds like any other, but a clause that resumes twice needs the continuation
+-- itself and cannot. The region is carved around that escape while the stream
+-- pipeline beside it stays fused, and both branches of each resumption have to
+-- see the same `n`, which is what any tier has to keep identical.
+effect Peek
+  peek(Int) : Int
+
+fn run_thunks(fs, acc) =
+  match fs of
+    Nil => acc
+    Cons(f, rest) => run_thunks(rest, acc + f())
+
+fn peeked() =
+  let fs = [\() -> peek(4), \() -> peek(7)]
+  handle run_thunks(fs, 0) with
+    peek(n) resume k => k(n) + k(n * 2)
+    return r => r
+
+fn double(n) = n * 2
+
+fn main() =
+  println(srange(1, 50).smap(double).ssum())
+  println(peeked())

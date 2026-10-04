@@ -29,7 +29,10 @@ pub struct ArtifactIdentity {
     pub scheduler: &'static str,
     pub effect_tier: &'static str,
     pub effect_exclude: String,
+    pub consolidate: bool,
+    pub reify: bool,
     pub erasures: bool,
+    pub thread_nontail: bool,
     pub native_effects: bool,
     pub trampoline: bool,
     pub fuse: bool,
@@ -63,7 +66,10 @@ pub enum ArtifactField {
     Scheduler,
     EffectTier,
     EffectExclude,
+    Consolidate,
+    Reify,
     Erasures,
+    ThreadNontail,
     NativeEffects,
     Trampoline,
     Fuse,
@@ -94,7 +100,10 @@ impl ArtifactField {
             Self::Scheduler => "scheduler",
             Self::EffectTier => "effect-tier",
             Self::EffectExclude => "effect-exclude",
+            Self::Consolidate => "consolidate",
+            Self::Reify => "reify",
             Self::Erasures => "erasures",
+            Self::ThreadNontail => "thread-nontail",
             Self::NativeEffects => "native-effects",
             Self::Trampoline => "trampoline",
             Self::Fuse => "fuse",
@@ -159,7 +168,10 @@ impl ArtifactIdentity {
             scheduler: cfg.scheduler().label(),
             effect_tier: cfg.flags().effect_tier.label(),
             effect_exclude: cfg.flags().effect_exclude.label(),
+            consolidate: cfg.flags().consolidate,
+            reify: cfg.flags().reify,
             erasures: cfg.flags().erasures,
+            thread_nontail: cfg.flags().thread_nontail,
             native_effects: cfg.flags().native_effects,
             trampoline: cfg.flags().trampoline,
             fuse: cfg.flags().fuse,
@@ -250,13 +262,23 @@ impl ArtifactIdentity {
             ArtifactRow::new(ArtifactField::EffectTier, self.effect_tier),
         ]);
         // Preserve default artifact identity. Exclusions are an opt-in
-        // experimental lowering policy, so only the behavior-changing case
+        // experimental lowering policy, and the consolidated route is the
+        // default one, so in both cases only the departure from the default
         // contributes a row.
         if !self.effect_exclude.is_empty() {
             rows.push(ArtifactRow::new(
                 ArtifactField::EffectExclude,
                 self.effect_exclude.clone(),
             ));
+        }
+        if !self.consolidate {
+            rows.push(ArtifactRow::new(ArtifactField::Consolidate, "false"));
+        }
+        if self.reify {
+            rows.push(ArtifactRow::new(ArtifactField::Reify, "true"));
+        }
+        if !self.thread_nontail {
+            rows.push(ArtifactRow::new(ArtifactField::ThreadNontail, "false"));
         }
         rows.extend([
             ArtifactRow::new(ArtifactField::Erasures, self.erasures.to_string()),
@@ -452,5 +474,30 @@ mod tests {
 
         assert_eq!(row.value, "state-fusion,local-partial");
         assert_ne!(normal.fingerprint(), excluded.fingerprint());
+    }
+
+    #[test]
+    fn reification_changes_artifact_identity_without_changing_default_rows() {
+        let mut cfg = Config::default();
+        cfg.update_flags(|flags| flags.reify = false);
+        let normal = ArtifactIdentity::from_config(&cfg, "llvm");
+        assert!(!row_fields(&normal).contains(&ArtifactField::Reify));
+
+        cfg.update_flags(|flags| flags.reify = true);
+        let reified = ArtifactIdentity::from_config(&cfg, "llvm");
+        assert_ne!(normal.fingerprint(), reified.fingerprint());
+        assert!(reified
+            .portable_rows()
+            .iter()
+            .any(|row| { row.field == ArtifactField::Reify && row.value == "true" }));
+        let without_reify: Vec<_> = reified
+            .rows()
+            .into_iter()
+            .filter(|row| row.field != ArtifactField::Reify)
+            .collect();
+        assert_eq!(normal.rows(), without_reify);
+
+        cfg.update_flags(|flags| flags.reify = false);
+        assert_eq!(normal, ArtifactIdentity::from_config(&cfg, "llvm"));
     }
 }

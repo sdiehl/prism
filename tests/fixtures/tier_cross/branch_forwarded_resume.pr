@@ -1,0 +1,31 @@
+-- One callee handles a thunk in one branch and forwards the other unhandled,
+-- under an outer handler of a second effect that resumes with a multiplied
+-- answer. The two branches run at rows with different open tails, so a tier
+-- that reads the handled branch's answer as the forwarded one prints a
+-- different total.
+
+effect Tick
+  tick() : Int
+
+effect Peek
+  peek(Int) : Int
+
+fn either(
+  c : Bool,
+  a : () -> Int ! {| e},
+  b : () -> Int ! {| e}
+) : Int ! { | e} =
+  if c then
+    handle a() with
+      tick() resume k => k(1)
+      return r => r
+  else
+    b()
+
+fn main() =
+  let total =
+    handle (either(false, \() -> tick() * 100, \() -> peek(2))
+        + either(true, \() -> tick() * 100, \() -> peek(2))) with
+      peek(n) resume k => k(n) * 10
+      return r => r
+  println(total)

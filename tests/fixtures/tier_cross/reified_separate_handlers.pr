@@ -1,0 +1,23 @@
+effect Tick
+  tick() : Int
+
+effect Tock
+  tock() : Int
+
+fn run_two(a : () -> Int ! {| e}, b : () -> Int ! {| e}) : Int ! { | e} =
+  let x =
+    handle a() with
+      tick() resume k => k(1) + k(2)
+      return r => r
+  let y =
+    handle b() with
+      tock() resume k => k(10)
+      return r => r
+  x + y
+
+fn main() =
+  let r =
+    handle run_two(\() -> tick() * 100 + tock(), \() -> tock() + 1) with
+      tock() resume k => k(3)
+      return r => r
+  println(r)

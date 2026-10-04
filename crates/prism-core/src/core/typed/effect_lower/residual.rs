@@ -9,7 +9,7 @@ use prism_syntax::names;
 use super::super::traverse::Visit;
 use super::super::verify::VerifyEnv;
 use super::super::{TypedComp, TypedCoreFn};
-use super::evidence::OpIds;
+use super::ops::OpIds;
 use super::plan::collect_calls;
 
 /// The direct effects retained by each declaration around its reified

@@ -1200,6 +1200,62 @@ fn polymorphic_function_subtyping_is_alpha_invariant() {
 }
 
 #[test]
+fn a_stored_scheme_equals_its_capture_avoiding_rename() {
+    let e = Sym::new("e");
+    let renamed = Sym::from(prism_syntax::names::typed_quantifier("e", 0));
+    let stored = |row| {
+        CoreType::Thunk(Box::new(CompSig::new(
+            CoreType::Function(Box::new(CoreFnSig::new(
+                vec![CoreQuantifier::Row(row)],
+                vec![source(Type::Int)],
+                CompSig::new(source(Type::Int), EffRow::Var(row)),
+            ))),
+            EffRow::Empty,
+        )))
+    };
+    assert_ne!(stored(e), stored(renamed));
+    assert!(core_type_eq(&stored(e), &stored(renamed)));
+    assert!(!core_type_eq(&stored(e), &source(Type::Int)));
+}
+
+#[test]
+fn a_function_polymorphic_in_its_ambient_row_specializes_to_any_row() {
+    let state = Sym::new("state");
+    let ambient = Sym::new("ambient");
+    let io = EffRow::canonical([Label::bare("IO")], EffRow::Empty);
+    let clause = |row: EffRow| {
+        CoreType::Thunk(Box::new(CompSig::new(
+            CoreType::Function(Box::new(CoreFnSig::new(
+                Vec::new(),
+                vec![source(Type::Int), source(Type::Var(state))],
+                CompSig::new(source(Type::Var(state)), row),
+            ))),
+            EffRow::Empty,
+        )))
+    };
+    let polymorphic = CoreType::Function(Box::new(CoreFnSig::new(
+        vec![CoreQuantifier::Type(state), CoreQuantifier::Row(ambient)],
+        vec![clause(EffRow::Var(ambient)), source(Type::Var(state))],
+        CompSig::new(source(Type::Var(state)), EffRow::Var(ambient)),
+    )));
+    let at_io = CoreType::Function(Box::new(CoreFnSig::new(
+        vec![CoreQuantifier::Type(state)],
+        vec![clause(io.clone()), source(Type::Var(state))],
+        CompSig::new(source(Type::Var(state)), io.clone()),
+    )));
+    assert!(core_subtype(&polymorphic, &at_io));
+    assert!(!core_subtype(&at_io, &polymorphic));
+    // The specialization is read off the body's tail: a surplus row the body
+    // does not run at is not determined by the expected row.
+    let elsewhere = CoreType::Function(Box::new(CoreFnSig::new(
+        vec![CoreQuantifier::Type(state), CoreQuantifier::Row(ambient)],
+        vec![clause(EffRow::Var(ambient)), source(Type::Var(state))],
+        CompSig::new(source(Type::Var(state)), io),
+    )));
+    assert!(!core_subtype(&elsewhere, &at_io));
+}
+
+#[test]
 fn alpha_alignment_does_not_capture_a_free_type_variable() {
     let bound = Sym::new("bound");
     let other_bound = Sym::new("other_bound");

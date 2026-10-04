@@ -1,7 +1,6 @@
--- Fixed-width bitwise and shift builtins on the I64/U64 lanes, with the
--- hash step PROVEN allocation-free by the `fbip` checker. and/or/
--- xor share one bit pattern across lanes; `i64_shr` is arithmetic (sign-filling),
--- `u64_shr` logical (zero-filling). Shift counts are taken modulo 64.
+-- Fixed-width bitwise and shift builtins on the I64/U64 lanes. Values use
+-- boxed machine words. i64_shr is arithmetic (sign-filling), u64_shr logical
+-- (zero-filling). Shift counts are taken modulo 64.
 --
 -- Prints:
 --   8
@@ -11,18 +10,13 @@
 --   1
 --   1285471668107568959
 
--- A xorshift64 step: pure U64 bit-twiddling, no constructor built, so the
--- compiler PROVES it allocates nothing fresh and accepts it as `fbip`. It is not
--- `fip`: each intermediate word is read twice, and the linearity half of the
--- check counts that as a duplication regardless of the word being unboxed.
-fbip fn xorshift(h : U64) : U64 =
+-- A xorshift64 step. Each machine-word result may allocate a box.
+fn xorshift(h : U64) : U64 =
   let a = u64_xor(h, u64_shl(h, to_u64(13)))
   let b = u64_xor(a, u64_shr(a, to_u64(7)))
   u64_xor(b, u64_shl(b, to_u64(17)))
 
--- Fold a list of byte values into a 64-bit hash, mixing after each. The fold
--- walks a list (allocation in the seed), so it is ordinary; the per-step mix it
--- calls is the fip-checked kernel above.
+-- Fold a list of byte values into a 64-bit hash, mixing after each.
 fn hash_ints(xs : List(Int)) : U64 =
   match xs of
     Nil => to_u64(1469598103934665603)

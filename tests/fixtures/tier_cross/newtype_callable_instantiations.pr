@@ -1,0 +1,16 @@
+effect Peek
+  peek() : Int
+
+newtype Callback(a) = Callback(a)
+
+fn invoke(callback) =
+  match callback of
+    Callback(k) => k()
+
+fn main() =
+  println(invoke(Callback(\() -> 7)))
+  let answer =
+    handle invoke(Callback(\() -> peek())) with
+      peek() resume k => k(3) + k(5)
+      return r => r
+  println(answer)

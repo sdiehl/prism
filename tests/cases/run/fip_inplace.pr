@@ -1,22 +1,20 @@
--- FP^2 in-place discipline pinned end to end: a reverse-onto-accumulator whose
--- rebuilt Cons is not in tail position (it feeds the recursive call), a
--- spine-rebuilding bump, and a tree relabel that reuses every node. All carry
--- the `fbip` annotation, so the compiler proves they allocate nothing fresh; the
--- reuse credit refinement is what lets the non-tail Cons reuse the freed cell.
+-- Drop-guided list and tree reuse. Unique inputs permit in-place updates;
+-- shared inputs can allocate. Arithmetic may also allocate bignums, so these
+-- functions do not carry unconditional allocation certificates.
 
-fbip fn rev_onto(xs, acc) =
+fn rev_onto(xs, acc) =
   match xs of
     Nil => acc
     Cons(h, t) => rev_onto(t, Cons(h, acc))
 
-fbip fn bump(xs) =
+fn bump(xs) =
   match xs of
     Nil => Nil
     Cons(h, t) => Cons(h + 1, bump(t))
 
 type Tree = Leaf | Node(Tree, Int, Tree)
 
-fbip fn relabel(t) =
+fn relabel(t) =
   match t of
     Leaf => Leaf
     Node(l, x, r) => Node(relabel(l), x + x, relabel(r))

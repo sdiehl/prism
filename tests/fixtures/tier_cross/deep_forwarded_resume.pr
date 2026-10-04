@@ -1,0 +1,32 @@
+-- A handler that forwards, with a tail-resumptive arm, inside a region a
+-- confined lowering reifies. Its driver answers in the effect type, so the
+-- clause reaches the resumption through the monadic plumbing and the hop is a
+-- closure call rather than the driver's own tail. The loop is deep enough that
+-- a lowering which keeps those hops on the stack exhausts it, so the tiers
+-- would disagree on whether the program terminates rather than on what it
+-- prints.
+
+effect Tick
+  tick() : Int
+
+effect Note
+  note() : Int
+
+fn spin(n : Int) : Int ! {Tick, Note} =
+  if n == 0 then
+    note()
+  else
+    tick()
+    spin(n - 1)
+
+fn forwarded(n : Int) : Int ! {Note} =
+  handle spin(n) with
+    tick() resume k => k(1)
+    return x => x
+
+fn main() : Unit ! {IO} =
+  let total =
+    handle forwarded(1000000) with
+      note() resume k => k(7)
+      return x => x
+  println(show(total))

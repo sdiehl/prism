@@ -744,6 +744,195 @@ impl<'a> Monadic<'a> {
         ))
     }
 
+    /// Re-enter the driver in place of a clause's tail resumption.
+    ///
+    /// A closed driver answers at the source convention, so it is not an effect
+    /// computation and nothing downstream can defer a call to it. A reified
+    /// resumption there is a closure the clause immediately forces, and the
+    /// forced call is not in tail position of the driver, so every hop costs a
+    /// native frame and a program whose hops are heap objects runs out of stack
+    /// anyway. Applying the queue and calling the driver directly is the same
+    /// computation at the same arity in tail position, which is a native loop.
+    ///
+    /// The rewrite holds exactly where the clause resumes in tail position and
+    /// nowhere else, so it recognizes that shape as it goes and answers `None`
+    /// for any other, leaving the reified continuation to carry it.
+    fn resume_tail_loop(
+        &mut self,
+        comp: &TypedComp,
+        aliases: &BTreeSet<Sym>,
+        tail: bool,
+        queue: &TypedBinder,
+        driver: Sym,
+        captures: &[TypedBinder],
+    ) -> Option<TypedComp> {
+        let verbatim = || {
+            free_comp_vars(comp)
+                .is_disjoint(aliases)
+                .then(|| comp.clone())
+        };
+        match comp.kind() {
+            TypedCompKind::App {
+                callee,
+                instantiation,
+                args,
+            } => {
+                if !forced_repr_var(callee).is_some_and(|name| aliases.contains(&name)) {
+                    return verbatim();
+                }
+                let [argument] = args.as_slice() else {
+                    return None;
+                };
+                if !tail
+                    || !instantiation.is_empty()
+                    || !free_value_vars(argument).is_disjoint(aliases)
+                {
+                    return None;
+                }
+                let resumed =
+                    TypedBinder::new(Sym::from(names::RESUME_KONT), abi::eff(self.row.clone()));
+                let applied = abi::qapply(
+                    Self::var(queue.name(), queue.ty().clone()),
+                    abi::lowered_repr(argument.clone(), abi::word()),
+                    self.row.clone(),
+                );
+                let mut redrive_args = vec![Self::var(resumed.name(), resumed.ty().clone())];
+                redrive_args.extend(
+                    captures
+                        .iter()
+                        .map(|capture| Self::var(capture.name(), capture.ty().clone())),
+                );
+                let redrive = self.call(driver, redrive_args)?;
+                Some(TypedComp::new(
+                    redrive.sig().clone(),
+                    TypedCompKind::Bind(Box::new(applied), resumed, Box::new(redrive)),
+                ))
+            }
+            TypedCompKind::Bind(head, binder, body) => {
+                let routing = match head.kind() {
+                    TypedCompKind::Return(value) => {
+                        repr_var(value).is_some_and(|name| aliases.contains(&name))
+                    }
+                    _ => false,
+                };
+                if routing {
+                    // The name being rebound no longer exists once the clause
+                    // resumes by re-entry, so the binding goes with it and the
+                    // new name joins the aliases the tail is read against.
+                    let mut extended = aliases.clone();
+                    extended.insert(binder.name());
+                    return self.resume_tail_loop(body, &extended, tail, queue, driver, captures);
+                }
+                let head = self.resume_tail_loop(head, aliases, false, queue, driver, captures)?;
+                let body = self.resume_tail_loop(body, aliases, tail, queue, driver, captures)?;
+                Some(TypedComp::new(
+                    CompSig::new(
+                        body.sig().result().clone(),
+                        union_effects(head.sig().effects(), body.sig().effects()),
+                    ),
+                    TypedCompKind::Bind(Box::new(head), binder.clone(), Box::new(body)),
+                ))
+            }
+            TypedCompKind::If(condition, yes, no) => {
+                if !free_value_vars(condition).is_disjoint(aliases) {
+                    return None;
+                }
+                let yes = self.resume_tail_loop(yes, aliases, tail, queue, driver, captures)?;
+                let no = self.resume_tail_loop(no, aliases, tail, queue, driver, captures)?;
+                Some(TypedComp::new(
+                    CompSig::new(
+                        yes.sig().result().clone(),
+                        union_effects(yes.sig().effects(), no.sig().effects()),
+                    ),
+                    TypedCompKind::If(condition.clone(), Box::new(yes), Box::new(no)),
+                ))
+            }
+            TypedCompKind::Case(scrutinee, arms) => {
+                if !free_value_vars(scrutinee).is_disjoint(aliases) {
+                    return None;
+                }
+                let mut effects = EffRow::Empty;
+                let mut rewritten = Vec::with_capacity(arms.len());
+                for (pattern, body) in arms {
+                    let body =
+                        self.resume_tail_loop(body, aliases, tail, queue, driver, captures)?;
+                    effects = union_effects(&effects, body.sig().effects());
+                    rewritten.push((pattern.clone(), body));
+                }
+                let result = rewritten.first()?.1.sig().result().clone();
+                Some(TypedComp::new(
+                    CompSig::new(result, effects),
+                    TypedCompKind::Case(scrutinee.clone(), rewritten),
+                ))
+            }
+            _ => verbatim(),
+        }
+    }
+
+    /// The driver's pure arm: the body's value has arrived, so the return
+    /// clause runs on it where the handler has one and the value is answered
+    /// as it stands where it does not. The value reaches the arm at the word
+    /// representation the effect cell carries, so the clause's binder is bound
+    /// to it unpacked at the source type the clause was written against.
+    fn driver_pure_body(
+        &mut self,
+        comp: &TypedComp,
+        captures: &[TypedBinder],
+        open: bool,
+        driver_result: &CoreType,
+        pure_value: &TypedBinder,
+    ) -> Option<TypedComp> {
+        let TypedCompKind::Handle {
+            return_binder,
+            return_body,
+            ..
+        } = comp.kind()
+        else {
+            return None;
+        };
+        Some(
+            if let (Some(binder), Some(return_body)) = (return_binder, return_body) {
+                let mut scope = captures.to_vec();
+                scope.push(binder.clone());
+                let lowered = self.with_source_binders(&scope, |this| {
+                    if open {
+                        this.comp(return_body)
+                    } else {
+                        this.direct(return_body)
+                    }
+                })?;
+                let unpacked = abi::lowered_repr(
+                    Self::var(pure_value.name(), pure_value.ty().clone()),
+                    binder.ty().clone(),
+                );
+                TypedComp::new(
+                    lowered.sig().clone(),
+                    TypedCompKind::Bind(
+                        Box::new(TypedComp::new(
+                            CompSig::new(binder.ty().clone(), EffRow::Empty),
+                            TypedCompKind::Return(unpacked),
+                        )),
+                        binder.clone(),
+                        Box::new(lowered),
+                    ),
+                )
+            } else if open {
+                abi::epure(
+                    Self::var(pure_value.name(), pure_value.ty().clone()),
+                    self.row.clone(),
+                )
+            } else {
+                TypedComp::new(
+                    CompSig::new(driver_result.clone(), EffRow::Empty),
+                    TypedCompKind::Return(abi::lowered_repr(
+                        Self::var(pure_value.name(), pure_value.ty().clone()),
+                        driver_result.clone(),
+                    )),
+                )
+            },
+        )
+    }
+
     pub(super) fn handle(&mut self, comp: &TypedComp, open: bool) -> Option<TypedComp> {
         let TypedCompKind::Handle {
             body,
@@ -756,6 +945,23 @@ impl<'a> Monadic<'a> {
         };
         if return_binder.is_some() != return_body.is_some() || ops.arms().is_empty() {
             return None;
+        }
+        // A driver that forwards answers in the effect type, so its clause
+        // reaches the resumption through the monadic plumbing rather than in
+        // its own tail, and the hop is a closure call no backend can make a
+        // native tail call. Confined that is a frame per hop; widening reaches
+        // the scope whose driver bounces the hop instead. Termination is not
+        // the lowering's to decide, so the scope that cannot run the loop
+        // refuses it rather than compiling one that runs out of stack.
+        if open && !self.whole_style() {
+            if let Some(operation) = ops.arms().iter().find(|operation| {
+                resumes_in_tail(
+                    operation.body(),
+                    &BTreeSet::from([operation.resume().name()]),
+                )
+            }) {
+                return self.refuse(Refusal::ForwardingResume, Site::Name(operation.name()));
+            }
         }
         let captures = self.handler_captures(comp)?;
 
@@ -777,45 +983,8 @@ impl<'a> Monadic<'a> {
             .insert(driver, driver_signature.clone());
 
         let pure_value = TypedBinder::new(self.mint("x"), abi::word());
-        let pure_body = if let (Some(binder), Some(return_body)) = (return_binder, return_body) {
-            let mut scope = captures.clone();
-            scope.push(binder.clone());
-            let lowered = self.with_source_binders(&scope, |this| {
-                if open {
-                    this.comp(return_body)
-                } else {
-                    this.direct(return_body)
-                }
-            })?;
-            let unpacked = abi::lowered_repr(
-                Self::var(pure_value.name(), pure_value.ty().clone()),
-                binder.ty().clone(),
-            );
-            TypedComp::new(
-                lowered.sig().clone(),
-                TypedCompKind::Bind(
-                    Box::new(TypedComp::new(
-                        CompSig::new(binder.ty().clone(), EffRow::Empty),
-                        TypedCompKind::Return(unpacked),
-                    )),
-                    binder.clone(),
-                    Box::new(lowered),
-                ),
-            )
-        } else if open {
-            abi::epure(
-                Self::var(pure_value.name(), pure_value.ty().clone()),
-                self.row.clone(),
-            )
-        } else {
-            TypedComp::new(
-                CompSig::new(driver_result.clone(), EffRow::Empty),
-                TypedCompKind::Return(abi::lowered_repr(
-                    Self::var(pure_value.name(), pure_value.ty().clone()),
-                    driver_result.clone(),
-                )),
-            )
-        };
+        let pure_body =
+            self.driver_pure_body(comp, &captures, open, &driver_result, &pure_value)?;
         let pure_arm = (abi::epure_pattern(self.row.clone(), pure_value), pure_body);
 
         let id = TypedBinder::new(self.mint("id"), CoreType::Source(Type::Int));
@@ -869,30 +1038,46 @@ impl<'a> Monadic<'a> {
                     this.direct(operation.body())
                 }
             })?;
+            let mut reified = true;
+            if !open {
+                if let Some(looped) = self.resume_tail_loop(
+                    &handled,
+                    &BTreeSet::from([operation.resume().name()]),
+                    true,
+                    &queue,
+                    driver,
+                    &captures,
+                ) {
+                    handled = looped;
+                    reified = false;
+                }
+            }
             handled = Self::bind_operation_params(operation.params(), &argument, handled)?;
-            let bound_resume = if open {
-                resume.clone()
-            } else {
-                abi::lowered_repr(
-                    abi::lowered_repr(resume.clone(), abi::word()),
-                    operation.resume().ty().clone(),
-                )
-            };
-            handled = TypedComp::new(
-                handled.sig().clone(),
-                TypedCompKind::Bind(
-                    Box::new(TypedComp::new(
-                        CompSig::new(bound_resume.ty().clone(), EffRow::Empty),
-                        TypedCompKind::Return(bound_resume),
-                    )),
-                    if open {
-                        TypedBinder::new(operation.resume().name(), resume.ty().clone())
-                    } else {
-                        operation.resume().clone()
-                    },
-                    Box::new(handled),
-                ),
-            );
+            if open || reified {
+                let bound_resume = if open {
+                    resume.clone()
+                } else {
+                    abi::lowered_repr(
+                        abi::lowered_repr(resume.clone(), abi::word()),
+                        operation.resume().ty().clone(),
+                    )
+                };
+                handled = TypedComp::new(
+                    handled.sig().clone(),
+                    TypedCompKind::Bind(
+                        Box::new(TypedComp::new(
+                            CompSig::new(bound_resume.ty().clone(), EffRow::Empty),
+                            TypedCompKind::Return(bound_resume),
+                        )),
+                        if open {
+                            TypedBinder::new(operation.resume().name(), resume.ty().clone())
+                        } else {
+                            operation.resume().clone()
+                        },
+                        Box::new(handled),
+                    ),
+                );
+            }
 
             let selected = if open {
                 let decremented = TypedBinder::new(self.mint("sk"), CoreType::Source(Type::Int));
@@ -1026,4 +1211,66 @@ impl<'a> Monadic<'a> {
             TypedCompKind::Bind(Box::new(body), initial, Box::new(driver_call)),
         ))
     }
+}
+
+/// The variable a value names, through the representation bridges the lowering
+/// crosses to reach the reified thunk's word convention. A clause reads its own
+/// resume across one of those, so a bare variable is not what the tree holds.
+fn repr_var(value: &TypedValue) -> Option<Sym> {
+    let mut value = value;
+    while let TypedValueKind::LoweredRepr { value: inner, .. } = &value.kind {
+        value = inner;
+    }
+    let TypedValueKind::Var {
+        name,
+        instantiation,
+    } = &value.kind
+    else {
+        return None;
+    };
+    instantiation.is_empty().then_some(*name)
+}
+
+/// Whether a clause resumes in tail position.
+///
+/// That is the shape which turns a handled loop into a driver loop: the hop
+/// answers by re-entering the driver and nothing of the clause is left to come
+/// back to. A resumption anywhere else has work waiting after it, so it holds a
+/// frame at every scope alike and none of them runs it unbounded.
+fn resumes_in_tail(comp: &TypedComp, aliases: &BTreeSet<Sym>) -> bool {
+    match comp.kind() {
+        TypedCompKind::App { callee, .. } => {
+            forced_var(callee).is_some_and(|name| aliases.contains(&name))
+        }
+        TypedCompKind::Bind(head, binder, body) => {
+            // Naming is administrative here: the clause is in normal form, so
+            // the resumption it applies has been rebound at least once by the
+            // time the application reads it, and following the rebinding is
+            // what makes the tail legible.
+            let mut aliases = aliases.clone();
+            match head.kind() {
+                TypedCompKind::Return(value)
+                    if repr_var(value).is_some_and(|name| aliases.contains(&name)) =>
+                {
+                    aliases.insert(binder.name());
+                }
+                _ => {
+                    aliases.remove(&binder.name());
+                }
+            }
+            resumes_in_tail(body, &aliases)
+        }
+        TypedCompKind::If(_, yes, no) => {
+            resumes_in_tail(yes, aliases) || resumes_in_tail(no, aliases)
+        }
+        TypedCompKind::Case(_, arms) => arms.iter().any(|(_, body)| resumes_in_tail(body, aliases)),
+        _ => false,
+    }
+}
+
+fn forced_repr_var(comp: &TypedComp) -> Option<Sym> {
+    let TypedCompKind::Force(value) = comp.kind() else {
+        return None;
+    };
+    repr_var(value)
 }

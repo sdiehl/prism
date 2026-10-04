@@ -7,8 +7,8 @@ use crate::types::ty::{EffRow, Label};
 use crate::types::{repr_of_type, Type};
 
 use super::super::violation::RowUnionError;
-use super::super::{CompSig, CoreFnSig, CoreQuantifier, CoreType, LoweredType};
-use super::subst::rename_fn_quantifier;
+use super::super::{CompSig, CoreFnSig, CoreInstantiation, CoreQuantifier, CoreType, LoweredType};
+use super::subst::{rename_fn_quantifier, substitute_core_type, substitute_sig};
 
 /// The multiset join of two effect rows, which the verifier uses wherever a
 /// node's row is the join of its subterms'.
@@ -72,7 +72,8 @@ pub fn union_rows(left: &EffRow, right: &EffRow) -> Result<EffRow, RowUnionError
     Ok(EffRow::canonical(out, tail))
 }
 
-pub(super) fn core_subtype(actual: &CoreType, expected: &CoreType) -> bool {
+#[must_use]
+pub fn core_subtype(actual: &CoreType, expected: &CoreType) -> bool {
     if actual == expected {
         return true;
     }
@@ -110,6 +111,14 @@ pub fn lowered_representation_conversion(actual: &CoreType, expected: &CoreType)
         // which mints the trampoline's initial queue by reinterpreting a
         // source unit rather than allocating a nil cell.
         (CoreType::Source(Type::Unit), CoreType::Lowered(LoweredType::Queue(_))) => true,
+        // A cell over a closed row is a cell over any row including it: the
+        // operations it may carry are drawn from the narrower set, and its
+        // continuations run under the wider row. The other direction would
+        // hide an operation, so it is not a conversion.
+        (
+            CoreType::Lowered(LoweredType::Eff(actual)),
+            CoreType::Lowered(LoweredType::Eff(expected)),
+        ) => matches!(actual.tail(), EffRow::Empty) && row_included(actual, expected),
         _ => false,
     }
 }
@@ -168,8 +177,8 @@ fn representation_preserving_by(
 /// Whether a representation-preserving coercion may relabel a thunk's inner
 /// row from `actual` to `expected`. A target row with an abstract tail
 /// absorbs anything. That absorption is sound only for casts minted at
-/// effect lowering, where the flow plan is the proof and the evidence tier's
-/// recast relies on it: one consumer does prove purity from an open row's
+/// effect lowering, where the flow plan is the proof and the threading
+/// route's recast relies on it: one consumer does prove purity from an open row's
 /// explicit heads (stream fusion's effect witness), so an absorb-blessed cast
 /// reaching fusion would hide an effectful thunk behind the tail. Fusion runs
 /// strictly before lowering, and every pre-lowering mint or splice site (the
@@ -191,10 +200,101 @@ fn row_reinterpretable(actual: &EffRow, expected: &EffRow) -> bool {
 }
 
 fn fn_sig_subtype(actual: &CoreFnSig, expected: &CoreFnSig) -> bool {
-    let Some((actual, expected)) = alpha_align_fn_sigs(actual, expected) else {
+    let Some((actual, expected)) =
+        alpha_align_fn_sigs(actual, expected).or_else(|| specialize_ambient_row(actual, expected))
+    else {
         return false;
     };
     actual.params() == expected.params() && sig_subtype(actual.body(), expected.body())
+}
+
+/// A function polymorphic in the row its body runs at is a subtype of that
+/// function at any one row. Rows are erased, so the specialization costs
+/// nothing at runtime, and the body's own tail says which quantifier it is:
+/// the one trailing row quantifier `actual` binds beyond `expected`'s, which
+/// takes whatever `expected`'s body row holds beyond `actual`'s own labels.
+/// The quantifiers both sides share are aligned first, so that row may name
+/// one of them.
+fn specialize_ambient_row(
+    actual: &CoreFnSig,
+    expected: &CoreFnSig,
+) -> Option<(CoreFnSig, CoreFnSig)> {
+    let shared = expected.quantifiers().len();
+    let [CoreQuantifier::Row(ambient)] = actual.quantifiers().get(shared..)? else {
+        return None;
+    };
+    let ambient = *ambient;
+    let prefix = CoreFnSig::new(
+        actual.quantifiers()[..shared].to_vec(),
+        actual.params().to_vec(),
+        actual.body().clone(),
+    );
+    let (prefix, expected) = alpha_align_fn_sigs(&prefix, expected)?;
+    let own = prefix.body().effects();
+    if own.tail() != &EffRow::Var(ambient) {
+        return None;
+    }
+    let mut remaining: Vec<Label> = expected
+        .body()
+        .effects()
+        .labels()
+        .into_iter()
+        .cloned()
+        .collect();
+    for label in own.labels() {
+        let position = remaining
+            .iter()
+            .position(|wanted| wanted.name == label.name)?;
+        remaining.remove(position);
+    }
+    let row = EffRow::canonical(remaining, expected.body().effects().tail().clone());
+    let quantifiers = [CoreQuantifier::Row(ambient)];
+    let arguments = [CoreInstantiation::Row(row)];
+    let specialized = CoreFnSig::new(
+        prefix.quantifiers().to_vec(),
+        prefix
+            .params()
+            .iter()
+            .map(|ty| substitute_core_type(ty, &quantifiers, &arguments))
+            .collect(),
+        substitute_sig(prefix.body(), &quantifiers, &arguments),
+    );
+    Some((specialized, expected))
+}
+
+/// Structural equality of Core types up to the spelling of bound quantifiers.
+///
+/// Substitution renames a quantifier whenever an inserted variable would be
+/// captured, so a declared scheme and its instantiated copy can differ only
+/// in spelling and still name one type.
+#[must_use]
+pub fn core_type_eq(actual: &CoreType, expected: &CoreType) -> bool {
+    match (actual, expected) {
+        (CoreType::Thunk(actual), CoreType::Thunk(expected)) => sig_eq(actual, expected),
+        (CoreType::Function(actual), CoreType::Function(expected)) => fn_sig_eq(actual, expected),
+        (CoreType::Ref(actual), CoreType::Ref(expected))
+        | (CoreType::ReuseToken(actual), CoreType::ReuseToken(expected)) => {
+            core_type_eq(actual, expected)
+        }
+        _ => actual == expected,
+    }
+}
+
+fn sig_eq(actual: &CompSig, expected: &CompSig) -> bool {
+    core_type_eq(actual.result(), expected.result()) && actual.effects() == expected.effects()
+}
+
+fn fn_sig_eq(actual: &CoreFnSig, expected: &CoreFnSig) -> bool {
+    let Some((actual, expected)) = alpha_align_fn_sigs(actual, expected) else {
+        return false;
+    };
+    actual.params().len() == expected.params().len()
+        && actual
+            .params()
+            .iter()
+            .zip(expected.params())
+            .all(|(actual, expected)| core_type_eq(actual, expected))
+        && sig_eq(actual.body(), expected.body())
 }
 
 /// Rename corresponding function quantifiers to shared names before a structural

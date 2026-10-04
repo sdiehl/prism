@@ -1,0 +1,14 @@
+effect Tick
+  tick() : Int
+
+fn run_both(a : () -> Int ! {| e}, b : () -> Int ! {| e}) : Int ! { | e} =
+  let x =
+    handle a() with
+      tick() resume k => k(1) + k(2)
+      return r => r
+  x + b()
+
+fn main() =
+  println(
+      run_both(\() -> tick() * 100, \() -> 5) + run_both(\() -> 7, \() -> 5),
+    )

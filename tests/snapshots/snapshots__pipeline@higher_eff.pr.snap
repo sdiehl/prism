@@ -321,10 +321,8 @@ fn main() =
 ; ModuleID = 'prism'
 source_filename = "prism"
 
-@.str0 = private constant { i64, i64, i64, [54 x i8] } { i64 1152921504606846976, i64 1398034944, i64 53, [54 x i8] c"ICE: effect op escaped a closed native handler clause\00" }, align 8
-@.str1 = private constant { i64, i64, i64, [50 x i8] } { i64 1152921504606846976, i64 1398034944, i64 49, [50 x i8] c"ICE: unhandled effect op in closed native handler\00" }, align 8
-@prism_native_kont_table = constant [877 x i8] c"scheme  prism-core-hash-v2\0Abundle  c44d8b74cc4b812c3f52bc098a147724d58ba32945951aa0e3d37c43ba2403ab\0Acompiler  <version>\0Atarget  <target>\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v2:c44d8b74cc4b812c3f52bc098a147724d58ba32945951aa0e3d37c43ba2403ab\0Aflag  stdlib-root  <stdlib-root>\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  erasures  true\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  borrow-infer  true\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prismfn_apply  f968938459a7e3129aca6f89acc029b564561d1aa95260cf6a17c2553cb123d9  apply\0Afn      prismfn_main  38d06cfd7c4a92f1e60d7eb87723f3b49568d168d8274a677d2206fd3a6641eb  main\0Afn      prismfn_risky  96f656488c40c61dfc22eb23b8e8415f044781b4a68391481625e7f31ac56261  risky\0A\00", section ",.prism_kont", align 1
-@prism_native_kont_state_map = constant [1029 x i8] c"state-map 1\0Ascheme  prism-core-hash-v2\0Abundle  c44d8b74cc4b812c3f52bc098a147724d58ba32945951aa0e3d37c43ba2403ab\0Acompiler  <version>\0Atarget  <target>\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v2:c44d8b74cc4b812c3f52bc098a147724d58ba32945951aa0e3d37c43ba2403ab\0Aflag  stdlib-root  <stdlib-root>\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  erasures  true\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  borrow-infer  true\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prismfn_apply f968938459a7e3129aca6f89acc029b564561d1aa95260cf6a17c2553cb123d9 apply arity 2 slots abi-word[arg0=%a0:word,arg1=%a1:word]\0Astate prismfn_main 38d06cfd7c4a92f1e60d7eb87723f3b49568d168d8274a677d2206fd3a6641eb main arity 0 slots abi-word[]\0Astate prismfn_risky 96f656488c40c61dfc22eb23b8e8415f044781b4a68391481625e7f31ac56261 risky arity 1 slots abi-word[arg0=%a0:word]\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_table = constant [895 x i8] c"scheme  prism-core-hash-v2\0Abundle  c44d8b74cc4b812c3f52bc098a147724d58ba32945951aa0e3d37c43ba2403ab\0Acompiler  <version>\0Atarget  <target>\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v2:c44d8b74cc4b812c3f52bc098a147724d58ba32945951aa0e3d37c43ba2403ab\0Aflag  stdlib-root  <stdlib-root>\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  reify  true\0Aflag  erasures  true\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  borrow-infer  true\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prismfn_apply  f968938459a7e3129aca6f89acc029b564561d1aa95260cf6a17c2553cb123d9  apply\0Afn      prismfn_main  38d06cfd7c4a92f1e60d7eb87723f3b49568d168d8274a677d2206fd3a6641eb  main\0Afn      prismfn_risky  96f656488c40c61dfc22eb23b8e8415f044781b4a68391481625e7f31ac56261  risky\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_state_map = constant [1075 x i8] c"state-map 1\0Ascheme  prism-core-hash-v2\0Abundle  c44d8b74cc4b812c3f52bc098a147724d58ba32945951aa0e3d37c43ba2403ab\0Acompiler  <version>\0Atarget  <target>\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v2:c44d8b74cc4b812c3f52bc098a147724d58ba32945951aa0e3d37c43ba2403ab\0Aflag  stdlib-root  <stdlib-root>\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  reify  true\0Aflag  erasures  true\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  borrow-infer  true\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prismfn_apply f968938459a7e3129aca6f89acc029b564561d1aa95260cf6a17c2553cb123d9 apply arity 3 slots abi-word[arg0=%a0:word,arg1=%a1:word,arg2=%a2:word]\0Astate prismfn_main 38d06cfd7c4a92f1e60d7eb87723f3b49568d168d8274a677d2206fd3a6641eb main arity 0 slots abi-word[]\0Astate prismfn_risky 96f656488c40c61dfc22eb23b8e8415f044781b4a68391481625e7f31ac56261 risky arity 2 slots abi-word[arg0=%a0:word,arg1=%a1:word]\0A\00", section ",.prism_kont", align 1
 @.kont_symbol1 = private constant [13 x i8] c"prismfn_main\00"
 @.kont_hash1 = private constant [65 x i8] c"38d06cfd7c4a92f1e60d7eb87723f3b49568d168d8274a677d2206fd3a6641eb\00"
 @.kont_name1 = private constant [5 x i8] c"main\00"
@@ -339,211 +337,104 @@ entry:
   %t2 = getelementptr inbounds i8, ptr %t1, i64 8
   store i64 4180332117194187166, ptr %t2, align 8
   %t4 = ptrtoint ptr %t1 to i64
-  %t6 = call ptr @prism_alloc(i64 1)
+  %t6 = call ptr @prism_alloc(i64 0)
   %t7 = getelementptr inbounds i8, ptr %t6, i64 8
-  store i64 0, ptr %t7, align 8
-  %t9 = getelementptr inbounds i8, ptr %t6, i64 24
-  store i64 %t4, ptr %t9, align 8
-  %t10 = ptrtoint ptr %t6 to i64
-  %t12 = call ptr @prism_alloc(i64 0)
+  store i64 6217696733472061813, ptr %t7, align 8
+  %t9 = ptrtoint ptr %t6 to i64
+  %t11 = call i64 @prismap_2(i64 %t9, i64 1, i64 %t4)
+  call void @prism_rc_dec(i64 %t9)
+  %t12 = inttoptr i64 %t11 to ptr
   %t13 = getelementptr inbounds i8, ptr %t12, i64 8
-  store i64 6217696733472061813, ptr %t13, align 8
-  %t15 = ptrtoint ptr %t12 to i64
-  %t16 = call i64 @prismfn_ebind(i64 %t10, i64 %t15)
-  %t17 = call i64 @prismfn_7Zaregion(i64 %t16)
-  ret i64 %t17
-}
-
-; Function Attrs: nounwind
-declare ptr @prism_alloc(i64) #0
-
-; Function Attrs: nounwind
-define i64 @prismfn_ebind(i64 %a0, i64 %a1) #0 {
-entry:
-  call void @prism_drive_step()
-  %t0 = inttoptr i64 %a0 to ptr
-  %t1 = getelementptr inbounds i8, ptr %t0, i64 8
-  %t2 = load i64, ptr %t1, align 8
-  switch i64 %t2, label %b1 [
-    i64 0, label %b2
-    i64 1, label %b3
-  ]
-
-b2:                                               ; preds = %entry
-  %t3 = getelementptr inbounds i8, ptr %t0, i64 24
-  %t4 = load i64, ptr %t3, align 8
-  call void @prism_rc_inc(i64 %t4)
-  call void @prism_rc_dec(i64 %a0)
-  %t7 = call i64 @prismap_1(i64 %a1, i64 %t4)
-  call void @prism_rc_dec(i64 %a1)
-  ret i64 %t7
-
-b3:                                               ; preds = %entry
-  %t8 = getelementptr inbounds i8, ptr %t0, i64 24
-  %t9 = load i64, ptr %t8, align 8
-  %t10 = getelementptr inbounds i8, ptr %t0, i64 32
-  %t11 = load i64, ptr %t10, align 8
-  %t12 = getelementptr inbounds i8, ptr %t0, i64 40
-  %t13 = load i64, ptr %t12, align 8
-  %t14 = getelementptr inbounds i8, ptr %t0, i64 48
-  %t15 = load i64, ptr %t14, align 8
-  call void @prism_rc_inc(i64 %t13)
-  call void @prism_rc_inc(i64 %t9)
-  call void @prism_rc_inc(i64 %t15)
-  call void @prism_rc_inc(i64 %t11)
-  %t20 = call i64 @prism_reuse_token(i64 %a0)
-  %t21 = call i64 @prism_taq_snoc(i64 %t15, i64 %a1)
-  call void @prism_rc_dec(i64 %t15)
-  call void @prism_rc_dec(i64 %a1)
-  %t23 = call ptr @prism_reuse_alloc(i64 %t20, i64 4)
-  %t24 = getelementptr inbounds i8, ptr %t23, i64 8
-  store i64 1, ptr %t24, align 8
-  %t26 = getelementptr inbounds i8, ptr %t23, i64 24
-  store i64 %t9, ptr %t26, align 8
-  %t27 = getelementptr inbounds i8, ptr %t23, i64 32
-  store i64 %t11, ptr %t27, align 8
-  %t28 = getelementptr inbounds i8, ptr %t23, i64 40
-  store i64 %t13, ptr %t28, align 8
-  %t29 = getelementptr inbounds i8, ptr %t23, i64 48
-  store i64 %t21, ptr %t29, align 8
-  %t30 = ptrtoint ptr %t23 to i64
-  ret i64 %t30
-
-b1:                                               ; preds = %entry
-  call void @prism_match_error()
-  unreachable
-}
-
-; Function Attrs: nounwind
-define i64 @prismfn_7Zaregion(i64 %a0) #0 {
-entry:
-  call void @prism_drive_step()
-  %t0 = inttoptr i64 %a0 to ptr
-  %t1 = getelementptr inbounds i8, ptr %t0, i64 8
-  %t2 = load i64, ptr %t1, align 8
-  switch i64 %t2, label %b1 [
-    i64 0, label %b2
-    i64 1, label %b3
-  ]
-
-b2:                                               ; preds = %entry
-  %t3 = getelementptr inbounds i8, ptr %t0, i64 24
-  %t4 = load i64, ptr %t3, align 8
-  call void @prism_rc_inc(i64 %t4)
-  call void @prism_rc_dec(i64 %a0)
-  ret i64 %t4
-
-b3:                                               ; preds = %entry
-  %t7 = getelementptr inbounds i8, ptr %t0, i64 24
-  %t8 = load i64, ptr %t7, align 8
-  %t9 = getelementptr inbounds i8, ptr %t0, i64 32
-  %t10 = load i64, ptr %t9, align 8
-  %t11 = getelementptr inbounds i8, ptr %t0, i64 40
-  %t12 = load i64, ptr %t11, align 8
-  %t13 = getelementptr inbounds i8, ptr %t0, i64 48
   %t14 = load i64, ptr %t13, align 8
-  call void @prism_rc_inc(i64 %t8)
-  call void @prism_rc_inc(i64 %t12)
-  call void @prism_rc_dec(i64 %a0)
-  %t19 = and i64 %t8, 1
-  %t21 = and i64 %t19, 1
-  %t22 = icmp eq i64 %t21, 1
-  br i1 %t22, label %b4, label %b5
+  switch i64 %t14, label %b1 [
+    i64 0, label %b2
+    i64 1, label %b3
+  ]
+
+b2:                                               ; preds = %entry
+  %t15 = getelementptr inbounds i8, ptr %t12, i64 24
+  %t16 = load i64, ptr %t15, align 8
+  call void @prism_rc_inc(i64 %t16)
+  call void @prism_rc_dec(i64 %t11)
+  ret i64 %t16
+
+b3:                                               ; preds = %entry
+  %t19 = getelementptr inbounds i8, ptr %t12, i64 24
+  %t20 = load i64, ptr %t19, align 8
+  call void @prism_rc_inc(i64 %t20)
+  call void @prism_rc_dec(i64 %t11)
+  %t24 = and i64 1, %t20
+  %t26 = and i64 %t24, 1
+  %t27 = icmp eq i64 %t26, 1
+  br i1 %t27, label %b4, label %b5
 
 b1:                                               ; preds = %entry
   call void @prism_match_error()
   unreachable
 
 b4:                                               ; preds = %b3
-  %t23 = icmp eq i64 %t8, 1
-  %t24 = zext i1 %t23 to i64
-  %t26 = shl i64 %t24, 1
-  %t27 = or i64 %t26, 1
+  %t31 = ashr i64 %t20, 1
+  %t32 = sub i64 0, %t31
+  %t34 = shl i64 %t32, 1
+  %t35 = ashr i64 %t34, 1
+  %t36 = icmp eq i64 %t35, %t32
+  br i1 %t36, label %b7, label %b5
+
+b5:                                               ; preds = %b4, %b3
+  %t38 = call i64 @prism_rt_int_sub(i64 1, i64 %t20)
   br label %b6
 
-b5:                                               ; preds = %b3
-  %t28 = call i64 @prism_rt_int_cmp(i64 %t8, i64 1)
-  %t30 = icmp eq i64 %t28, 0
-  %t31 = zext i1 %t30 to i64
-  %t33 = shl i64 %t31, 1
-  %t34 = or i64 %t33, 1
+b7:                                               ; preds = %b4
+  %t37 = or i64 %t34, 1
   br label %b6
 
-b6:                                               ; preds = %b5, %b4
-  %t35 = phi i64 [ %t27, %b4 ], [ %t34, %b5 ]
-  call void @prism_rc_dec(i64 %t8)
+b6:                                               ; preds = %b5, %b7
+  %t39 = phi i64 [ %t37, %b7 ], [ %t38, %b5 ]
   call void @prism_rc_dec(i64 1)
-  %t37 = icmp ne i64 %t35, 1
-  br i1 %t37, label %b7, label %b8
-
-b7:                                               ; preds = %b6
-  call void @prism_rc_dec(i64 %t35)
-  %t41 = call ptr @prism_alloc(i64 1)
-  %t42 = getelementptr inbounds i8, ptr %t41, i64 8
-  store i64 0, ptr %t42, align 8
-  %t44 = getelementptr inbounds i8, ptr %t41, i64 24
-  store i64 1, ptr %t44, align 8
-  %t45 = ptrtoint ptr %t41 to i64
-  %t47 = call ptr @prism_alloc(i64 1)
-  %t48 = getelementptr inbounds i8, ptr %t47, i64 8
-  store i64 7349731457420784559, ptr %t48, align 8
-  %t50 = getelementptr inbounds i8, ptr %t47, i64 24
-  store i64 %t12, ptr %t50, align 8
-  %t51 = ptrtoint ptr %t47 to i64
-  %t52 = call i64 @prismfn_ebind(i64 %t45, i64 %t51)
-  %t53 = inttoptr i64 %t52 to ptr
-  %t54 = getelementptr inbounds i8, ptr %t53, i64 8
-  %t55 = load i64, ptr %t54, align 8
-  switch i64 %t55, label %b10 [
-    i64 1, label %b12
-    i64 0, label %b13
-  ]
-
-b8:                                               ; preds = %b6
-  call void @prism_rc_dec(i64 %t35)
-  call void @prism_rc_dec(i64 %t12)
-  call void @prism_fatal(i64 ptrtoint (ptr @.str1 to i64))
-  ret i64 0
-
-b12:                                              ; preds = %b7
-  %t65 = getelementptr inbounds i8, ptr %t53, i64 24
-  %t66 = load i64, ptr %t65, align 8
-  %t67 = getelementptr inbounds i8, ptr %t53, i64 32
-  %t68 = load i64, ptr %t67, align 8
-  %t69 = getelementptr inbounds i8, ptr %t53, i64 40
-  %t70 = load i64, ptr %t69, align 8
-  %t71 = getelementptr inbounds i8, ptr %t53, i64 48
-  %t72 = load i64, ptr %t71, align 8
-  call void @prism_rc_dec(i64 %t52)
-  call void @prism_fatal(i64 ptrtoint (ptr @.str0 to i64))
-  ret i64 0
-
-b13:                                              ; preds = %b7
-  %t76 = getelementptr inbounds i8, ptr %t53, i64 24
-  %t77 = load i64, ptr %t76, align 8
-  call void @prism_rc_inc(i64 %t77)
-  call void @prism_rc_dec(i64 %t52)
-  ret i64 %t77
-
-b10:                                              ; preds = %b7
-  call void @prism_match_error()
-  unreachable
-
-b11:                                              ; No predecessors!
-  %t56 = getelementptr inbounds i8, ptr %t53, i64 24
-  %t57 = load i64, ptr %t56, align 8
-  %t58 = getelementptr inbounds i8, ptr %t53, i64 32
-  %t59 = load i64, ptr %t58, align 8
-  call void @prism_rc_inc(i64 %t57)
-  call void @prism_rc_inc(i64 %t59)
-  call void @prism_rc_dec(i64 %t52)
-  %t63 = call i64 @prismfn_qApply(i64 %t57, i64 %t59)
-  %t64 = musttail call i64 @prismfn_7Zaregion(i64 %t63)
-  ret i64 %t64
+  call void @prism_rc_dec(i64 %t20)
+  ret i64 %t39
 }
 
 ; Function Attrs: nounwind
-declare void @prism_drive_step() #0
+declare ptr @prism_alloc(i64) #0
+
+; Function Attrs: nounwind
+define i64 @prismap_2(i64 %_clos, i64 %_a0, i64 %_a1) #0 {
+entry:
+  %_cp = inttoptr i64 %_clos to ptr
+  %_tp = getelementptr inbounds i8, ptr %_cp, i64 8
+  %_tag = load i64, ptr %_tp, align 8
+  switch i64 %_tag, label %_dead [
+    i64 4180332117194187166, label %_lam4180332117194187166
+    i64 6217696733472061813, label %_lam6217696733472061813
+    i64 7170891667029511803, label %_lam7170891667029511803
+  ]
+
+_lam4180332117194187166:                          ; preds = %entry
+  call void @prism_apply_error()
+  unreachable
+
+_lam6217696733472061813:                          ; preds = %entry
+  %_r6217696733472061813 = call i64 @prismlam_6217696733472061813(i64 %_a0, i64 %_a1)
+  br label %_merge
+
+_lam7170891667029511803:                          ; preds = %entry
+  %_fp7170891667029511803_0 = getelementptr inbounds i8, ptr %_cp, i64 24
+  %_fv7170891667029511803_0 = load i64, ptr %_fp7170891667029511803_0, align 8
+  call void @prism_apply_error()
+  unreachable
+
+_dead:                                            ; preds = %entry
+  call void @prism_apply_error()
+  unreachable
+
+_merge:                                           ; preds = %_lam6217696733472061813
+  %_result = phi i64 [ %_r6217696733472061813, %_lam6217696733472061813 ]
+  ret i64 %_result
+}
+
+; Function Attrs: nounwind
+declare void @prism_rc_dec(i64) #0
 
 ; Function Attrs: nounwind
 declare void @prism_match_error() #0
@@ -552,103 +443,72 @@ declare void @prism_match_error() #0
 declare void @prism_rc_inc(i64) #0
 
 ; Function Attrs: nounwind
-declare void @prism_rc_dec(i64) #0
+declare i64 @prism_rt_int_sub(i64, i64) #0
 
 ; Function Attrs: nounwind
-declare i64 @prism_rt_int_cmp(i64, i64) #0
-
-; Function Attrs: nounwind
-define i64 @prismfn_qApply(i64 %a0, i64 %a1) #0 {
+define i64 @prismlam_4180332117194187166(i64 %_p0) #0 {
 entry:
-  call void @prism_drive_step()
-  %t0 = call i64 @prism_taq_uncons(i64 %a0)
-  call void @prism_rc_dec(i64 %a0)
-  %t1 = inttoptr i64 %t0 to ptr
+  %t1 = call ptr @prism_alloc(i64 1)
   %t2 = getelementptr inbounds i8, ptr %t1, i64 8
-  %t3 = load i64, ptr %t2, align 8
-  switch i64 %t3, label %b1 [
-    i64 0, label %b2
-    i64 1, label %b3
-  ]
-
-b2:                                               ; preds = %entry
-  call void @prism_rc_dec(i64 %t0)
-  %t6 = call ptr @prism_alloc(i64 1)
-  %t7 = getelementptr inbounds i8, ptr %t6, i64 8
-  store i64 0, ptr %t7, align 8
-  %t9 = getelementptr inbounds i8, ptr %t6, i64 24
-  store i64 %a1, ptr %t9, align 8
-  %t10 = ptrtoint ptr %t6 to i64
-  ret i64 %t10
-
-b3:                                               ; preds = %entry
-  %t11 = getelementptr inbounds i8, ptr %t1, i64 24
-  %t12 = load i64, ptr %t11, align 8
-  %t13 = getelementptr inbounds i8, ptr %t1, i64 32
-  %t14 = load i64, ptr %t13, align 8
-  call void @prism_rc_inc(i64 %t12)
-  call void @prism_rc_inc(i64 %t14)
-  call void @prism_rc_dec(i64 %t0)
-  %t18 = call i64 @prismap_1(i64 %t12, i64 %a1)
-  call void @prism_rc_dec(i64 %t12)
-  %t19 = inttoptr i64 %t18 to ptr
-  %t20 = getelementptr inbounds i8, ptr %t19, i64 8
-  %t21 = load i64, ptr %t20, align 8
-  switch i64 %t21, label %b5 [
-    i64 0, label %b6
-    i64 1, label %b7
-  ]
-
-b1:                                               ; preds = %entry
-  call void @prism_match_error()
-  unreachable
-
-b6:                                               ; preds = %b3
-  %t22 = getelementptr inbounds i8, ptr %t19, i64 24
-  %t23 = load i64, ptr %t22, align 8
-  call void @prism_rc_inc(i64 %t23)
-  call void @prism_rc_dec(i64 %t18)
-  %t26 = musttail call i64 @prismfn_qApply(i64 %t14, i64 %t23)
-  ret i64 %t26
-
-b7:                                               ; preds = %b3
-  %t27 = getelementptr inbounds i8, ptr %t19, i64 24
-  %t28 = load i64, ptr %t27, align 8
-  %t29 = getelementptr inbounds i8, ptr %t19, i64 32
-  %t30 = load i64, ptr %t29, align 8
-  %t31 = getelementptr inbounds i8, ptr %t19, i64 40
-  %t32 = load i64, ptr %t31, align 8
-  %t33 = getelementptr inbounds i8, ptr %t19, i64 48
-  %t34 = load i64, ptr %t33, align 8
-  call void @prism_rc_inc(i64 %t32)
-  call void @prism_rc_inc(i64 %t28)
-  call void @prism_rc_inc(i64 %t34)
-  call void @prism_rc_inc(i64 %t30)
-  %t39 = call i64 @prism_reuse_token(i64 %t18)
-  %t40 = call i64 @prism_taq_concat(i64 %t34, i64 %t14)
-  call void @prism_rc_dec(i64 %t34)
-  call void @prism_rc_dec(i64 %t14)
-  %t42 = call ptr @prism_reuse_alloc(i64 %t39, i64 4)
-  %t43 = getelementptr inbounds i8, ptr %t42, i64 8
-  store i64 1, ptr %t43, align 8
-  %t45 = getelementptr inbounds i8, ptr %t42, i64 24
-  store i64 %t28, ptr %t45, align 8
-  %t46 = getelementptr inbounds i8, ptr %t42, i64 32
-  store i64 %t30, ptr %t46, align 8
-  %t47 = getelementptr inbounds i8, ptr %t42, i64 40
-  store i64 %t32, ptr %t47, align 8
-  %t48 = getelementptr inbounds i8, ptr %t42, i64 48
-  store i64 %t40, ptr %t48, align 8
-  %t49 = ptrtoint ptr %t42 to i64
-  ret i64 %t49
-
-b5:                                               ; preds = %b3
-  call void @prism_match_error()
-  unreachable
+  store i64 1, ptr %t2, align 8
+  %t4 = getelementptr inbounds i8, ptr %t1, i64 24
+  store i64 %_p0, ptr %t4, align 8
+  %t5 = ptrtoint ptr %t1 to i64
+  ret i64 %t5
 }
 
 ; Function Attrs: nounwind
-declare void @prism_fatal(i64) #0
+define i64 @prismlam_6217696733472061813(i64 %_p0, i64 %_p1) #0 {
+entry:
+  call void @prism_rc_inc(i64 %_p0)
+  %t2 = and i64 %_p0, 1
+  %t4 = and i64 %t2, 1
+  %t5 = icmp eq i64 %t4, 1
+  br i1 %t5, label %b0, label %b1
+
+b0:                                               ; preds = %entry
+  %t6 = icmp eq i64 %_p0, 1
+  %t7 = zext i1 %t6 to i64
+  %t9 = shl i64 %t7, 1
+  %t10 = or i64 %t9, 1
+  br label %b2
+
+b1:                                               ; preds = %entry
+  %t11 = call i64 @prism_rt_int_cmp(i64 %_p0, i64 1)
+  %t13 = icmp eq i64 %t11, 0
+  %t14 = zext i1 %t13 to i64
+  %t16 = shl i64 %t14, 1
+  %t17 = or i64 %t16, 1
+  br label %b2
+
+b2:                                               ; preds = %b1, %b0
+  %t18 = phi i64 [ %t10, %b0 ], [ %t17, %b1 ]
+  call void @prism_rc_dec(i64 %_p0)
+  call void @prism_rc_dec(i64 1)
+  %t20 = icmp ne i64 %t18, 1
+  br i1 %t20, label %b3, label %b4
+
+b3:                                               ; preds = %b2
+  call void @prism_rc_dec(i64 %_p0)
+  call void @prism_rc_dec(i64 %t18)
+  %t24 = call i64 @prismap_1(i64 %_p1, i64 3)
+  call void @prism_rc_dec(i64 %_p1)
+  ret i64 %t24
+
+b4:                                               ; preds = %b2
+  call void @prism_rc_dec(i64 %_p1)
+  call void @prism_rc_dec(i64 %t18)
+  %t28 = call ptr @prism_alloc(i64 1)
+  %t29 = getelementptr inbounds i8, ptr %t28, i64 8
+  store i64 0, ptr %t29, align 8
+  %t31 = getelementptr inbounds i8, ptr %t28, i64 24
+  store i64 %_p0, ptr %t31, align 8
+  %t32 = ptrtoint ptr %t28 to i64
+  ret i64 %t32
+}
+
+; Function Attrs: nounwind
+declare i64 @prism_rt_int_cmp(i64, i64) #0
 
 ; Function Attrs: nounwind
 define i64 @prismap_1(i64 %_clos, i64 %_a0) #0 {
@@ -657,365 +517,45 @@ entry:
   %_tp = getelementptr inbounds i8, ptr %_cp, i64 8
   %_tag = load i64, ptr %_tp, align 8
   switch i64 %_tag, label %_dead [
-    i64 314861716129843827, label %_lam314861716129843827
-    i64 1005911676631999517, label %_lam1005911676631999517
-    i64 1616227615631620365, label %_lam1616227615631620365
     i64 4180332117194187166, label %_lam4180332117194187166
-    i64 4281519452633221380, label %_lam4281519452633221380
-    i64 4526294491531849704, label %_lam4526294491531849704
     i64 6217696733472061813, label %_lam6217696733472061813
     i64 7170891667029511803, label %_lam7170891667029511803
-    i64 7349731457420784559, label %_lam7349731457420784559
-    i64 7649622893994025250, label %_lam7649622893994025250
-    i64 7743101094664659736, label %_lam7743101094664659736
   ]
-
-_lam314861716129843827:                           ; preds = %entry
-  %_fp314861716129843827_0 = getelementptr inbounds i8, ptr %_cp, i64 24
-  %_fv314861716129843827_0 = load i64, ptr %_fp314861716129843827_0, align 8
-  %_r314861716129843827 = call i64 @prismlam_314861716129843827(i64 %_fv314861716129843827_0, i64 %_a0)
-  br label %_merge
-
-_lam1005911676631999517:                          ; preds = %entry
-  %_fp1005911676631999517_0 = getelementptr inbounds i8, ptr %_cp, i64 24
-  %_fv1005911676631999517_0 = load i64, ptr %_fp1005911676631999517_0, align 8
-  %_r1005911676631999517 = call i64 @prismlam_1005911676631999517(i64 %_fv1005911676631999517_0, i64 %_a0)
-  br label %_merge
-
-_lam1616227615631620365:                          ; preds = %entry
-  %_fp1616227615631620365_0 = getelementptr inbounds i8, ptr %_cp, i64 24
-  %_fv1616227615631620365_0 = load i64, ptr %_fp1616227615631620365_0, align 8
-  %_r1616227615631620365 = call i64 @prismlam_1616227615631620365(i64 %_fv1616227615631620365_0, i64 %_a0)
-  br label %_merge
 
 _lam4180332117194187166:                          ; preds = %entry
   %_r4180332117194187166 = call i64 @prismlam_4180332117194187166(i64 %_a0)
   br label %_merge
 
-_lam4281519452633221380:                          ; preds = %entry
-  %_fp4281519452633221380_0 = getelementptr inbounds i8, ptr %_cp, i64 24
-  %_fv4281519452633221380_0 = load i64, ptr %_fp4281519452633221380_0, align 8
-  %_r4281519452633221380 = call i64 @prismlam_4281519452633221380(i64 %_fv4281519452633221380_0, i64 %_a0)
-  br label %_merge
-
-_lam4526294491531849704:                          ; preds = %entry
-  %_fp4526294491531849704_0 = getelementptr inbounds i8, ptr %_cp, i64 24
-  %_fv4526294491531849704_0 = load i64, ptr %_fp4526294491531849704_0, align 8
-  %_r4526294491531849704 = call i64 @prismlam_4526294491531849704(i64 %_fv4526294491531849704_0, i64 %_a0)
-  br label %_merge
-
 _lam6217696733472061813:                          ; preds = %entry
-  %_r6217696733472061813 = call i64 @prismlam_6217696733472061813(i64 %_a0)
+  %_ac6217696733472061813 = call ptr @prism_alloc(i64 1)
+  %_atp6217696733472061813 = getelementptr inbounds i8, ptr %_ac6217696733472061813, i64 8
+  store i64 7170891667029511803, ptr %_atp6217696733472061813, align 8
+  %_afp6217696733472061813_0 = getelementptr inbounds i8, ptr %_ac6217696733472061813, i64 24
+  store i64 %_a0, ptr %_afp6217696733472061813_0, align 8
+  %_r6217696733472061813 = ptrtoint ptr %_ac6217696733472061813 to i64
   br label %_merge
 
 _lam7170891667029511803:                          ; preds = %entry
-  %_r7170891667029511803 = call i64 @prismlam_7170891667029511803(i64 %_a0)
-  br label %_merge
-
-_lam7349731457420784559:                          ; preds = %entry
-  %_fp7349731457420784559_0 = getelementptr inbounds i8, ptr %_cp, i64 24
-  %_fv7349731457420784559_0 = load i64, ptr %_fp7349731457420784559_0, align 8
-  %_r7349731457420784559 = call i64 @prismlam_7349731457420784559(i64 %_fv7349731457420784559_0, i64 %_a0)
-  br label %_merge
-
-_lam7649622893994025250:                          ; preds = %entry
-  %_r7649622893994025250 = call i64 @prismlam_7649622893994025250(i64 %_a0)
-  br label %_merge
-
-_lam7743101094664659736:                          ; preds = %entry
-  %_fp7743101094664659736_0 = getelementptr inbounds i8, ptr %_cp, i64 24
-  %_fv7743101094664659736_0 = load i64, ptr %_fp7743101094664659736_0, align 8
-  %_r7743101094664659736 = call i64 @prismlam_7743101094664659736(i64 %_fv7743101094664659736_0, i64 %_a0)
+  %_fp7170891667029511803_0 = getelementptr inbounds i8, ptr %_cp, i64 24
+  %_fv7170891667029511803_0 = load i64, ptr %_fp7170891667029511803_0, align 8
+  %_r7170891667029511803 = call i64 @prismlam_7170891667029511803(i64 %_fv7170891667029511803_0, i64 %_a0)
   br label %_merge
 
 _dead:                                            ; preds = %entry
   call void @prism_apply_error()
   unreachable
 
-_merge:                                           ; preds = %_lam7743101094664659736, %_lam7649622893994025250, %_lam7349731457420784559, %_lam7170891667029511803, %_lam6217696733472061813, %_lam4526294491531849704, %_lam4281519452633221380, %_lam4180332117194187166, %_lam1616227615631620365, %_lam1005911676631999517, %_lam314861716129843827
-  %_result = phi i64 [ %_r314861716129843827, %_lam314861716129843827 ], [ %_r1005911676631999517, %_lam1005911676631999517 ], [ %_r1616227615631620365, %_lam1616227615631620365 ], [ %_r4180332117194187166, %_lam4180332117194187166 ], [ %_r4281519452633221380, %_lam4281519452633221380 ], [ %_r4526294491531849704, %_lam4526294491531849704 ], [ %_r6217696733472061813, %_lam6217696733472061813 ], [ %_r7170891667029511803, %_lam7170891667029511803 ], [ %_r7349731457420784559, %_lam7349731457420784559 ], [ %_r7649622893994025250, %_lam7649622893994025250 ], [ %_r7743101094664659736, %_lam7743101094664659736 ]
+_merge:                                           ; preds = %_lam7170891667029511803, %_lam6217696733472061813, %_lam4180332117194187166
+  %_result = phi i64 [ %_r4180332117194187166, %_lam4180332117194187166 ], [ %_r6217696733472061813, %_lam6217696733472061813 ], [ %_r7170891667029511803, %_lam7170891667029511803 ]
   ret i64 %_result
 }
 
 ; Function Attrs: nounwind
-declare i64 @prism_reuse_token(i64) #0
-
-; Function Attrs: nounwind
-declare i64 @prism_taq_snoc(i64, i64) #0
-
-; Function Attrs: nounwind
-declare ptr @prism_reuse_alloc(i64, i64) #0
-
-; Function Attrs: nounwind
-declare i64 @prism_taq_uncons(i64) #0
-
-; Function Attrs: nounwind
-declare i64 @prism_taq_concat(i64, i64) #0
-
-; Function Attrs: nounwind
-define i64 @prismlam_4180332117194187166(i64 %_p0) #0 {
-entry:
-  call void @prism_rc_inc(i64 %_p0)
-  %t2 = call ptr @prism_alloc(i64 1)
-  %t3 = getelementptr inbounds i8, ptr %t2, i64 8
-  store i64 0, ptr %t3, align 8
-  %t5 = getelementptr inbounds i8, ptr %t2, i64 24
-  store i64 %_p0, ptr %t5, align 8
-  %t6 = ptrtoint ptr %t2 to i64
-  %t8 = call ptr @prism_alloc(i64 0)
-  %t9 = getelementptr inbounds i8, ptr %t8, i64 8
-  store i64 7170891667029511803, ptr %t9, align 8
-  %t11 = ptrtoint ptr %t8 to i64
-  %t12 = call i64 @prismfn_ebind(i64 %t6, i64 %t11)
-  %t14 = call ptr @prism_alloc(i64 1)
-  %t15 = getelementptr inbounds i8, ptr %t14, i64 8
-  store i64 7743101094664659736, ptr %t15, align 8
-  %t17 = getelementptr inbounds i8, ptr %t14, i64 24
-  store i64 %_p0, ptr %t17, align 8
-  %t18 = ptrtoint ptr %t14 to i64
-  %t19 = call i64 @prismfn_ebind(i64 %t12, i64 %t18)
-  ret i64 %t19
-}
-
-; Function Attrs: nounwind
-define i64 @prismlam_6217696733472061813(i64 %_p0) #0 {
-entry:
-  %t2 = call ptr @prism_alloc(i64 1)
-  %t3 = getelementptr inbounds i8, ptr %t2, i64 8
-  store i64 0, ptr %t3, align 8
-  %t5 = getelementptr inbounds i8, ptr %t2, i64 24
-  store i64 1, ptr %t5, align 8
-  %t6 = ptrtoint ptr %t2 to i64
-  %t8 = call ptr @prism_alloc(i64 1)
-  %t9 = getelementptr inbounds i8, ptr %t8, i64 8
-  store i64 4526294491531849704, ptr %t9, align 8
-  %t11 = getelementptr inbounds i8, ptr %t8, i64 24
-  store i64 %_p0, ptr %t11, align 8
-  %t12 = ptrtoint ptr %t8 to i64
-  %t13 = call i64 @prismfn_ebind(i64 %t6, i64 %t12)
-  ret i64 %t13
-}
-
-; Function Attrs: nounwind
-define i64 @prismlam_7349731457420784559(i64 %_fv0, i64 %_p0) #0 {
+define i64 @prismlam_7170891667029511803(i64 %_fv0, i64 %_p0) #0 {
 entry:
   call void @prism_rc_inc(i64 %_fv0)
-  %t2 = call ptr @prism_alloc(i64 1)
-  %t3 = getelementptr inbounds i8, ptr %t2, i64 8
-  store i64 0, ptr %t3, align 8
-  %t5 = getelementptr inbounds i8, ptr %t2, i64 24
-  store i64 %_fv0, ptr %t5, align 8
-  %t6 = ptrtoint ptr %t2 to i64
-  %t8 = call ptr @prism_alloc(i64 1)
-  %t9 = getelementptr inbounds i8, ptr %t8, i64 8
-  store i64 4281519452633221380, ptr %t9, align 8
-  %t11 = getelementptr inbounds i8, ptr %t8, i64 24
-  store i64 %_p0, ptr %t11, align 8
-  %t12 = ptrtoint ptr %t8 to i64
-  %t13 = musttail call i64 @prismfn_ebind(i64 %t6, i64 %t12)
-  ret i64 %t13
-}
-
-; Function Attrs: nounwind
-define i64 @prismlam_7170891667029511803(i64 %_p0) #0 {
-entry:
-  %t2 = call ptr @prism_alloc(i64 1)
-  %t3 = getelementptr inbounds i8, ptr %t2, i64 8
-  store i64 0, ptr %t3, align 8
-  %t5 = getelementptr inbounds i8, ptr %t2, i64 24
-  store i64 1, ptr %t5, align 8
-  %t6 = ptrtoint ptr %t2 to i64
-  %t8 = call ptr @prism_alloc(i64 1)
-  %t9 = getelementptr inbounds i8, ptr %t8, i64 8
-  store i64 1616227615631620365, ptr %t9, align 8
-  %t11 = getelementptr inbounds i8, ptr %t8, i64 24
-  store i64 %_p0, ptr %t11, align 8
-  %t12 = ptrtoint ptr %t8 to i64
-  %t13 = call i64 @prismfn_ebind(i64 %t6, i64 %t12)
-  ret i64 %t13
-}
-
-; Function Attrs: nounwind
-define i64 @prismlam_7743101094664659736(i64 %_fv0, i64 %_p0) #0 {
-entry:
-  %t1 = icmp ne i64 %_p0, 1
-  br i1 %t1, label %b0, label %b1
-
-b0:                                               ; preds = %entry
-  call void @prism_rc_dec(i64 %_p0)
-  %t5 = call ptr @prism_alloc(i64 1)
-  %t6 = getelementptr inbounds i8, ptr %t5, i64 8
-  store i64 0, ptr %t6, align 8
-  %t8 = getelementptr inbounds i8, ptr %t5, i64 24
-  store i64 3, ptr %t8, align 8
-  %t9 = ptrtoint ptr %t5 to i64
-  %t11 = call ptr @prism_alloc(i64 0)
-  %t12 = getelementptr inbounds i8, ptr %t11, i64 8
-  store i64 7649622893994025250, ptr %t12, align 8
-  %t14 = ptrtoint ptr %t11 to i64
-  %t15 = musttail call i64 @prismfn_ebind(i64 %t9, i64 %t14)
-  ret i64 %t15
-
-b1:                                               ; preds = %entry
-  call void @prism_rc_inc(i64 %_fv0)
-  call void @prism_rc_dec(i64 %_p0)
-  %t19 = call ptr @prism_alloc(i64 1)
-  %t20 = getelementptr inbounds i8, ptr %t19, i64 8
-  store i64 0, ptr %t20, align 8
-  %t22 = getelementptr inbounds i8, ptr %t19, i64 24
-  store i64 %_fv0, ptr %t22, align 8
-  %t23 = ptrtoint ptr %t19 to i64
-  ret i64 %t23
-}
-
-; Function Attrs: nounwind
-define i64 @prismlam_4526294491531849704(i64 %_fv0, i64 %_p0) #0 {
-entry:
-  %t1 = call ptr @prism_alloc(i64 1)
-  %t2 = getelementptr inbounds i8, ptr %t1, i64 8
-  store i64 0, ptr %t2, align 8
-  %t4 = getelementptr inbounds i8, ptr %t1, i64 24
-  store i64 %_p0, ptr %t4, align 8
-  %t5 = ptrtoint ptr %t1 to i64
-  call void @prism_rc_inc(i64 %_fv0)
-  %t8 = call ptr @prism_alloc(i64 1)
-  %t9 = getelementptr inbounds i8, ptr %t8, i64 8
-  store i64 314861716129843827, ptr %t9, align 8
-  %t11 = getelementptr inbounds i8, ptr %t8, i64 24
-  store i64 %_fv0, ptr %t11, align 8
-  %t12 = ptrtoint ptr %t8 to i64
-  %t13 = musttail call i64 @prismfn_ebind(i64 %t5, i64 %t12)
-  ret i64 %t13
-}
-
-; Function Attrs: nounwind
-define i64 @prismlam_4281519452633221380(i64 %_fv0, i64 %_p0) #0 {
-entry:
-  call void @prism_rc_inc(i64 %_fv0)
-  %t1 = and i64 %_fv0, %_p0
-  %t3 = and i64 %t1, 1
-  %t4 = icmp eq i64 %t3, 1
-  br i1 %t4, label %b0, label %b1
-
-b0:                                               ; preds = %entry
-  %t6 = ashr i64 %_fv0, 1
-  %t8 = ashr i64 %_p0, 1
-  %t9 = sub i64 %t6, %t8
-  %t11 = shl i64 %t9, 1
-  %t12 = ashr i64 %t11, 1
-  %t13 = icmp eq i64 %t12, %t9
-  br i1 %t13, label %b3, label %b1
-
-b1:                                               ; preds = %b0, %entry
-  %t15 = call i64 @prism_rt_int_sub(i64 %_fv0, i64 %_p0)
-  br label %b2
-
-b3:                                               ; preds = %b0
-  %t14 = or i64 %t11, 1
-  br label %b2
-
-b2:                                               ; preds = %b1, %b3
-  %t16 = phi i64 [ %t14, %b3 ], [ %t15, %b1 ]
-  call void @prism_rc_dec(i64 %_fv0)
-  call void @prism_rc_dec(i64 %_p0)
-  %t18 = call ptr @prism_alloc(i64 1)
-  %t19 = getelementptr inbounds i8, ptr %t18, i64 8
-  store i64 0, ptr %t19, align 8
-  %t21 = getelementptr inbounds i8, ptr %t18, i64 24
-  store i64 %t16, ptr %t21, align 8
-  %t22 = ptrtoint ptr %t18 to i64
-  ret i64 %t22
-}
-
-; Function Attrs: nounwind
-declare i64 @prism_rt_int_sub(i64, i64) #0
-
-; Function Attrs: nounwind
-define i64 @prismlam_1616227615631620365(i64 %_fv0, i64 %_p0) #0 {
-entry:
-  call void @prism_rc_inc(i64 %_fv0)
-  %t1 = and i64 %_fv0, %_p0
-  %t3 = and i64 %t1, 1
-  %t4 = icmp eq i64 %t3, 1
-  br i1 %t4, label %b0, label %b1
-
-b0:                                               ; preds = %entry
-  %t5 = icmp eq i64 %_fv0, %_p0
-  %t6 = zext i1 %t5 to i64
-  %t8 = shl i64 %t6, 1
-  %t9 = or i64 %t8, 1
-  br label %b2
-
-b1:                                               ; preds = %entry
-  %t10 = call i64 @prism_rt_int_cmp(i64 %_fv0, i64 %_p0)
-  %t12 = icmp eq i64 %t10, 0
-  %t13 = zext i1 %t12 to i64
-  %t15 = shl i64 %t13, 1
-  %t16 = or i64 %t15, 1
-  br label %b2
-
-b2:                                               ; preds = %b1, %b0
-  %t17 = phi i64 [ %t9, %b0 ], [ %t16, %b1 ]
-  call void @prism_rc_dec(i64 %_fv0)
-  call void @prism_rc_dec(i64 %_p0)
-  %t19 = call ptr @prism_alloc(i64 1)
-  %t20 = getelementptr inbounds i8, ptr %t19, i64 8
-  store i64 0, ptr %t20, align 8
-  %t22 = getelementptr inbounds i8, ptr %t19, i64 24
-  store i64 %t17, ptr %t22, align 8
-  %t23 = ptrtoint ptr %t19 to i64
-  ret i64 %t23
-}
-
-; Function Attrs: nounwind
-define i64 @prismlam_7649622893994025250(i64 %_p0) #0 {
-entry:
-  %t4 = call ptr @prism_alloc(i64 4)
-  %t5 = getelementptr inbounds i8, ptr %t4, i64 8
-  store i64 1, ptr %t5, align 8
-  %t7 = getelementptr inbounds i8, ptr %t4, i64 24
-  store i64 1, ptr %t7, align 8
-  %t8 = getelementptr inbounds i8, ptr %t4, i64 32
-  store i64 1, ptr %t8, align 8
-  %t9 = getelementptr inbounds i8, ptr %t4, i64 40
-  store i64 %_p0, ptr %t9, align 8
-  %t10 = getelementptr inbounds i8, ptr %t4, i64 48
-  store i64 0, ptr %t10, align 8
-  %t11 = ptrtoint ptr %t4 to i64
-  call void @prism_effop_alloc()
-  ret i64 %t11
-}
-
-; Function Attrs: nounwind
-declare void @prism_effop_alloc() #0
-
-; Function Attrs: nounwind
-define i64 @prismlam_314861716129843827(i64 %_fv0, i64 %_p0) #0 {
-entry:
-  call void @prism_rc_inc(i64 %_fv0)
-  %t2 = call ptr @prism_alloc(i64 1)
-  %t3 = getelementptr inbounds i8, ptr %t2, i64 8
-  store i64 0, ptr %t3, align 8
-  %t5 = getelementptr inbounds i8, ptr %t2, i64 24
-  store i64 %_fv0, ptr %t5, align 8
-  %t6 = ptrtoint ptr %t2 to i64
-  %t8 = call ptr @prism_alloc(i64 1)
-  %t9 = getelementptr inbounds i8, ptr %t8, i64 8
-  store i64 1005911676631999517, ptr %t9, align 8
-  %t11 = getelementptr inbounds i8, ptr %t8, i64 24
-  store i64 %_p0, ptr %t11, align 8
-  %t12 = ptrtoint ptr %t8 to i64
-  %t13 = musttail call i64 @prismfn_ebind(i64 %t6, i64 %t12)
-  ret i64 %t13
-}
-
-; Function Attrs: nounwind
-define i64 @prismlam_1005911676631999517(i64 %_fv0, i64 %_p0) #0 {
-entry:
-  call void @prism_rc_inc(i64 %_fv0)
-  %t1 = call i64 @prismap_1(i64 %_p0, i64 %_fv0)
-  call void @prism_rc_dec(i64 %_p0)
-  ret i64 %t1
+  %t0 = call i64 @prismlam_6217696733472061813(i64 %_fv0, i64 %_p0)
+  ret i64 %t0
 }
 
 ; Function Attrs: nounwind

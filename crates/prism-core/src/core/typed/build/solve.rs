@@ -403,7 +403,7 @@ impl Solver {
         // upper bound, which is what the short circuit above already says about
         // a pure computation. Solving it here would instead copy the consumer's
         // row onto a closure that performs none of it, and a closure that
-        // describes itself as effectful costs the evidence lowering. The one
+        // describes itself as effectful costs a slower lowering rung. The one
         // demand that constrains more than an upper bound names labels and still has an
         // open tail: a container element or a parameter row this closure helps
         // determine, where the binder that names the closure records exactly

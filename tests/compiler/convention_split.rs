@@ -37,6 +37,15 @@ fn typed_from_program(
     (typed, env, ctors, grades)
 }
 
+// The cascade with the consolidated state route off, so the convention split
+// is asked the questions these fixtures were written to ask.
+fn cascade_flags() -> DynFlags {
+    DynFlags {
+        consolidate: false,
+        ..DynFlags::default()
+    }
+}
+
 fn calls(function: &TypedCoreFn) -> BTreeSet<Sym> {
     let mut calls = BTreeSet::new();
     collect_calls(function.body(), &mut calls);
@@ -46,7 +55,7 @@ fn calls(function: &TypedCoreFn) -> BTreeSet<Sym> {
 #[test]
 fn mixed_direct_and_effectful_map_keeps_the_pure_clone_direct() {
     let (typed, env, ctors, grades) = typed_from_program(MIXED);
-    let flags = DynFlags::default();
+    let flags = cascade_flags();
     let prepared = prepare(typed.clone(), &env, &ctors, &flags, &grades)
         .expect("convention preparation succeeds");
     let clone = prepared
@@ -115,12 +124,12 @@ fn pure_and_unrolled_controls_pin_the_expected_tiers_and_outputs() {
         (
             "unrolled",
             UNROLLED,
-            EffectStrategy::Evidence,
+            EffectStrategy::StateFusion,
             "[2, 3, 4][8, 10]",
         ),
     ] {
         let (typed, env, ctors, grades) = typed_from_program(source);
-        let lowered = lower_effects(typed, &env, &ctors, &DynFlags::default(), &grades)
+        let lowered = lower_effects(typed, &env, &ctors, &cascade_flags(), &grades)
             .unwrap_or_else(|error| panic!("{name} control lowers: {error}"));
         assert_eq!(lowered.strategy(), strategy, "{name} control tier");
 
@@ -148,7 +157,7 @@ fn main() =
   print("ok")
 "#;
     let (typed, env, ctors, grades) = typed_from_program(source);
-    let prepared = prepare(typed, &env, &ctors, &DynFlags::default(), &grades)
+    let prepared = prepare(typed, &env, &ctors, &cascade_flags(), &grades)
         .expect("single-convention preparation succeeds");
     assert!(
         prepared

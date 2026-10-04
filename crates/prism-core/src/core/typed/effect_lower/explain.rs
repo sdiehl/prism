@@ -132,7 +132,6 @@ fn region(
 ) -> Option<BTreeSet<Sym>> {
     match strategy {
         EffectStrategy::Pure
-        | EffectStrategy::Evidence
         | EffectStrategy::StateFusion
         | EffectStrategy::WholeProgramFreeMonad => None,
         EffectStrategy::LocalPartial => {

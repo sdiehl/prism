@@ -4,7 +4,9 @@
 // decides nothing of its own, so these check that each sentence tracks the fact
 // it claims, across rungs and across causes, plus determinism.
 
-use prism::{dump, with_prelude, EffectStrategy};
+use std::path::Path;
+
+use prism::{default_roots, dump, dump_on, with_prelude, Config, EffectStrategy};
 
 fn explain(src: &str) -> String {
     dump("tier-explain", &with_prelude(src)).expect("tier-explain")
@@ -30,10 +32,11 @@ fn main() = println(double(21))
 // `run_counter` discharges them at its handler.
 const STATE_SRC: &str = include_str!("../../examples/eff_state.pr");
 
-// An escaping `Log` component sharing a program with a fused stream pipeline:
-// the region is carved around the escape, so this program has both definitions
-// on the rung and definitions off it.
-const LOCAL_SRC: &str = include_str!("../../tests/cases/run/local_mono_combined.pr");
+// An escaping multishot component sharing a program with a fused stream
+// pipeline: the region is carved around the escape, so this program has both
+// definitions on the rung and definitions off it. Its clause resumes twice,
+// which is what keeps the escape from folding into an accumulator.
+const LOCAL_SRC: &str = include_str!("../../tests/cases/run/local_mono_multishot.pr");
 
 // The cheapest rung is explained too, and says that nothing was recorded against
 // it rather than staying silent.
@@ -78,25 +81,48 @@ fn performing_and_handling_are_different_causes() {
 // got.
 #[test]
 fn confined_region_names_the_escape_and_the_definitions_outside_it() {
-    let out = explain(LOCAL_SRC);
+    let mut config = Config::default();
+    config.update_flags(|flags| {
+        flags.consolidate = false;
+        flags.reify = false;
+    });
+    let out = dump_on(
+        "tier-explain",
+        &with_prelude(LOCAL_SRC),
+        &default_roots(Path::new(".")),
+        &config,
+    )
+    .expect("legacy tier explanation");
     let rung = EffectStrategy::LocalPartial.to_string();
     assert!(
-        line(&out, "program").contains(&format!("lowered to {rung} because `logged`"))
+        line(&out, "program").contains(&format!("lowered to {rung} because `peeked`"))
             && line(&out, "program").contains("escape"),
         "the program sentence must name the escaping definition:\n{out}"
     );
     assert!(
-        line(&out, "logged").contains(&format!("lowered to {rung}")),
+        line(&out, "peeked").contains(&format!("lowered to {rung}")),
         "the escaping definition is in the region:\n{out}"
     );
     assert!(
-        line(&out, "square").contains(&format!("stays off the {rung} path")),
+        line(&out, "double").contains(&format!("stays off the {rung} path")),
         "a definition outside the region must not claim the rung:\n{out}"
     );
     assert!(
         line(&out, "smap").contains("captures an effectful computation"),
         "a capturing definition must report its capture:\n{out}"
     );
+}
+
+#[test]
+fn escaping_computations_use_the_consolidated_route_by_default() {
+    let out = explain(LOCAL_SRC);
+    let rung = EffectStrategy::StateFusion.to_string();
+    for name in ["program", "peeked", "double"] {
+        assert!(
+            line(&out, name).contains(&format!("lowered to {rung}")),
+            "{out}"
+        );
+    }
 }
 
 // Every sentence is one of the two forms, and every definition the plan covers

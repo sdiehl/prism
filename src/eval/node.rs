@@ -49,6 +49,8 @@ pub enum Node {
     Bump(Vec<Atom>),
     ArenaEnter,
     ArenaExit(Vec<Atom>),
+    DriveEnter,
+    DriveLeave(Vec<Atom>),
 }
 
 #[derive(Debug)]
@@ -179,6 +181,14 @@ fn node(c: &Comp, runtime: bool) -> Node {
         Comp::StrBuiltin(Builtin::ArenaEnter, _) if runtime => Node::ArenaEnter,
         Comp::StrBuiltin(Builtin::ArenaExit, args) if runtime => {
             Node::ArenaExit(args.iter().map(|value| atom_of(value, runtime)).collect())
+        }
+        // The stack-budget brackets the effect trampoline emits around a tail
+        // hop the native code cannot make a tail call. The verifier's frames
+        // live on the heap, so it has no budget to spend: enter always grants
+        // a unit and leave passes the hop's result through, both unobservable.
+        Comp::StrBuiltin(Builtin::DriveEnter, _) if runtime => Node::DriveEnter,
+        Comp::StrBuiltin(Builtin::DriveLeave, args) if runtime => {
+            Node::DriveLeave(args.iter().map(|value| atom_of(value, runtime)).collect())
         }
         Comp::StrBuiltin(n, args) => Node::StrBuiltin(
             *n,

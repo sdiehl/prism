@@ -1,0 +1,5 @@
+type Cell = Cell(Int)
+
+fn rebuild(x : Cell) : Cell @ noalloc =
+  match x of
+    Cell(n) => Cell(n)

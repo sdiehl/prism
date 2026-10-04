@@ -44,7 +44,11 @@ def run_filtered(
         text=True,
         check=False,
     )
-    matches = [line for line in result.stdout.splitlines() if pattern.search(line)]
+    matches = (
+        result.stdout.splitlines()
+        if result.returncode
+        else [line for line in result.stdout.splitlines() if pattern.search(line)]
+    )
     if matches:
         print(*matches, sep="\n")
     elif clean:

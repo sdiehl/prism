@@ -26,7 +26,6 @@ pub type OpGrades = BTreeMap<Sym, Grade>;
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub enum EffectStrategy {
     Pure,
-    Evidence,
     StateFusion,
     LocalPartial,
     SelectiveFreeMonad,
@@ -56,7 +55,6 @@ impl EffectStrategy {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Pure => "pure",
-            Self::Evidence => "evidence",
             Self::StateFusion => "state-fusion",
             Self::LocalPartial => "local-partial",
             Self::SelectiveFreeMonad => "selective-free-monad",
@@ -88,8 +86,7 @@ impl EffectStrategy {
     /// be missing from the table.
     const fn next_costlier(self) -> Option<Self> {
         match self {
-            Self::Pure => Some(Self::Evidence),
-            Self::Evidence => Some(Self::StateFusion),
+            Self::Pure => Some(Self::StateFusion),
             Self::StateFusion => Some(Self::LocalPartial),
             Self::LocalPartial => Some(Self::SelectiveFreeMonad),
             Self::SelectiveFreeMonad => Some(Self::WholeProgramFreeMonad),

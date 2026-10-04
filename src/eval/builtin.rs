@@ -827,6 +827,9 @@ pub(super) fn str_builtin(b: Builtin, vals: &[Rv], args: &[String]) -> Result<Rv
         (B::ArenaEnter | B::ArenaExit, _) => {
             Err("arena region hooks are native-only and have no interpreter form".into())
         }
+        (B::DriveEnter | B::DriveLeave, _) => {
+            Err("stack-budget hooks are native-only and have no interpreter form".into())
+        }
         // The type-aligned continuation queue the free-monad lowerings thread
         // through `ebind`/`qApply`. The interpreter never emits these (it runs
         // pre-lowering Core), but the lowered-Core observation harness replays

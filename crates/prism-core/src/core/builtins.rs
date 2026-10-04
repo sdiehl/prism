@@ -593,6 +593,17 @@ builtins! {
     // (`() -> Int` and `forall a. (Int, a) -> a`).
     ArenaEnter "arena_enter" "ArenaEnter" 106 RETAG;
     ArenaExit "arena_exit" "ArenaExit" 107 IMM0;
+    // The effect trampoline's stack budget, the same data-dependent bracket as
+    // the arena pair. A tail hop the native code cannot make a tail call nests
+    // while `drive_enter` grants a unit of the runtime's depth budget (it
+    // returns 1 and takes the unit, or 0 when the budget is spent) and defers
+    // to the driver otherwise; `drive_leave` threads the token plus the hop's
+    // result, giving the unit back. The stack a chain of hops holds is bounded
+    // by the budget, and the driver's bounce cell is paid once per budget of
+    // hops instead of once per hop. Signatures are overrides seeded by the
+    // effect ABI (`() -> Int` and `forall e. (Int, Eff e) -> Eff e`).
+    DriveEnter "drive_enter" "DriveEnter" 149 RETAG;
+    DriveLeave "drive_leave" "DriveLeave" 150 IMM0;
     // Baseline 128-bit SIMD (the `src/core/simd.rs` registry, wired to execution).
     // The hash tags are exactly the frozen `SimdOp::hash_tag`s, so content identity
     // matches the pinned registry (`simd_builtin_tags_match_registry` guards it).
@@ -902,6 +913,8 @@ mod tag_tests {
                 (Builtin::Bump, "Bump"),
                 (Builtin::ArenaEnter, "ArenaEnter"),
                 (Builtin::ArenaExit, "ArenaExit"),
+                (Builtin::DriveEnter, "DriveEnter"),
+                (Builtin::DriveLeave, "DriveLeave"),
                 (Builtin::SimdFSplat, "SimdFSplat"),
                 (Builtin::SimdFExtract, "SimdFExtract"),
                 (Builtin::SimdFAdd, "SimdFAdd"),

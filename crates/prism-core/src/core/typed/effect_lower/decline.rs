@@ -22,6 +22,7 @@ const THUNK_BOUNDARY: &str = "thunk-boundary";
 const WORD_CAPTURE: &str = "word-capture";
 const HANDLER_ANSWER: &str = "handler-answer";
 const HANDLER_ARMS: &str = "handler-arms";
+const FORWARDING_RESUME: &str = "forwarding-resume";
 const MEMBER_TAIL: &str = "member-tail";
 const MISSING_ROW: &str = "missing-row";
 const PLAN_MISMATCH: &str = "plan-mismatch";
@@ -60,6 +61,13 @@ pub enum Refusal {
     /// row a clause that never performs leaves empty inside the answered
     /// function type where a performing sibling carries the ambient one.
     HandlerArms,
+    /// A handler that forwards has a clause resuming in tail position. Its
+    /// driver answers in the effect type, so the clause reaches the reified
+    /// resumption through the monadic plumbing and every hop is a closure call
+    /// off the native tail path. Confined, that costs a frame per hop and a
+    /// long-running handled loop exhausts the stack; whole-program lowering
+    /// bounces the same hop through its driver and does not.
+    ForwardingResume,
     /// A region member's tail is not `Eff`-shaped, so its caller would bind a
     /// value that is not a cell.
     MemberTail,
@@ -89,6 +97,7 @@ impl Refusal {
             Self::WordCapture => WORD_CAPTURE,
             Self::HandlerAnswer => HANDLER_ANSWER,
             Self::HandlerArms => HANDLER_ARMS,
+            Self::ForwardingResume => FORWARDING_RESUME,
             Self::MemberTail => MEMBER_TAIL,
             Self::MissingRow => MISSING_ROW,
             Self::PlanMismatch => PLAN_MISMATCH,
@@ -107,6 +116,9 @@ impl Refusal {
             Self::WordCapture => "copies a value that reads a binder the rewrite reified",
             Self::HandlerAnswer => "installs a performing handler that answers with a transformer",
             Self::HandlerArms => "installs a handler whose clauses answer at different types",
+            Self::ForwardingResume => {
+                "installs a forwarding handler whose clause resumes in tail position"
+            }
             Self::MemberTail => "is a region member whose tail is not effect-shaped",
             Self::MissingRow => "has no residual row to write a monadic signature from",
             Self::PlanMismatch => "is named by a region plan the program does not agree with",

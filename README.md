@@ -54,14 +54,14 @@ docker run ghcr.io/sdiehl/prism --version
 
 # Debian / Ubuntu (LLVM repository, then package)
 curl -fsSL https://apt.llvm.org/llvm.sh | sudo bash -s 22
-curl -fLO https://github.com/sdiehl/prism/releases/download/v0.22.0/prism_0.22.0_amd64.deb && sudo apt install ./prism_0.22.0_amd64.deb
+curl -fLO https://github.com/sdiehl/prism/releases/download/v0.23.0/prism_0.23.0_amd64.deb && sudo apt install ./prism_0.23.0_amd64.deb
 
 # Fedora / RHEL
-sudo dnf install https://github.com/sdiehl/prism/releases/download/v0.22.0/prism-0.22.0-1.x86_64.rpm
+sudo dnf install https://github.com/sdiehl/prism/releases/download/v0.23.0/prism-0.23.0-1.x86_64.rpm
 
 # Arch (prebuilt package or local PKGBUILD)
-sudo pacman -U https://github.com/sdiehl/prism/releases/download/v0.22.0/prism-0.22.0-1-x86_64.pkg.tar.zst
-curl -fLO https://github.com/sdiehl/prism/releases/download/v0.22.0/PKGBUILD && makepkg -si
+sudo pacman -U https://github.com/sdiehl/prism/releases/download/v0.23.0/prism-0.23.0-1-x86_64.pkg.tar.zst
+curl -fLO https://github.com/sdiehl/prism/releases/download/v0.23.0/PKGBUILD && makepkg -si
 ```
 
 ### From Source

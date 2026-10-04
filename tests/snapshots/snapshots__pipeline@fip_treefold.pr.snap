@@ -213,12 +213,12 @@ fn relabel(t) =
       return Node(t@2, t@5, t@7)
 
 == fip ==
-[E6080] Type Error: usage check `fip` failed for function `relabel`: recurses in non-tail position (one stack frame per element); make the recursive call a tail call or a tail under a single constructor / addition, or annotate it `fbip`
+[E6075] Type Error: usage check `fip` failed for function `relabel`: in `relabel`, constructor `Leaf` may allocate a fresh cell; numeric operation may allocate a fresh runtime cell; constructor `Node` may allocate a fresh cell
     ╭─[ <source>:10:1 ]
     │
  10 │ ╭─▶ fip fn relabel(t) =
     ┆ ┆   
  13 │ ├─▶     Node(l, x, r) => Node(relabel(l), x + x, relabel(r))
     │ │                                                              
-    │ ╰────────────────────────────────────────────────────────────── usage check `fip` failed for function `relabel`: recurses in non-tail position (one stack frame per element); make the recursive call a tail call or a tail under a single constructor / addition, or annotate it `fbip`
+    │ ╰────────────────────────────────────────────────────────────── usage check `fip` failed for function `relabel`: in `relabel`, constructor `Leaf` may allocate a fresh cell; numeric operation may allocate a fresh runtime cell; constructor `Node` may allocate a fresh cell
 ────╯

@@ -2,8 +2,12 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::core::builtins::Builtin;
+use crate::core::cbpv::CoreOp;
 use crate::core::effect_abi::{BOUNCE_TAG, EBOUNCE, EOP, EPURE, ERESUME};
+use crate::core::tailrec::loops_as_tail_call;
 use crate::types::ty::EffRow;
+use crate::types::Type;
 use prism_common::fixpoint::stabilize;
 use prism_common::fresh::Fresh;
 use prism_common::sym::Sym;
@@ -55,8 +59,15 @@ fn eff_tail(comp: &TypedComp, eff: &BTreeSet<Sym>) -> bool {
             kind: TypedValueKind::Ctor { name, .. },
             ..
         }) => is_eff_ctor(*name),
-        TypedCompKind::Call { callee, .. } => eff.contains(callee),
-        TypedCompKind::App { .. } | TypedCompKind::Force(_) | TypedCompKind::Error(_) => true,
+        TypedCompKind::Call { callee, .. } => {
+            eff.contains(callee) && eff_row(comp.sig().result()).is_some()
+        }
+        // Only a tail that answers a cell can bounce. Whole-program output
+        // answers cells everywhere; beside a threaded island, a function
+        // whose tail applies a closure at another type is not monadic.
+        TypedCompKind::App { .. } | TypedCompKind::Force(_) | TypedCompKind::Error(_) => {
+            eff_row(comp.sig().result()).is_some()
+        }
         TypedCompKind::If(_, yes, no) => eff_tail(yes, eff) && eff_tail(no, eff),
         TypedCompKind::Case(_, arms) => arms.iter().all(|(_, body)| eff_tail(body, eff)),
         TypedCompKind::Bind(_, _, tail) => eff_tail(tail, eff),
@@ -65,9 +76,16 @@ fn eff_tail(comp: &TypedComp, eff: &BTreeSet<Sym>) -> bool {
 }
 
 fn eff_functions(functions: &[TypedCoreFn]) -> BTreeSet<Sym> {
-    // Greatest fixpoint by erosion: assume every function ends in an effect
-    // computation, then evict any whose body cannot, until stable.
-    let all: BTreeSet<Sym> = functions.iter().map(TypedCoreFn::name).collect();
+    // Greatest fixpoint by erosion: assume every function whose signature
+    // answers a cell ends in an effect computation, then evict any whose body
+    // cannot, until stable. A function answering anything else is direct code
+    // whatever it calls in tail position: a cycle of such functions is a
+    // native loop, not a bounce.
+    let all: BTreeSet<Sym> = functions
+        .iter()
+        .filter(|function| eff_row(function.sig().body().result()).is_some())
+        .map(TypedCoreFn::name)
+        .collect();
     stabilize(all, |eff| {
         let mut changed = false;
         for function in functions {
@@ -80,7 +98,123 @@ fn eff_functions(functions: &[TypedCoreFn]) -> BTreeSet<Sym> {
     })
 }
 
-fn bounce(comp: TypedComp) -> Option<TypedComp> {
+/// The effect functions a frame's own tail calls reach. Calls inside thunks
+/// and lambdas run in a later frame that a bounce or a non-tail application
+/// already bounds, so they are edges of no frame.
+fn tail_callees(body: &TypedComp, eff: &BTreeSet<Sym>, out: &mut BTreeSet<Sym>) {
+    match body.kind() {
+        TypedCompKind::Bind(_, _, rest) => tail_callees(rest, eff, out),
+        TypedCompKind::If(_, yes, no) => {
+            tail_callees(yes, eff, out);
+            tail_callees(no, eff, out);
+        }
+        TypedCompKind::Case(_, arms) => {
+            for (_, arm) in arms {
+                tail_callees(arm, eff, out);
+            }
+        }
+        TypedCompKind::Call { callee, .. } if eff.contains(callee) => {
+            out.insert(*callee);
+        }
+        _ => {}
+    }
+}
+
+/// Which effect functions each effect function reaches through direct tail
+/// calls, native tail calls included: a same-arity hop grows no stack itself
+/// but still closes a cycle whose other edges do. A chain of direct tail calls
+/// grows the stack only while it stays inside a cycle, since the acyclic rest
+/// is bounded by the program's own depth, so a hop needs a bounce exactly when
+/// it grows a frame and its callee reaches back to the caller.
+fn tail_reach(functions: &[TypedCoreFn], eff: &BTreeSet<Sym>) -> BTreeMap<Sym, BTreeSet<Sym>> {
+    let edges: BTreeMap<Sym, BTreeSet<Sym>> = functions
+        .iter()
+        .filter(|function| eff.contains(&function.name()))
+        .map(|function| {
+            let mut out = BTreeSet::new();
+            tail_callees(function.body(), eff, &mut out);
+            (function.name(), out)
+        })
+        .collect();
+    stabilize(edges.clone(), |reach| {
+        let mut changed = false;
+        for (name, direct) in &edges {
+            let mut grown = reach[name].clone();
+            for callee in direct {
+                if let Some(further) = reach.get(callee) {
+                    grown.extend(further.iter().copied());
+                }
+            }
+            if grown.len() != reach[name].len() {
+                reach.insert(*name, grown);
+                changed = true;
+            }
+        }
+        changed
+    })
+}
+
+/// Defer a tail hop the native code cannot make a tail call. The hop nests in
+/// a native frame while the runtime grants a unit of its stack budget and goes
+/// to the driver as a bounce cell once the budget is spent, so a chain of hops
+/// holds a bounded number of frames and pays the driver's closure once per
+/// budget of hops rather than once per hop.
+fn bounce(comp: TypedComp, fresh: &mut Fresh) -> Option<TypedComp> {
+    let deferred = defer(comp.clone())?;
+    let int = CoreType::Source(Type::Int);
+    let bool = CoreType::Source(Type::Bool);
+    let mut binder = |stem: &str, ty: CoreType| {
+        TypedBinder::new(Sym::from(names::lowered(stem, fresh.bump())), ty)
+    };
+    let unit = binder("budget", int.clone());
+    let granted = binder("nest", bool.clone());
+    let answer = binder("hop", comp.sig().result().clone());
+    let enter = TypedComp::new(
+        pure(int.clone()),
+        TypedCompKind::StrBuiltin {
+            op: Builtin::DriveEnter,
+            instantiation: Vec::new(),
+            args: Vec::new(),
+        },
+    );
+    let test = TypedComp::new(
+        pure(bool),
+        TypedCompKind::Prim(
+            CoreOp::Gt,
+            var(&unit),
+            TypedValue::new(int, TypedValueKind::Int(0)),
+        ),
+    );
+    let row = eff_row(comp.sig().result())?;
+    let leave = TypedComp::new(
+        pure(answer.ty().clone()),
+        TypedCompKind::StrBuiltin {
+            op: Builtin::DriveLeave,
+            instantiation: abi::row_instantiation(row),
+            args: vec![var(&unit), var(&answer)],
+        },
+    );
+    let signature = comp.sig().clone();
+    let nested = TypedComp::new(
+        signature.clone(),
+        TypedCompKind::Bind(Box::new(comp), answer, Box::new(leave)),
+    );
+    let chosen = TypedComp::new(
+        signature.clone(),
+        TypedCompKind::If(var(&granted), Box::new(nested), Box::new(deferred)),
+    );
+    let tested = TypedComp::new(
+        signature.clone(),
+        TypedCompKind::Bind(Box::new(test), granted, Box::new(chosen)),
+    );
+    Some(TypedComp::new(
+        signature,
+        TypedCompKind::Bind(Box::new(enter), unit, Box::new(tested)),
+    ))
+}
+
+/// The driver's bounce cell for a hop: a thunk of the hop under `EBounce`.
+fn defer(comp: TypedComp) -> Option<TypedComp> {
     let row = eff_row(comp.sig().result())?;
     let signature = CoreFnSig::new(Vec::new(), Vec::new(), comp.sig().clone());
     let lambda = TypedComp::new(
@@ -179,6 +313,8 @@ pub fn prism_drive_fn() -> TypedCoreFn {
 
 struct Tr<'a> {
     eff: &'a BTreeSet<Sym>,
+    reach: &'a BTreeMap<Sym, BTreeSet<Sym>>,
+    current: Sym,
     arity: &'a BTreeMap<Sym, usize>,
     fresh: &'a mut Fresh,
     current_arity: usize,
@@ -186,7 +322,17 @@ struct Tr<'a> {
 
 impl Tr<'_> {
     fn native_tail(&self, callee: Sym, arguments: usize) -> bool {
-        self.arity.get(&callee) == Some(&arguments) && arguments == self.current_arity
+        self.arity
+            .get(&callee)
+            .is_some_and(|&arity| loops_as_tail_call(arguments, arity, self.current_arity))
+    }
+
+    /// Whether a tail call to `callee` lies on a cycle through the current
+    /// function, so that repeating it can grow the stack without bound.
+    fn closes_cycle(&self, callee: Sym) -> bool {
+        self.reach
+            .get(&callee)
+            .is_some_and(|reachable| reachable.contains(&self.current))
     }
 
     fn value(&mut self, value: &TypedValue) -> Option<TypedValue> {
@@ -407,7 +553,7 @@ impl Tr<'_> {
                     },
                 );
                 if tail && context {
-                    bounce(application)?
+                    bounce(application, self.fresh)?
                 } else {
                     application
                 }
@@ -441,10 +587,10 @@ impl Tr<'_> {
                 );
                 if tail
                     && context
-                    && self.eff.contains(callee)
+                    && self.closes_cycle(*callee)
                     && !self.native_tail(*callee, args.len())
                 {
-                    bounce(call)?
+                    bounce(call, self.fresh)?
                 } else {
                     call
                 }
@@ -582,19 +728,24 @@ impl Tr<'_> {
     }
 }
 
-/// Bounce only tail hops that cannot already use the native same-arity fast path.
+/// Bounce the tail hops that can grow the stack without bound: closure
+/// applications, and direct calls into a tail-call cycle that the native
+/// same-arity fast path does not close.
 pub fn trampolinize(functions: &[TypedCoreFn], fresh: &mut Fresh) -> Option<Vec<TypedCoreFn>> {
     let eff = eff_functions(functions);
     let arity: BTreeMap<Sym, usize> = functions
         .iter()
         .map(|function| (function.name(), function.params().len()))
         .collect();
+    let reach = tail_reach(functions, &eff);
     functions
         .iter()
         .map(|function| {
             let context = eff_tail(function.body(), &eff);
             let mut rewrite = Tr {
                 eff: &eff,
+                reach: &reach,
+                current: function.name(),
                 arity: &arity,
                 fresh,
                 current_arity: function.params().len(),
@@ -641,7 +792,7 @@ mod tests {
     }
 
     #[test]
-    fn cross_arity_and_closure_hops_bounce_but_native_tail_calls_do_not() {
+    fn cyclic_cross_arity_and_closure_hops_bounce_but_acyclic_and_native_tail_calls_do_not() {
         let finish_body = abi::epure(abi::lowered_repr(int_value(7), abi::word()), EffRow::Empty);
         let finish = TypedCoreFn::new(
             Sym::from("finish"),
@@ -714,9 +865,42 @@ mod tests {
             0,
         );
 
+        let y = TypedBinder::new(Sym::from("y"), int());
+        let ping_body = TypedComp::new(
+            pure(abi::eff(EffRow::Empty)),
+            TypedCompKind::Call {
+                callee: Sym::from("pong"),
+                instantiation: Vec::new(),
+                args: Vec::new(),
+            },
+        );
+        let ping = TypedCoreFn::new(
+            Sym::from("ping"),
+            vec![y],
+            ping_body,
+            eff_signature(vec![int()]),
+            0,
+        );
+        let echo_body = TypedComp::new(
+            pure(abi::eff(EffRow::Empty)),
+            TypedCompKind::Call {
+                callee: Sym::from("ping"),
+                instantiation: Vec::new(),
+                args: vec![int_value(1)],
+            },
+        );
+        let echo = TypedCoreFn::new(
+            Sym::from("pong"),
+            Vec::new(),
+            echo_body,
+            eff_signature(Vec::new()),
+            0,
+        );
+
         let mut fresh = Fresh::new();
-        let mut rewritten = trampolinize(&[finish, hop, native_loop, apply], &mut fresh)
-            .expect("the typed trampoline rewrites every function");
+        let mut rewritten =
+            trampolinize(&[finish, hop, native_loop, apply, ping, echo], &mut fresh)
+                .expect("the typed trampoline rewrites every function");
         rewritten.push(prism_drive_fn());
         let mut env = VerifyEnv::new();
         abi::insert(&mut env);
@@ -724,27 +908,102 @@ mod tests {
             .expect("trampolined program verifies");
         let erased = typed.erase();
 
+        // A bounced hop opens the runtime's stack budget before anything else.
+        let bounces = |body: &Comp| {
+            matches!(
+                body,
+                Comp::Bind(head, _, _) if matches!(**head, Comp::StrBuiltin(Builtin::DriveEnter, _))
+            )
+        };
+        // A cross-arity hop that reaches no cycle is a bounded direct call.
         assert!(matches!(
             erased.fns[1].body,
-            Comp::Return(Value::Ctor(name, BOUNCE_TAG, _)) if name.as_str() == EBOUNCE
+            Comp::Call(name, _) if name.as_str() == "finish"
         ));
         assert!(matches!(
             erased.fns[2].body,
             Comp::Call(name, _) if name.as_str() == "loop"
         ));
+        assert!(bounces(&erased.fns[3].body));
+        // A cross-arity cycle bounces at each of its members.
+        assert!(bounces(&erased.fns[4].body));
+        assert!(bounces(&erased.fns[5].body));
+    }
+
+    #[test]
+    fn a_cycle_closed_by_a_native_tail_call_bounces_only_its_growing_edges() {
+        let x = TypedBinder::new(Sym::from("x"), int());
+        let y = TypedBinder::new(Sym::from("y"), int());
+        let call = |callee: &str, args: Vec<TypedValue>| {
+            TypedComp::new(
+                pure(abi::eff(EffRow::Empty)),
+                TypedCompKind::Call {
+                    callee: Sym::from(callee),
+                    instantiation: Vec::new(),
+                    args,
+                },
+            )
+        };
+        let first = TypedCoreFn::new(
+            Sym::from("first"),
+            vec![x.clone()],
+            call("second", vec![var(&x)]),
+            eff_signature(vec![int()]),
+            0,
+        );
+        let second = TypedCoreFn::new(
+            Sym::from("second"),
+            vec![x.clone()],
+            call("third", vec![var(&x), int_value(1)]),
+            eff_signature(vec![int()]),
+            0,
+        );
+        let third = TypedCoreFn::new(
+            Sym::from("third"),
+            vec![x.clone(), y],
+            call("first", vec![var(&x)]),
+            eff_signature(vec![int(), int()]),
+            0,
+        );
+        let mut fresh = Fresh::new();
+        let mut rewritten = trampolinize(&[first, second, third], &mut fresh).expect("rewrites");
+        rewritten.push(prism_drive_fn());
+        let mut env = VerifyEnv::new();
+        abi::insert(&mut env);
+        let typed = verify(UncheckedTypedCore::<EffectLowered>::new(rewritten), &env)
+            .expect("the mixed cycle verifies");
+        let erased = typed.erase();
+        let bounces = |body: &Comp| {
+            matches!(
+                body,
+                Comp::Bind(head, _, _) if matches!(**head, Comp::StrBuiltin(Builtin::DriveEnter, _))
+            )
+        };
+        // The same-arity edge is a native tail call and grows nothing.
         assert!(matches!(
-            erased.fns[3].body,
-            Comp::Return(Value::Ctor(name, BOUNCE_TAG, _)) if name.as_str() == EBOUNCE
+            erased.fns[0].body,
+            Comp::Call(name, _) if name.as_str() == "second"
         ));
+        // The two cross-arity edges each grow a frame around the cycle.
+        assert!(bounces(&erased.fns[1].body));
+        assert!(bounces(&erased.fns[2].body));
     }
 
     #[test]
     fn a_nonempty_residual_row_survives_the_bounce_witness() {
         let row = EffRow::singleton("IO");
+        // A cross-arity cycle, so the hop is one the native tail call cannot close.
         let finish = TypedCoreFn::new(
             Sym::from("finish_io"),
             Vec::new(),
-            abi::epure(abi::lowered_repr(int_value(7), abi::word()), row.clone()),
+            TypedComp::new(
+                CompSig::new(abi::eff(row.clone()), row.clone()),
+                TypedCompKind::Call {
+                    callee: Sym::from("hop_io"),
+                    instantiation: Vec::new(),
+                    args: vec![int_value(7)],
+                },
+            ),
             eff_signature_at(Vec::new(), row.clone()),
             0,
         );
@@ -765,6 +1024,16 @@ mod tests {
         );
         let mut rewritten =
             trampolinize(&[finish, hop], &mut Fresh::new()).expect("the residual-row hop rewrites");
+        // The deferred cell sits past the budget bracket: enter, test, choose.
+        let TypedCompKind::Bind(_, _, tested) = rewritten[1].body().kind() else {
+            panic!("the cross-arity tail opens the stack budget")
+        };
+        let TypedCompKind::Bind(_, _, chosen) = tested.kind() else {
+            panic!("the budget grant is tested")
+        };
+        let TypedCompKind::If(_, _, deferred) = chosen.kind() else {
+            panic!("the hop nests or defers on the grant")
+        };
         let TypedCompKind::Return(TypedValue {
             kind:
                 TypedValueKind::Ctor {
@@ -773,9 +1042,9 @@ mod tests {
                     ..
                 },
             ..
-        }) = rewritten[1].body().kind()
+        }) = deferred.kind()
         else {
-            panic!("the cross-arity tail must be an EBounce return")
+            panic!("the deferred hop must be an EBounce return")
         };
         assert_eq!(name.as_str(), EBOUNCE);
         assert_eq!(instantiation, &abi::row_instantiation(row));
@@ -878,9 +1147,9 @@ mod tests {
             pure(abi::eff(EffRow::Empty)),
             TypedCompKind::Case(var(&current), arms()),
         );
-        let bounced = bounce(stored_case).expect("the stored case returns Eff");
+        let bounced = defer(stored_case).expect("the stored case returns Eff");
         let TypedCompKind::Return(scrutinee) = bounced.kind() else {
-            unreachable!("bounce returns its EBounce cell")
+            unreachable!("defer returns its EBounce cell")
         };
         let outer_case = TypedComp::new(
             pure(abi::eff(EffRow::Empty)),

@@ -1,6 +1,6 @@
 //! Typed effect lowering: the `Elaborated -> EffectLowered` phase transition.
 //!
-//! An explicit, witness-preserving builder consumes the input evidence, runs
+//! An explicit, witness-preserving builder consumes the input witnesses, runs
 //! the strategy cascade, and verifies the output against the extended
 //! environment before the `EffectLowered` marker is stamped; the marker is
 //! never forged around an unverified tree. This verified typed result,
@@ -9,9 +9,8 @@
 //! erased observable behavior without a second lowering implementation.
 //!
 //! The supported set includes pure lowering, local-variable and loop-control
-//! erasure, evidence lowering, and the selective/whole-program free-monad
-//! strategies, including State fusion on its own and as the fused half of
-//! `LocalPartial`.
+//! erasure, and the selective/whole-program free-monad strategies, including
+//! State fusion on its own and as the fused half of `LocalPartial`.
 
 #[cfg(any(test, feature = "test-hooks"))]
 use std::cell::Cell;
@@ -26,14 +25,15 @@ mod convention;
 pub mod decline;
 pub mod diagnostics;
 mod erase_control;
+mod erase_nontail;
 mod erase_var;
-pub mod evidence;
 pub mod explain;
 #[cfg(test)]
 pub mod fixtures;
 pub mod flow;
 pub mod latent;
 pub mod monadic;
+pub mod ops;
 pub mod plan;
 pub mod residual;
 pub mod state;
@@ -83,6 +83,9 @@ pub struct TypedLowering {
     /// one was attempted and refused. The plan artifact renders it, so a tier
     /// nobody expected can be read back to the shape that caused it.
     confined_decline: Option<Decline>,
+    /// Why the state engine declined before this strategy was taken, when it
+    /// was tried and declined.
+    state_decline: Option<String>,
 }
 
 #[derive(Debug)]
@@ -92,6 +95,7 @@ struct LoweringFacts {
     warning: Option<String>,
     strategy: EffectStrategy,
     confined_decline: Option<Decline>,
+    state_decline: Option<String>,
 }
 
 /// A downstream pass failed, or its output did not verify under the lowering's
@@ -173,6 +177,7 @@ impl TypedLowering {
                 warning: self.warning,
                 strategy: self.strategy,
                 confined_decline: self.confined_decline,
+                state_decline: self.state_decline,
             },
         )
     }
@@ -211,6 +216,12 @@ impl TypedLowering {
     #[must_use]
     pub const fn confined_decline(&self) -> Option<&Decline> {
         self.confined_decline.as_ref()
+    }
+
+    /// Why the state engine declined this program, when it was tried and did.
+    #[must_use]
+    pub fn state_decline(&self) -> Option<&str> {
+        self.state_decline.as_deref()
     }
 
     /// Rewrite the program while keeping it paired with the verifier context
@@ -278,6 +289,7 @@ impl LoweringFacts {
             warning: self.warning,
             strategy: self.strategy,
             confined_decline: self.confined_decline,
+            state_decline: self.state_decline,
         }
     }
 
@@ -379,6 +391,7 @@ mod transition_tests {
             warning: None,
             strategy: EffectStrategy::Pure,
             confined_decline: None,
+            state_decline: None,
         }
     }
 
@@ -625,14 +638,12 @@ fn prepare_on_core_stack(
 /// # Errors
 /// [`TypedCoreEffectLoweringFailure::Internal`] when the program declares more
 /// operations than an `i64` can number.
-pub fn operation_ids(
-    fns: &[TypedCoreFn],
-) -> Result<evidence::OpIds, TypedCoreEffectLoweringFailure> {
+pub fn operation_ids(fns: &[TypedCoreFn]) -> Result<ops::OpIds, TypedCoreEffectLoweringFailure> {
     let mut ops = BTreeSet::new();
     for f in fns {
         walk::collect_ops(f.body(), &mut ops);
     }
-    evidence::OpIds::assign(&ops).ok_or_else(|| TypedCoreEffectLoweringFailure::Internal {
+    ops::OpIds::assign(&ops).ok_or_else(|| TypedCoreEffectLoweringFailure::Internal {
         msg: "more than i64::MAX effect ops".into(),
     })
 }
@@ -656,8 +667,18 @@ pub fn threaded_state_typed(
     let options = EffectLowerOptions::from(flags);
     let prepared = prepare_with_options(core, env, ctors, &options, grades)?;
     let ops = operation_ids(&prepared.fns)?;
-    let latent = latent::latent_map(&prepared.fns);
-    let thunk_flow = flow::analyze(&prepared.fns, &latent);
+    // The state rung reads the off-tail threading, as it does in the cascade.
+    let fns = if options.thread_nontail() {
+        erase_nontail::erase_nontail_resumes(&prepared.fns)
+    } else {
+        prepared.fns
+    };
+    let carriers = if options.consolidate() {
+        flow::Carriers::of(&prepared.env)
+    } else {
+        flow::Carriers::none()
+    };
+    let (latent, thunk_flow) = flow::deep_latent(&fns, &carriers);
     let mut env = prepared.env;
     // The Step constructors an early-exit lowering mints must be on the
     // verifier's tables. State threading is the Elaborated -> EffectLowered
@@ -665,16 +686,24 @@ pub fn threaded_state_typed(
     // LoweredRepr in its output is legal by the output phase alone; no monadic
     // constructor universe is installed, because a pure state output emits none.
     erase_control::insert_step_constructors(&mut env);
-    let analysis = state::StateAnalysis::new(&ops, &latent, &thunk_flow, &env);
-    let Some(plan) = state::fold_uniform(&prepared.fns, &analysis) else {
+    let analysis = state::StateAnalysis::new(
+        &ops,
+        &latent,
+        &thunk_flow,
+        &env,
+        BTreeSet::new(),
+        options.consolidate(),
+        options.reify(),
+    );
+    let Some(plan) = state::fold_uniform(&fns, &analysis) else {
         return Ok(None);
     };
-    if !state::threads(&plan, &prepared.fns, &analysis) {
+    if !state::threads(&plan, &fns, &analysis) {
         return Ok(None);
     }
     let mut fresh = prism_common::fresh::Fresh::new();
-    let Some(fns) = state::thread_program(
-        &prepared.fns,
+    let Some(state::Threaded { functions, env }) = state::thread_program(
+        &fns,
         &plan,
         &analysis,
         &DriftLog::new(options.quiet()),
@@ -682,7 +711,7 @@ pub fn threaded_state_typed(
     ) else {
         return Ok(None);
     };
-    verify(UncheckedTypedCore::<EffectLowered>::new(fns), &env)
+    verify(UncheckedTypedCore::<EffectLowered>::new(functions), &env)
         .map(|core| Some((core, env)))
         .map_err(|violations| verification_failure(&violations))
 }
@@ -703,50 +732,154 @@ fn cascade(
         return lowered(fns, env, ctors, None, EffectStrategy::Pure, None);
     }
 
-    // The evidence rung: the Identity answer, tried first because it reifies
-    // the least. It fully succeeds or declines with no state to undo. A floor
-    // above it skips it to request a later rung directly.
     let ops = operation_ids(&fns)?;
     let latent = latent::latent_map(&fns);
     let thunk_flow = flow::analyze(&fns, &latent);
     let plan = EffectPlan::from_parts(&fns, latent, thunk_flow);
-    let (latent, thunk_flow) = (plan.latent(), plan.flow());
-    let state_analysis = state::StateAnalysis::new(&ops, latent, thunk_flow, env);
     let drift = DriftLog::new(options.quiet());
     let mut fresh = prism_common::fresh::Fresh::new();
-    if options.rung_enabled(EffectStrategy::Evidence) {
-        if let Some(threaded) =
-            evidence::try_lower_ev(&fns, latent, thunk_flow, &ops, env, &drift, &mut fresh)
-        {
-            return lowered(threaded, env, ctors, None, EffectStrategy::Evidence, None);
-        }
-    }
+
+    // The consolidated route sees the program with every operation that
+    // reaches the entry point handled there, so a program that lets an
+    // operation escape to `main` has the shape of one whose `main` handles it.
+    let carriers = if options.consolidate() {
+        flow::Carriers::of(env)
+    } else {
+        flow::Carriers::none()
+    };
+    // The work a clause does after resuming is a function of the handler's one
+    // answer type, so it composes into an accumulator and the clause folds like
+    // any other. That rewrite exists to serve the fold, and only the fold: it
+    // buys one composed closure per off-tail resumption, which is a win when it
+    // unlocks the accumulator and a pure loss on a program that goes on to
+    // reify a continuation anyway. So the state rung reads the threaded tree
+    // and every rung below reads the tree as written.
+    let nontail = options
+        .thread_nontail()
+        .then(|| erase_nontail::erase_nontail_resumes(&fns));
+    let source = nontail.as_ref().map_or(fns.as_slice(), Vec::as_slice);
+    let instantiated = if options.consolidate() {
+        state::instantiate_carriers(source)
+    } else {
+        None
+    };
+    let base = instantiated.as_ref().map_or(source, Vec::as_slice);
+    let (state_latent, state_flow) = flow::deep_latent(base, &carriers);
+    let discharged = if options.consolidate() {
+        state::discharge_entry(base, &state_latent, env)
+    } else {
+        None
+    };
+    let state_fns = discharged.as_ref().map_or(base, |d| d.fns.as_slice());
+    let entry = discharged
+        .as_ref()
+        .map_or_else(BTreeSet::new, |d| d.ops.clone());
+    let (state_latent, state_flow) = discharged.as_ref().map_or((state_latent, state_flow), |d| {
+        flow::deep_latent(&d.fns, &carriers)
+    });
+    let state_analysis = state::StateAnalysis::new(
+        &ops,
+        &state_latent,
+        &state_flow,
+        env,
+        entry,
+        options.consolidate(),
+        options.reify(),
+    );
 
     // The state rung: the State answer, for a program whose consumer handles its
-    // operation by parameter passing (so its clause is not tail-resumptive and
-    // the evidence rung above declined).
+    // operation by parameter passing, carrying an accumulator from one
+    // operation to the next.
     //
     // A program can pass the gate and still decline below it: fold-uniformity
     // comes first, then the value-coincidence the threading runs under. Both
     // fall through to the next rung rather than failing, because a decline here
     // is a program this engine does not fit, not a defect.
     if options.rung_enabled(EffectStrategy::StateFusion) {
-        if let Some(plan) = state::fold_uniform(&fns, &state_analysis) {
-            if state::threads(&plan, &fns, &state_analysis) {
-                if let Some(threaded) =
-                    state::thread_program(&fns, &plan, &state_analysis, &drift, &mut fresh)
+        if let Some(plan) = state::fold_uniform(state_fns, &state_analysis) {
+            if state::threads(&plan, state_fns, &state_analysis) {
+                // A reified operation answers with a cell, so the queue
+                // combinators the cells are composed with come along and the
+                // constructor tables have to name them. A reified island
+                // resumes by applying its queue and re-entering its driver,
+                // and the cells compose through `ebind`: every hop is a call,
+                // so a long forwarding chain runs the stack out unless the
+                // hops bounce. The island is trampolined exactly as the
+                // whole-program route is, and a trampoline refusal is a
+                // decline of this route, not a program the cascade cannot
+                // lower.
+                let reified = !plan.reified.is_empty();
+                let threaded = if reified && !options.trampoline() {
+                    // Without the trampoline no reified cycle runs in constant
+                    // stack, so the route refuses rather than lower a program
+                    // whose termination depends on its depth.
+                    state_analysis.decline("a reified island without the trampoline")
+                } else {
+                    state::thread_program(state_fns, &plan, &state_analysis, &drift, &mut fresh)
+                        .and_then(|mut threaded| {
+                            if !reified {
+                                return Some(threaded);
+                            }
+                            threaded.functions.push(abi::ebind_fn());
+                            threaded.functions.push(abi::qapply_fn());
+                            let Some(mut driven) =
+                                trampoline::trampolinize(&threaded.functions, &mut fresh)
+                            else {
+                                return state_analysis
+                                    .decline("a reified island the trampoline declines");
+                            };
+                            driven.push(trampoline::prism_drive_fn());
+                            Some(state::Threaded {
+                                functions: driven,
+                                env: threaded.env,
+                            })
+                        })
+                };
+                if let Some(state::Threaded {
+                    functions: threaded,
+                    env,
+                }) = threaded
                 {
-                    let mut lowered_env = env.clone();
-                    let mut lowered_ctors = ctors.clone();
-                    install_step_runtime(&threaded, &mut lowered_env, &mut lowered_ctors);
-                    return lowered(
-                        threaded,
+                    // The threaded program reads and builds every constructor
+                    // field at its stored convention, and is checked against
+                    // the declaration it carries, the one it was built under.
+                    let (mut lowered_env, mut lowered_ctors) = if reified {
+                        install_monadic_runtime(&threaded, &env, ctors, true)
+                    } else {
+                        (env, ctors.clone())
+                    };
+                    if !reified {
+                        install_step_runtime(&threaded, &mut lowered_env, &mut lowered_ctors);
+                    }
+                    // Lower or decline, never a third answer. A threaded program
+                    // the verifier refuses is a shape this engine reads wrongly,
+                    // and the rungs below still lower it correctly, so the
+                    // refusal is recorded where every other decline is and the
+                    // cascade continues instead of failing the compile.
+                    match verify(
+                        UncheckedTypedCore::<EffectLowered>::new(threaded),
                         &lowered_env,
-                        &lowered_ctors,
-                        None,
-                        EffectStrategy::StateFusion,
-                        None,
-                    );
+                    ) {
+                        Ok(core) => {
+                            return Ok(Decision::Lowered(Box::new(TypedLowering {
+                                core,
+                                env: lowered_env,
+                                ctors: lowered_ctors,
+                                warning: None,
+                                strategy: EffectStrategy::StateFusion,
+                                confined_decline: None,
+                                state_decline: None,
+                            })));
+                        }
+                        Err(violations) => {
+                            let _: Option<()> = state_analysis.decline(format!(
+                                "a threaded program the verifier refuses: {}",
+                                violations
+                                    .first()
+                                    .map_or_else(String::new, ToString::to_string)
+                            ));
+                        }
+                    }
                 }
             }
         }
@@ -758,7 +891,7 @@ fn cascade(
     };
     if options.rung_enabled(EffectStrategy::LocalPartial) {
         if let Some(local) = try_local_partial(&fns, env, ctors, &analysis, &drift, &mut fresh)? {
-            return Ok(local);
+            return Ok(with_state_decline(local, &state_analysis));
         }
     }
 
@@ -767,14 +900,14 @@ fn cascade(
     // retains every name consumed by that attempt, matching the executable
     // pass's late-decline behavior.
     monadic_fallback_with_options(&fns, env, ctors, options, &analysis, &mut fresh)
+        .map(|decision| with_state_decline(decision, &state_analysis))
 }
 
-/// What every rung below the evidence engine reads: the operation numbering the
-/// whole prepared program shares, and the one plan that answers reachability and
-/// purity for it.
+/// What every rung reads: the operation numbering the whole prepared program
+/// shares, and the one plan that answers reachability and purity for it.
 #[derive(Debug)]
 pub struct LoweringAnalysis<'a> {
-    pub ops: &'a evidence::OpIds,
+    pub ops: &'a ops::OpIds,
     pub plan: &'a EffectPlan,
 }
 
@@ -947,29 +1080,29 @@ fn try_local_partial(
         .filter(|function| !region.contains(&function.name()))
         .cloned()
         .collect();
-    let fused = if let Some(fused) = evidence::try_lower_ev(
-        &rest,
-        analysis.latent(),
-        analysis.flow(),
-        analysis.ops,
-        env,
-        drift,
-        fresh,
-    ) {
-        fused
-    } else {
-        let state_analysis =
-            state::StateAnalysis::new(analysis.ops, analysis.latent(), analysis.flow(), env);
+    let fused = {
+        let (state_latent, state_flow) = flow::deep_latent(fns, &flow::Carriers::none());
+        let state_analysis = state::StateAnalysis::new(
+            analysis.ops,
+            &state_latent,
+            &state_flow,
+            env,
+            BTreeSet::new(),
+            false,
+            false,
+        );
         let Some(plan) = state::fold_uniform(&rest, &state_analysis) else {
             return Ok(None);
         };
         if !state::threads(&plan, &rest, &state_analysis) {
             return Ok(None);
         }
-        let Some(fused) = state::thread_program(&rest, &plan, &state_analysis, drift, fresh) else {
+        let Some(state::Threaded { functions, .. }) =
+            state::thread_program(&rest, &plan, &state_analysis, drift, fresh)
+        else {
             return Ok(None);
         };
-        fused
+        functions
     };
     #[cfg(any(test, feature = "test-hooks"))]
     if declines_at(LocalDeclinePoint::AfterRestFusion) {
@@ -1329,7 +1462,15 @@ fn lowered(
         warning,
         strategy,
         confined_decline,
+        state_decline: None,
     })))
+}
+
+/// Attach the state engine's recorded refusal to a decision a later rung made.
+fn with_state_decline(mut decision: Decision, analysis: &state::StateAnalysis<'_>) -> Decision {
+    let Decision::Lowered(lowering) = &mut decision;
+    lowering.state_decline = analysis.declined();
+    decision
 }
 
 // The functions reachable from the entry point, over direct calls and

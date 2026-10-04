@@ -1,0 +1,54 @@
+-- A carrier stored through a generic constructor argument, forced under
+-- handlers on each channel: alone on the value channel, beside an
+-- accumulator-channel operation it also performs, and from inside a scope
+-- threading an accumulator it never touches. Every tier must hand the stored
+-- callable exactly the evidence its position declares.
+
+effect Gen
+  gen() : Int
+
+effect Tick
+  tick() : Int
+
+type Box(a) = Box(a)
+
+fn stored_gen() : Box(() -> Int ! {Gen}) = Box(\() -> gen() + gen())
+
+fn stored_both() : Box(() -> Int ! {Gen, Tick}) = Box(\() -> gen() + tick())
+
+fn force_gen(b : Box(() -> Int ! {Gen})) : Int ! {Gen} =
+  match b of
+    Box(f) => f()
+
+fn force_both(b : Box(() -> Int ! {Gen, Tick})) : Int ! {Gen, Tick} =
+  match b of
+    Box(f) => f()
+
+fn force_inside(b : Box(() -> Int ! {Gen})) : Int ! {Gen, Tick} =
+  match b of
+    Box(f) =>
+      let t = tick()
+      f() + t
+
+fn named() : Int ! {Gen} = gen() * 10
+
+fn mixed() : Int ! {Gen, Tick} =
+  let a = named()
+  let t = tick()
+  a + t
+
+fn with_ticks(action : () -> Int ! {Gen, Tick}) : Int ! {Gen} =
+  handle action() with
+    tick() resume k => k(1) + 100
+    return r => r
+
+fn with_gens(action : () -> Int ! {Gen}) : Int =
+  handle action() with
+    gen() resume k => k(3)
+    return r => r
+
+fn main() =
+  println(with_gens(\() -> force_gen(stored_gen())))
+  println(with_gens(\() -> with_ticks(\() -> force_both(stored_both()))))
+  println(with_gens(\() -> with_ticks(\() -> force_inside(stored_gen()))))
+  println(with_gens(\() -> with_ticks(mixed)))

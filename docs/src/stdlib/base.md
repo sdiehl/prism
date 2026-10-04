@@ -1528,16 +1528,16 @@ enum_from_then_to(1, 3, 9)
 
 ### `smap_go`
 
-```prism,sig,h-f1fe669cce2d4ef0f51a916b0df2a7665635c0b335313894909653e0a1c6b850
-smap_go : forall e0 a b c. ((Unit) -> a ! {Emit(b), e0}, (c) -> b ! {Emit(b), e0}) -> a ! {Emit(b), e0}
+```prism,sig,h-f2b7ddef12ade5cf2dba2d9930070cacd28d322ead84700f7fab97e98506a1be
+smap_go : forall e0 a b. ((Unit) -> a ! {Emit(b), e0}, (b) -> b ! {Emit(b), e0}) -> a ! {Emit(b), e0}
 ```
 
 Helper for `smap`.
 
 ### `smap`
 
-```prism,sig,h-c9164ad19c0a57837b95a2f11b7512970e54a5a10e85bc3df2644553c1146fde
-smap : forall e1 a b c d. ((Unit) -> a ! {Emit(b), e1}, (c) -> b ! {Emit(b), e1}) -> (d) -> a ! {Emit(b), e1}
+```prism,sig,h-a35321eb4c8d0c34389d6f82f9196f8dafabec10999ffc678afbcc1b6eb04cf3
+smap : forall e1 a b c. ((Unit) -> a ! {Emit(b), e1}, (b) -> b ! {Emit(b), e1}) -> (c) -> a ! {Emit(b), e1}
 ```
 
 Map `f` over every element of a stream, fusing (no intermediate list).

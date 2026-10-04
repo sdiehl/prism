@@ -3,7 +3,7 @@
 // green while the language's headline optimizations silently fall back to the
 // slow path. These tests check the runtime allocation counters instead:
 //
-//   - evidence passing + stream fusion must allocate ZERO free-monad eff-op
+//   - clause threading + stream fusion must allocate ZERO free-monad eff-op
 //     cells on the fusion corpus (`PRISM_EFFOP_STATS`), and
 //   - drop-guided in-place constructor reuse must actually fire at runtime
 //     (`PRISM_REUSE_STATS`), the runtime complement to the static IR check in
@@ -20,7 +20,7 @@ use std::path::Path;
 use std::process::Command;
 use std::{env, fs};
 
-use crate::support::{stat_build_counters, ALLOCATED_BYTES_SUFFIX, ALLOC_STATS};
+use crate::support::{stat_build_counters, ALLOCATED_BYTES_SUFFIX, ALLOCATED_SUFFIX, ALLOC_STATS};
 
 // Corpus discovery and prelude-prepending source loader, shared with the parity
 // oracles. The tier manifest below records the same program set those gates diff, so
@@ -54,6 +54,51 @@ const PERF_BYTES_BODY_DECODE: &str = include_str!("../cases/perf/bytes_body_deco
 const N_PLACEHOLDER: &str = "__N__";
 const PIPELINE_PLACEHOLDER: &str = "__PIPELINE__";
 const RUN_STRATEGY_PLACEHOLDER: &str = "run_strategy";
+const DEEP_EFFECT_CASE: &str = "tests/cases/run/deep_effect_recursion.pr";
+const DEEP_EFFECT_ITERATIONS: &str = "100000";
+const SMALL_EFFECT_ITERATIONS: &str = "100";
+
+#[test]
+fn boxed_machine_words_have_a_runtime_allocation_witness() {
+    require_cc();
+    let source = "fn main() : U64 = to_u64(7)";
+    let cells = stat_src(
+        &prism::with_prelude(source),
+        "boxed-machine-word",
+        ALLOC_STATS,
+        ALLOCATED_SUFFIX,
+    )
+    .unwrap();
+    assert!(
+        cells > 0,
+        "machine-word results are fresh cells, not immediates"
+    );
+    let claimed = source.replace(": U64 =", ": U64 @ noalloc =");
+    let error = prism::dump("core", &prism::with_prelude(&claimed))
+        .expect_err("the runtime allocation must not receive a zero-allocation certificate");
+    assert!(error.to_string().contains("allocation"), "{error}");
+}
+
+#[test]
+fn state_result_pairs_do_not_allocate_per_iteration() {
+    require_cc();
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(DEEP_EFFECT_CASE);
+    let source = fs::read_to_string(path).unwrap();
+    assert_eq!(source.matches(DEEP_EFFECT_ITERATIONS).count(), 1);
+    let small = source.replacen(DEEP_EFFECT_ITERATIONS, SMALL_EFFECT_ITERATIONS, 1);
+    let small_cells = stat_src(
+        &prism::with_prelude(&small),
+        "state-result-pairs-small",
+        ALLOC_STATS,
+        ALLOCATED_SUFFIX,
+    )
+    .unwrap();
+    let large_cells = stat(DEEP_EFFECT_CASE, ALLOC_STATS, ALLOCATED_SUFFIX).unwrap();
+    assert_eq!(
+        large_cells, small_cells,
+        "temporary state/result pairs must not allocate on each loop iteration"
+    );
+}
 
 fn cc() -> String {
     env::var("PRISM_CC").unwrap_or_else(|_| "clang".into())
@@ -119,6 +164,40 @@ fn stat_src_o2(full: &str, tag: &str, stat_env: &str, suffix: &str) -> Result<i6
     })
 }
 
+// Like `stat_src`, but pinned to one effect tier, for a gate on a driver only
+// that tier runs.
+fn stat_src_tier(
+    full: &str,
+    tag: &str,
+    stat_env: &str,
+    suffix: &str,
+    tier: prism::EffectTier,
+) -> Result<i64, String> {
+    stat_build(full, tag, stat_env, suffix, |src, bin| {
+        let mut cfg = prism::Config::from_env();
+        cfg.update_flags(|flags| flags.effect_tier = tier);
+        prism::build_on(src, &prism::default_roots(Path::new(".")), bin, &cfg)
+    })
+}
+
+// Like `stat` and `stat_src`, but with the consolidated state route off. The
+// controls below have to reach the free monad for their gate to mean anything,
+// and the route takes a control as readily as the case it controls for: a zero
+// on both sides would pass vacuously.
+fn stat_cascade(case: &str, stat_env: &str, suffix: &str) -> Result<i64, String> {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(case);
+    let src = fs::read_to_string(&path).map_err(|e| format!("{case}: {e}"))?;
+    stat_src_cascade(&prism::with_prelude(&src), case, stat_env, suffix)
+}
+
+fn stat_src_cascade(full: &str, tag: &str, stat_env: &str, suffix: &str) -> Result<i64, String> {
+    stat_build(full, tag, stat_env, suffix, |src, bin| {
+        let mut cfg = prism::Config::from_env();
+        cfg.update_flags(|flags| flags.consolidate = false);
+        prism::build_on(src, &prism::default_roots(Path::new(".")), bin, &cfg)
+    })
+}
+
 fn stat_build(
     full: &str,
     tag: &str,
@@ -143,7 +222,7 @@ fn stat_build_many(
 }
 
 // The fusion corpus: each program drives a different path to the zero-allocation
-// guarantee (evidence passing under one and two handlers, open re-emit inlining,
+// guarantee (clause threading under one and two handlers, open re-emit inlining,
 // first-class stream fusion, fold-consumer state threading, get-style multi-op
 // `State`, and the full stake + mixed-mode showcase). Every one must allocate no
 // `EOp` cells.
@@ -165,7 +244,7 @@ fn effop_fast_path_allocates_nothing() {
         match stat(prog, "PRISM_EFFOP_STATS", "eff ops allocated") {
             Ok(0) => {}
             Ok(n) => fails.push(format!(
-                "{prog}: {n} eff ops allocated; the evidence/fusion fast path regressed (want 0)"
+                "{prog}: {n} eff ops allocated; the threading/fusion fast path regressed (want 0)"
             )),
             Err(e) => fails.push(e),
         }
@@ -204,7 +283,7 @@ fn guard_free_comprehension_fuses() {
         fused, 0,
         r"a guard-free comprehension allocated {fused} eff-op cell(s); want 0. The fusing `scollect(smap(..))` lowering regressed to the free-monad for-consumer thunk."
     );
-    let guarded = stat_src(
+    let guarded = stat_src_cascade(
         &perf_src_n(PERF_COMP_MAP_GUARDED, n),
         "comp map guarded",
         "PRISM_EFFOP_STATS",
@@ -228,7 +307,7 @@ fn guard_free_comprehension_fuses() {
 #[test]
 fn local_monadification_keeps_pipeline_fused() {
     require_cc();
-    let count = |case| stat(case, "PRISM_EFFOP_STATS", "eff ops allocated");
+    let count = |case| stat_cascade(case, "PRISM_EFFOP_STATS", "eff ops allocated");
     let escape = count("tests/cases/run/local_mono_escape.pr").unwrap_or_else(|e| panic!("{e}"));
     let combined =
         count("tests/cases/run/local_mono_combined.pr").unwrap_or_else(|e| panic!("{e}"));
@@ -1102,21 +1181,31 @@ fn param_passing_effect_loop_runs_in_constant_stack() {
 // with an O(1)-snoc queue, so `ebind` no longer re-walks the spine; this is the
 // permanent ratchet that checks that in, and would catch its reintroduction (the
 // re-association blowup that made `deep_abort` quadratic and had to be reverted).
+// The default cascade threads this program's abort by value and never runs the
+// driver, so the gate pins the free-monad tier, whose driver is what it measures.
 #[test]
 fn driver_work_is_linear_on_deep_nontail_recursion() {
     require_cc();
     let prog = |n: i64| perf_src_n(PERF_DEEP_ABORT, n);
     let small = 2000_i64;
     let big = 4 * small;
-    let steps_small = stat_src(
+    let tier = prism::EffectTier::FreeMonad;
+    let steps_small = stat_src_tier(
         &prog(small),
         "drive_small",
         "PRISM_DRIVE_STATS",
         "drive steps",
+        tier,
     )
     .unwrap_or_else(|e| panic!("{e}"));
-    let steps_big = stat_src(&prog(big), "drive_big", "PRISM_DRIVE_STATS", "drive steps")
-        .unwrap_or_else(|e| panic!("{e}"));
+    let steps_big = stat_src_tier(
+        &prog(big),
+        "drive_big",
+        "PRISM_DRIVE_STATS",
+        "drive steps",
+        tier,
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
     // Integer ratio test (no float): linear work quadruples (4x), quadratic ~16x.
     assert!(
         steps_small > 0 && steps_big < 8 * steps_small,

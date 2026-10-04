@@ -190,10 +190,10 @@ fn pair(x, y) =
   return Pair(t@2, t@4)
 
 == fip ==
-[E6075] Type Error: usage check `fip(2)` failed for function `pair`: needs an allocation budget of at least 3, declared at most 2: call to `box` charges its declared allocation budget of 1; call to `box` charges its declared allocation budget of 1; constructor `Pair` is built fresh outside `reuse`
+[E6075] Type Error: usage check `fip(2)` failed for function `pair`: needs an allocation budget of at least 3, declared at most 2: call to `box` charges its declared allocation budget of 1; call to `box` charges its declared allocation budget of 1; constructor `Pair` may allocate a fresh cell
     ╭─[ <source>:12:1 ]
     │
  12 │ fip(2) fn pair(x, y) = Pair(box(x), box(y))
     │ ─────────────────────┬─────────────────────  
-    │                      ╰─────────────────────── usage check `fip(2)` failed for function `pair`: needs an allocation budget of at least 3, declared at most 2: call to `box` charges its declared allocation budget of 1; call to `box` charges its declared allocation budget of 1; constructor `Pair` is built fresh outside `reuse`
+    │                      ╰─────────────────────── usage check `fip(2)` failed for function `pair`: needs an allocation budget of at least 3, declared at most 2: call to `box` charges its declared allocation budget of 1; call to `box` charges its declared allocation budget of 1; constructor `Pair` may allocate a fresh cell
 ────╯

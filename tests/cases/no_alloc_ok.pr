@@ -1,8 +1,6 @@
--- `@ noalloc` is `fbip` spelled as a usage fact on the result: the function
--- and its whole call tree must allocate no fresh heap cell. `inc` only does
--- arithmetic and `twice` calls only `inc`, so both certify; `main` stays pure.
-fn inc(x : Int) : Int @ noalloc = x + 1
+-- An identity and its certified caller allocate no fresh heap cells.
+fn identity(x : Int) : Int @ noalloc = x
 
-fn twice(x : Int) : Int @ noalloc = inc(inc(x))
+fn twice(x : Int) : Int @ noalloc = identity(identity(x))
 
 fn main() : Int = twice(40)

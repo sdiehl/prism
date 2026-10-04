@@ -190,3 +190,38 @@ long prism_kont_splice(long top, long base) {
     }
     return prev;
 }
+
+/* The trampoline's stack budget. A tail hop that native code cannot make a tail
+ * call (a closure application, or a direct call into a cross-arity cycle) asks
+ * for a unit of depth before nesting; while units remain, the hop runs in a
+ * nested native frame and gives the unit back on return, and once the budget
+ * is spent the hop is handed to the driver as a bounce cell, which unwinds
+ * the frames above it. A chain of hops therefore holds at most
+ * PRISM_DRIVE_BUDGET nested frames of the chain, and pays the driver's
+ * closure once per budget of hops. Both calls borrow their arguments;
+ * drive_leave hands back an owned reference to the result it threads. */
+#define PRISM_DRIVE_BUDGET 256L
+
+static long prism_drive_depth = 0;
+
+long prism_drive_enter(void) {
+    if (prism_drive_depth >= PRISM_DRIVE_BUDGET) return 0;
+    prism_drive_depth++;
+    return 1;
+}
+
+long prism_drive_leave(long entered, long result) {
+    if (entered) {
+        /* Every unit handed out is given back by the frame that took it, so
+         * the depth can only underflow when a bracket was split or duplicated
+         * by a rewrite; trap rather than let a wrong count silently defer or
+         * nest every later hop. */
+        if (prism_drive_depth <= 0) {
+            fprintf(stderr, "fatal: drive_leave without a matching drive_enter\n");
+            abort();
+        }
+        prism_drive_depth--;
+    }
+    prism_rc_inc(result);
+    return result;
+}

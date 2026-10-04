@@ -31,6 +31,34 @@ fn allocation_certificate_rejects_expected_programs(
 }
 
 #[test]
+fn runtime_allocation_rejections_are_valid_programs_without_the_claim() {
+    for name in [
+        "boxed_word",
+        "word_operation",
+        "float_operation",
+        "string_operation",
+        "print_integer",
+        "integer_arithmetic",
+        "shared_reuse",
+    ] {
+        let path = format!("tests/cases/alloc_certificate/reject/{name}.pr");
+        let source = fs::read_to_string(path).unwrap();
+        let plain = source.replace(" @ noalloc", "");
+        assert!(
+            prism::dump("core", &plain).is_ok(),
+            "{name}: unannotated program must be valid"
+        );
+        let error = prism::dump("core", &source)
+            .expect_err("runtime allocation needs a certificate")
+            .to_string();
+        assert!(
+            error.contains("alloc"),
+            "{name}: expected an allocation diagnostic: {error}"
+        );
+    }
+}
+
+#[test]
 fn allocation_certificate_diagnostics_are_snapshotted() {
     let mut paths = fixture_paths("tests/cases/alloc_certificate/reject");
     paths.sort();

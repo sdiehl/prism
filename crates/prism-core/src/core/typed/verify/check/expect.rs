@@ -8,7 +8,9 @@ use super::super::super::violation::{
     InstantiationSubject, RowRelation, Site, TypeRelation, Violation,
 };
 use super::super::super::{CompSig, CoreFnSig, CoreInstantiation, CoreType};
-use super::super::compat::{core_subtype, row_included, union_rows as canonical_union_rows};
+use super::super::compat::{
+    core_subtype, core_type_eq, row_included, union_rows as canonical_union_rows,
+};
 use super::super::env::{ConstructorSig, OperationSig};
 use super::super::instantiate::{
     instantiate_constructor as instantiate_constructor_sig, instantiate_fn as instantiate_fn_sig,
@@ -119,7 +121,7 @@ impl<P: TypedCorePhase> Checker<'_, P> {
         context: impl Into<Site>,
     ) {
         let context = context.into();
-        if actual != expected {
+        if !core_type_eq(actual, expected) {
             self.fail(Violation::TypeMismatch {
                 site: context,
                 relation: TypeRelation::Equal,

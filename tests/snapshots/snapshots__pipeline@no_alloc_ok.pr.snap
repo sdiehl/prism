@@ -4,7 +4,7 @@ expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/no_alloc_ok.pr
 ---
 == tokens ==
-VOpen Fn Ident("inc") LParen Ident("x") Colon KwInt RParen Colon KwInt At Ident("noalloc") Eq Ident("x") Plus Int(IntLit { value: 1, suffix: None }) VSemi Fn Ident("twice") LParen Ident("x") Colon KwInt RParen Colon KwInt At Ident("noalloc") Eq Ident("inc") LParen Ident("inc") LParen Ident("x") RParen RParen VSemi Fn Ident("main") LParen RParen Colon KwInt Eq Ident("twice") LParen Int(IntLit { value: 40, suffix: None }) RParen VClose
+VOpen Fn Ident("identity") LParen Ident("x") Colon KwInt RParen Colon KwInt At Ident("noalloc") Eq Ident("x") VSemi Fn Ident("twice") LParen Ident("x") Colon KwInt RParen Colon KwInt At Ident("noalloc") Eq Ident("identity") LParen Ident("identity") LParen Ident("x") RParen RParen VSemi Fn Ident("main") LParen RParen Colon KwInt Eq Ident("twice") LParen Int(IntLit { value: 40, suffix: None }) RParen VClose
 
 == ast ==
 Program {
@@ -16,7 +16,7 @@ Program {
     instances: [],
     fns: [
         Decl {
-            name: "inc",
+            name: "identity",
             params: [
                 Param {
                     name: "x",
@@ -33,29 +33,14 @@ Program {
             eff: None,
             constraints: [],
             body: Spanned {
-                node: Bin(
-                    Add,
-                    Spanned {
-                        node: Var(
-                            "x",
-                        ),
-                        span: 268..269,
-                    },
-                    Spanned {
-                        node: Int(
-                            IntLit {
-                                value: 1,
-                                suffix: None,
-                            },
-                        ),
-                        span: 272..273,
-                    },
+                node: Var(
+                    "x",
                 ),
-                span: 268..273,
+                span: 109..110,
             },
             wheres: [],
             no_alloc: true,
-            span: 234..273,
+            span: 70..110,
         },
         Decl {
             name: "twice",
@@ -78,37 +63,37 @@ Program {
                 node: Call(
                     Spanned {
                         node: Var(
-                            "inc",
+                            "identity",
                         ),
-                        span: 311..314,
+                        span: 148..156,
                     },
                     [
                         Spanned {
                             node: Call(
                                 Spanned {
                                     node: Var(
-                                        "inc",
+                                        "identity",
                                     ),
-                                    span: 315..318,
+                                    span: 157..165,
                                 },
                                 [
                                     Spanned {
                                         node: Var(
                                             "x",
                                         ),
-                                        span: 319..320,
+                                        span: 166..167,
                                     },
                                 ],
                             ),
-                            span: 315..321,
+                            span: 157..168,
                         },
                     ],
                 ),
-                span: 311..322,
+                span: 148..169,
             },
             wheres: [],
             no_alloc: true,
-            span: 275..322,
+            span: 112..169,
         },
         Decl {
             name: "main",
@@ -124,7 +109,7 @@ Program {
                         node: Var(
                             "twice",
                         ),
-                        span: 342..347,
+                        span: 189..194,
                     },
                     [
                         Spanned {
@@ -134,112 +119,66 @@ Program {
                                     suffix: None,
                                 },
                             ),
-                            span: 348..350,
+                            span: 195..197,
                         },
                     ],
                 ),
-                span: 342..351,
+                span: 189..198,
             },
             wheres: [],
-            span: 324..351,
+            span: 171..198,
         },
     ],
 }
 
 == types ==
-inc : (Int) -> Int
+identity : (Int) -> Int
 twice : (Int) -> Int
 main : () -> Int
 
 == core (cbpv) ==
-fn inc(x) =
-  return x to t@0
-  return 1 to t@1
-  t@0 + t@1
+fn identity(x) =
+  return x
 fn twice(x) =
-  return x to t@2
-  inc(t@2) to t@3
-  inc(t@3)
+  return x to t@0
+  identity(t@0) to t@1
+  identity(t@1)
 fn main() =
-  return 40 to t@4
-  twice(t@4)
+  return 40 to t@2
+  twice(t@2)
 
 == fbip (rc) ==
-fn inc(x) =
-  return x to t@0
-  return 1 to t@1
-  t@0 + t@1
+fn identity(x) =
+  return x
 fn twice(x) =
-  return x to t@2
-  inc(t@2) to t@3
-  inc(t@3)
+  return x to t@0
+  identity(t@0) to t@1
+  identity(t@1)
 fn main() =
-  return 40 to t@4
-  twice(t@4)
+  return 40 to t@2
+  twice(t@2)
 
 == llvm ==
 ; ModuleID = 'prism'
 source_filename = "prism"
 
-@prism_native_kont_table = constant [873 x i8] c"scheme  prism-core-hash-v2\0Abundle  c0032d94837a7399fd75a26f1a09a24ba8beb40417f978c9b389feaf916ee4de\0Acompiler  <version>\0Atarget  <target>\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v2:c0032d94837a7399fd75a26f1a09a24ba8beb40417f978c9b389feaf916ee4de\0Aflag  stdlib-root  <stdlib-root>\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  erasures  true\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  borrow-infer  true\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prismfn_inc  3bc0c9d37b29baabc8c21448af21633e47aa613063258033cf3593dafe0ce507  inc\0Afn      prismfn_main  7f4d8aad335420755f5ddf21dc7b7f1b05f9ada64e7c1d7b510dc6ee51139edf  main\0Afn      prismfn_twice  c270ad901364757576b6067c5d058f658e08e1d86e624fd7737aaea7d0e7e086  twice\0A\00", section ",.prism_kont", align 1
-@prism_native_kont_state_map = constant [1011 x i8] c"state-map 1\0Ascheme  prism-core-hash-v2\0Abundle  c0032d94837a7399fd75a26f1a09a24ba8beb40417f978c9b389feaf916ee4de\0Acompiler  <version>\0Atarget  <target>\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v2:c0032d94837a7399fd75a26f1a09a24ba8beb40417f978c9b389feaf916ee4de\0Aflag  stdlib-root  <stdlib-root>\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  erasures  true\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  borrow-infer  true\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prismfn_inc 3bc0c9d37b29baabc8c21448af21633e47aa613063258033cf3593dafe0ce507 inc arity 1 slots abi-word[arg0=%a0:word]\0Astate prismfn_main 7f4d8aad335420755f5ddf21dc7b7f1b05f9ada64e7c1d7b510dc6ee51139edf main arity 0 slots abi-word[]\0Astate prismfn_twice c270ad901364757576b6067c5d058f658e08e1d86e624fd7737aaea7d0e7e086 twice arity 1 slots abi-word[arg0=%a0:word]\0A\00", section ",.prism_kont", align 1
-@.kont_symbol0 = private constant [12 x i8] c"prismfn_inc\00"
-@.kont_hash0 = private constant [65 x i8] c"3bc0c9d37b29baabc8c21448af21633e47aa613063258033cf3593dafe0ce507\00"
-@.kont_name0 = private constant [4 x i8] c"inc\00"
+@prism_native_kont_table = constant [901 x i8] c"scheme  prism-core-hash-v2\0Abundle  50f33bee36edc8cef254d9b2455e7c5a07f9023339e21c737f02cbe33b499087\0Acompiler  <version>\0Atarget  <target>\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v2:50f33bee36edc8cef254d9b2455e7c5a07f9023339e21c737f02cbe33b499087\0Aflag  stdlib-root  <stdlib-root>\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  reify  true\0Aflag  erasures  true\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  borrow-infer  true\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prismfn_identity  8d0bbbcae2c3f1e1b984e17faf209a1ce6f55886e5c63a978fd48918faa4df0a  identity\0Afn      prismfn_main  6e18241156ba301d541822e1e644722a106e73c200b74ec3eb023f07dfd1cd61  main\0Afn      prismfn_twice  1c556c55249e9b5b183750cc13ebeac74523ef6e57b705645fc4a680c6a431ea  twice\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_state_map = constant [1039 x i8] c"state-map 1\0Ascheme  prism-core-hash-v2\0Abundle  50f33bee36edc8cef254d9b2455e7c5a07f9023339e21c737f02cbe33b499087\0Acompiler  <version>\0Atarget  <target>\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v2:50f33bee36edc8cef254d9b2455e7c5a07f9023339e21c737f02cbe33b499087\0Aflag  stdlib-root  <stdlib-root>\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  reify  true\0Aflag  erasures  true\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  borrow-infer  true\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prismfn_identity 8d0bbbcae2c3f1e1b984e17faf209a1ce6f55886e5c63a978fd48918faa4df0a identity arity 1 slots abi-word[arg0=%a0:word]\0Astate prismfn_main 6e18241156ba301d541822e1e644722a106e73c200b74ec3eb023f07dfd1cd61 main arity 0 slots abi-word[]\0Astate prismfn_twice 1c556c55249e9b5b183750cc13ebeac74523ef6e57b705645fc4a680c6a431ea twice arity 1 slots abi-word[arg0=%a0:word]\0A\00", section ",.prism_kont", align 1
 @.kont_symbol1 = private constant [13 x i8] c"prismfn_main\00"
-@.kont_hash1 = private constant [65 x i8] c"7f4d8aad335420755f5ddf21dc7b7f1b05f9ada64e7c1d7b510dc6ee51139edf\00"
+@.kont_hash1 = private constant [65 x i8] c"6e18241156ba301d541822e1e644722a106e73c200b74ec3eb023f07dfd1cd61\00"
 @.kont_name1 = private constant [5 x i8] c"main\00"
-@prism_native_kont_ptrs = constant [2 x { ptr, ptr, ptr, ptr }] [{ ptr, ptr, ptr, ptr } { ptr @prismfn_inc, ptr @.kont_symbol0, ptr @.kont_hash0, ptr @.kont_name0 }, { ptr, ptr, ptr, ptr } { ptr @prismfn_main, ptr @.kont_symbol1, ptr @.kont_hash1, ptr @.kont_name1 }], section ",.prism_kont", align 8
-@prism_native_kont_ptrs_len = constant i64 2, section ",.prism_kont", align 8
+@prism_native_kont_ptrs = constant [1 x { ptr, ptr, ptr, ptr }] [{ ptr, ptr, ptr, ptr } { ptr @prismfn_main, ptr @.kont_symbol1, ptr @.kont_hash1, ptr @.kont_name1 }], section ",.prism_kont", align 8
+@prism_native_kont_ptrs_len = constant i64 1, section ",.prism_kont", align 8
 @llvm.used = appending global [4 x ptr] [ptr @prism_native_kont_table, ptr @prism_native_kont_state_map, ptr @prism_native_kont_ptrs, ptr @prism_native_kont_ptrs_len], section ",llvm.metadata"
-
-; Function Attrs: nounwind
-define i64 @prismfn_inc(i64 %a0) #0 {
-entry:
-  %t1 = and i64 %a0, 3
-  %t3 = and i64 %t1, 1
-  %t4 = icmp eq i64 %t3, 1
-  br i1 %t4, label %b0, label %b1
-
-b0:                                               ; preds = %entry
-  %t6 = ashr i64 %a0, 1
-  %t9 = add i64 %t6, 1
-  %t11 = shl i64 %t9, 1
-  %t12 = ashr i64 %t11, 1
-  %t13 = icmp eq i64 %t12, %t9
-  br i1 %t13, label %b3, label %b1
-
-b1:                                               ; preds = %b0, %entry
-  %t15 = call i64 @prism_rt_int_add(i64 %a0, i64 3)
-  br label %b2
-
-b3:                                               ; preds = %b0
-  %t14 = or i64 %t11, 1
-  br label %b2
-
-b2:                                               ; preds = %b1, %b3
-  %t16 = phi i64 [ %t14, %b3 ], [ %t15, %b1 ]
-  call void @prism_rc_dec(i64 %a0)
-  call void @prism_rc_dec(i64 3)
-  ret i64 %t16
-}
-
-; Function Attrs: nounwind
-declare i64 @prism_rt_int_add(i64, i64) #0
-
-; Function Attrs: nounwind
-declare void @prism_rc_dec(i64) #0
 
 ; Function Attrs: nounwind
 define i64 @prismfn_main() #0 {
 entry:
-  %t1 = call i64 @prismfn_inc(i64 81)
-  %t2 = call i64 @prismfn_inc(i64 %t1)
-  ret i64 %t2
+  ret i64 81
 }
 
 attributes #0 = { nounwind }
 
 == run ==
 output: []
-result: 42
+result: 40

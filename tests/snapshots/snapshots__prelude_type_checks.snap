@@ -242,8 +242,8 @@ show_list_body : forall a. (List(a), Bool) -> String
 signum : (Int) -> Int
 skeep : forall e1 a b c. ((Unit) -> a ! {Emit(b), e1}, (b) -> Bool ! {Emit(b), e1}) -> (c) -> a ! {Emit(b), e1}
 skeep_go : forall e0 a b. ((Unit) -> a ! {Emit(b), e0}, (b) -> Bool ! {Emit(b), e0}) -> a ! {Emit(b), e0} ! {Emit}
-smap : forall e1 a b c d. ((Unit) -> a ! {Emit(b), e1}, (c) -> b ! {Emit(b), e1}) -> (d) -> a ! {Emit(b), e1}
-smap_go : forall e0 a b c. ((Unit) -> a ! {Emit(b), e0}, (c) -> b ! {Emit(b), e0}) -> a ! {Emit(b), e0} ! {Emit}
+smap : forall e1 a b c. ((Unit) -> a ! {Emit(b), e1}, (b) -> b ! {Emit(b), e1}) -> (c) -> a ! {Emit(b), e1}
+smap_go : forall e0 a b. ((Unit) -> a ! {Emit(b), e0}, (b) -> b ! {Emit(b), e0}) -> a ! {Emit(b), e0} ! {Emit}
 snd : forall a b. ((a, b)) -> b
 sof : forall a b. (List(a)) -> (b) -> Unit ! {Emit(a)}
 sof_go : forall a. (List(a)) -> Unit ! {Emit(a)} ! {Emit}

@@ -4,23 +4,37 @@ expression: out
 ---
 === alloc effect ===
 allocation certificate `@ noalloc` failed for function `grab`: in `grab`, `alloc` carves a fresh cell from an arena, which is cheaper but not free
+=== boxed word ===
+allocation certificate `@ noalloc` failed for function `word`: in `word`, primitive `to_u64` is not on the allocation-free allow-list
 === closure value ===
 allocation certificate `@ noalloc` failed for function `make`: in `make`, a lambda is materialized as a fresh closure cell
 === composed row fresh ===
-allocation certificate `@ noalloc` failed for function `wrap`: in `wrap`, constructor `Box` is built fresh outside `reuse`
+allocation certificate `@ noalloc` failed for function `wrap`: in `wrap`, constructor `Box` may allocate a fresh cell
 === explicit fbip allocation ===
-usage check `fbip` failed for function `fresh`: in `fresh`, constructor `Box` is built fresh outside `reuse`
+usage check `fbip` failed for function `fresh`: in `fresh`, constructor `Box` may allocate a fresh cell
 === fip calls fbip ===
 usage check `fip` failed for function `use_it`: linearity is not closed over its call tree: call to `helper` receives an owned value but `helper` carries no linearity certificate; certify `helper` (`@ linear` or `fip`)
+=== float operation ===
+allocation certificate `@ noalloc` failed for function `add`: in `add`, numeric operation may allocate a fresh runtime cell
 === fresh constructor ===
-allocation certificate `@ noalloc` failed for function `fresh`: in `fresh`, constructor `Box` is built fresh outside `reuse`
+allocation certificate `@ noalloc` failed for function `fresh`: in `fresh`, constructor `Box` may allocate a fresh cell
 === fresh tuple ===
-allocation certificate `@ noalloc` failed for function `pair`: in `pair`, a tuple is built fresh outside `reuse`
+allocation certificate `@ noalloc` failed for function `pair`: in `pair`, a tuple may allocate a fresh cell
 === hoisted region fresh ===
-allocation certificate `@ noalloc` failed for function `wrap_region`: in `wrap_region`, constructor `Box` is built fresh outside `reuse`
+allocation certificate `@ noalloc` failed for function `wrap_region`: in `wrap_region`, constructor `Box` may allocate a fresh cell
 === indirect call ===
 allocation certificate `@ noalloc` failed for function `apply`: in `apply`, an indirect call through a first-class function value has no callee certificate
+=== integer arithmetic ===
+allocation certificate `@ noalloc` failed for function `inc`: in `inc`, numeric operation may allocate a fresh runtime cell
 === many alloc sites ===
-allocation certificate `@ noalloc` failed for function `many`: in `many`, constructor `Wrap` is built fresh outside `reuse`; constructor `Wrap` is built fresh outside `reuse`; constructor `Wrap` is built fresh outside `reuse`; and 2 more
+allocation certificate `@ noalloc` failed for function `many`: in `many`, constructor `Wrap` may allocate a fresh cell; constructor `Wrap` may allocate a fresh cell; constructor `Wrap` may allocate a fresh cell; and 2 more
+=== print integer ===
+allocation certificate `@ noalloc` failed for function `output`: in `output`, Print may allocate a fresh runtime cell
+=== shared reuse ===
+allocation certificate `@ noalloc` failed for function `rebuild`: in `rebuild`, constructor `Cell` may allocate a fresh cell
+=== string operation ===
+allocation certificate `@ noalloc` failed for function `join`: in `join`, primitive `concat` is not on the allocation-free allow-list
 === uncertified callee ===
 allocation certificate `@ noalloc` failed for function `top`: in `top`, call to `mk` may allocate (`mk` has no zero-allocation certificate)
+=== word operation ===
+allocation certificate `@ noalloc` failed for function `shift`: in `shift`, primitive `u64_xor` is not on the allocation-free allow-list

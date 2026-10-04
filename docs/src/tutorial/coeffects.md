@@ -14,31 +14,28 @@ Python has no direct equivalent. A decorator can perform a runtime check and a t
 `@ noalloc` promises that evaluation of the function's whole call tree allocates no fresh heap cell:
 
 ```prism
-fn gcd(a : Int, b : Int) : Int @ noalloc =
-  if b == 0 then
-    a
-  else
-    gcd(b, a % b)
+fn larger(a : Int, b : Int) : Int @ noalloc =
+  if a > b then a else b
 
-fn main() = println(gcd(48, 18))
+fn main() = println(larger(48, 18))
 ```
 
 ```output
-6
+48
 ```
 
-Integer arithmetic and this recursion satisfy the promise. Constructing a fresh list inside `gcd` would not. The annotation is not an optimization hint. It is a claim the compiler checks.
+Comparing integers and returning an existing value satisfy the promise. Integer arithmetic can allocate a bignum, and fixed-width and floating-point results can require boxes. Constructing a fresh list inside `larger` would also violate it. The annotation is not an optimization hint. It is a claim the compiler checks.
 
 This sharpens the meaning of purity from the previous chapter. A pure function has no outward observable effect, but it may still allocate. `@ noalloc` certifies the stronger and separate resource property.
 
 The same fact can be demanded of a callable. Written on a function-typed parameter, `@ noalloc` obliges every argument supplied for it to carry the certificate:
 
 ```prism
-fip fn step(n : Int) : Int = n + 1
+fip fn step(n : Int) : Int = if n > 42 then 42 else n
 
 fn iterate(f : ((Int) -> Int) @ noalloc, x : Int) : Int = f(f(x))
 
-fn main() = println(iterate(step, 40))
+fn main() = println(iterate(step, 50))
 ```
 
 ```output
@@ -113,7 +110,7 @@ These features are related but not interchangeable:
 
 The connection becomes concrete at a handler clause. The continuation `k` is a value, and an operation grade constrains how the handler may consume it. A `once` operation therefore gives its continuation a checked one-use discipline. A `many` operation permits capture and duplication.
 
-> **Try it:** Add `let xs = [a, b]` inside `gcd` and return `a` as before. The list is unused, but its allocation still violates `@ noalloc`. Remove the annotation and compare the inferred function type.
+> **Try it:** Add `let xs = [a, b]` inside `larger` and return `a` as before. The list is unused, but its allocation still violates `@ noalloc`. Remove the annotation and compare the inferred function type.
 
 ## Checkpoint
 

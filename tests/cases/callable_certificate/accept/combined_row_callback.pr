@@ -1,5 +1,5 @@
-fip fn inc(x) = x + 1
+fip fn identity(x : Int) : Int = x
 
 fn iterate(f : ((Int) -> Int) @ {many, noalloc}, x : Int) : Int = f(f(x))
 
-fn drive(x : Int) : Int = iterate(inc, x)
+fn drive(x : Int) : Int = iterate(identity, x)

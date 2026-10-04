@@ -21,9 +21,9 @@ use super::super::{
 use super::abi;
 use super::analysis::{Effects, MonadicRegionPlan, MonadicScope};
 use super::decline::{Decline, Refusal, Site};
-use super::evidence::OpIds;
 use super::flow::{self, ThunkFlow};
 use super::latent::Latent;
+use super::ops::OpIds;
 use super::plan;
 use super::residual::Rows;
 use super::union_effects;

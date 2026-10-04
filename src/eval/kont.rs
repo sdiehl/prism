@@ -850,7 +850,9 @@ impl Encoder {
             | Node::RefSet(..)
             | Node::Bump(_)
             | Node::ArenaEnter
-            | Node::ArenaExit(_) => {
+            | Node::ArenaExit(_)
+            | Node::DriveEnter
+            | Node::DriveLeave(_) => {
                 return Err(SuspendError::NonSerializable(
                     "effect-lowered runtime computation".into(),
                 ));

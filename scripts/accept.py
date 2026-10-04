@@ -79,7 +79,13 @@ def run_filtered(command: Sequence[str], *, env: dict[str, str]) -> int:
         text=True,
         check=False,
     )
-    lines = [line for line in result.stdout.splitlines() if TEST_RESULTS.search(line)]
+    # Preserve diagnostics on failure: a summary alone loses the evidence needed
+    # to fix a cold run and forces an expensive rerun just to recover the error.
+    lines = (
+        result.stdout.splitlines()
+        if result.returncode
+        else [line for line in result.stdout.splitlines() if TEST_RESULTS.search(line)]
+    )
     if lines:
         print(*lines, sep="\n")
     return result.returncode

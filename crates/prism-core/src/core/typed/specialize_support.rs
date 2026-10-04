@@ -70,7 +70,40 @@ impl Rewrite for TypeSubstitution<'_> {
     type Ctx = ();
 
     fn comp(&mut self, comp: &TypedComp, cx: &Self::Ctx) -> TypedComp {
-        self.rewrite_comp_from_hooks(comp, cx)
+        // A lambda that re-quantifies a name the substitution names binds it
+        // afresh: the type-level substitution stops at that binder, and so
+        // must the witnesses in the lambda's parameters and body.
+        if let (TypedCompKind::Lam(params, body), CoreType::Function(function)) =
+            (&comp.kind, comp.sig.result())
+        {
+            let shadowed: BTreeSet<Sym> =
+                function.quantifiers().iter().map(quantifier_name).collect();
+            if self
+                .quantifiers
+                .iter()
+                .any(|q| shadowed.contains(&quantifier_name(q)))
+            {
+                let (quantifiers, arguments): (Vec<_>, Vec<_>) = self
+                    .quantifiers
+                    .iter()
+                    .zip(self.arguments)
+                    .filter(|(q, _)| !shadowed.contains(&quantifier_name(q)))
+                    .map(|(q, a)| (q.clone(), a.clone()))
+                    .unzip();
+                let mut inner = TypeSubstitution {
+                    quantifiers: &quantifiers,
+                    arguments: &arguments,
+                };
+                return TypedComp::new(
+                    self.comp_sig(&comp.sig, cx),
+                    TypedCompKind::Lam(
+                        params.iter().map(|p| inner.binder(p, cx)).collect(),
+                        Box::new(inner.comp(body, cx)),
+                    ),
+                );
+            }
+        }
+        self.descend_comp(comp, cx)
     }
 
     fn core_type(&mut self, ty: &CoreType, _cx: &Self::Ctx) -> CoreType {
@@ -105,6 +138,12 @@ impl Rewrite for TypeSubstitution<'_> {
             forward.operation,
             substitute_label(&forward.effect, self.quantifiers, self.arguments),
         )
+    }
+}
+
+const fn quantifier_name(q: &CoreQuantifier) -> Sym {
+    match q {
+        CoreQuantifier::Type(name) | CoreQuantifier::Row(name) => *name,
     }
 }
 
@@ -1210,5 +1249,69 @@ mod tests {
             specialized.body.result,
             source(Type::Tuple(vec![Type::Var(b), Type::Var(*retained)]))
         );
+    }
+
+    #[test]
+    fn witness_substitution_stops_at_a_lambda_that_requantifies_the_name() {
+        let a = sym("a");
+        let quantifiers = [CoreQuantifier::Type(a)];
+        let arguments = [CoreInstantiation::Type(Type::Int)];
+        let generic = source(Type::Var(a));
+        let identity = CoreType::Function(Box::new(CoreFnSig::new(
+            vec![CoreQuantifier::Type(a)],
+            vec![generic.clone()],
+            sig(generic.clone()),
+        )));
+        let thunk_type = CoreType::Thunk(Box::new(sig(identity.clone())));
+        let local = |name: &str| {
+            TypedValue::new(
+                generic.clone(),
+                TypedValueKind::Var {
+                    name: sym(name),
+                    instantiation: Vec::new(),
+                },
+            )
+        };
+        // `let f = \x -> x` at its own `forall a. (a) -> a`, in a body whose
+        // result is the outer `a`.
+        let lambda = TypedComp::new(
+            sig(identity.clone()),
+            TypedCompKind::Lam(
+                vec![TypedBinder::new(sym("x"), generic.clone())],
+                Box::new(ret(local("x"))),
+            ),
+        );
+        let head = ret(TypedValue::new(
+            thunk_type.clone(),
+            TypedValueKind::Thunk(Box::new(lambda)),
+        ));
+        let typed = TypedComp::new(
+            sig(generic.clone()),
+            TypedCompKind::Bind(
+                Box::new(head),
+                TypedBinder::new(sym("f"), thunk_type.clone()),
+                Box::new(ret(local("outer"))),
+            ),
+        );
+
+        let substituted = substitute_witnesses(&typed, &quantifiers, &arguments);
+        assert_eq!(substituted.sig, sig(source(Type::Int)));
+        let TypedCompKind::Bind(head, binder, rest) = substituted.kind else {
+            panic!("expected bind")
+        };
+        assert_eq!(binder.ty, thunk_type);
+        assert_eq!(rest.sig, sig(source(Type::Int)));
+        let TypedCompKind::Return(returned) = head.kind else {
+            panic!("expected returned thunk")
+        };
+        let TypedValueKind::Thunk(lambda) = returned.kind else {
+            panic!("expected thunk")
+        };
+        assert_eq!(lambda.sig, sig(identity));
+        let TypedCompKind::Lam(params, body) = lambda.kind else {
+            panic!("expected lambda")
+        };
+        assert_eq!(params[0].ty, generic);
+        assert_eq!(body.sig, sig(generic));
     }
 }

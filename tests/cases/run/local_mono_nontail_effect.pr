@@ -1,0 +1,28 @@
+-- The same confined region as `local_mono_nontail_resume`, except the work the
+-- clause does after the continuation returns performs an operation of its own.
+-- A pure post-resume computation composes into an accumulator the handler can
+-- thread, but an effectful one cannot: the region keeps its own sequencing,
+-- while the stream pipeline beside it stays fused. The interleaving of the
+-- printed lines is what any tier has to keep identical.
+effect Peek
+  peek(Int) : Int
+
+fn run_thunks(fs, acc) =
+  match fs of
+    Nil => acc
+    Cons(f, rest) => run_thunks(rest, acc + f())
+
+fn peeked() =
+  let fs = [\() -> peek(4), \() -> peek(7), \() -> peek(9)]
+  handle run_thunks(fs, 0) with
+    peek(n) resume k =>
+      let v = k(n)
+      println("peeked")
+      v + n
+    return r => r
+
+fn double(n) = n * 2
+
+fn main() =
+  println(srange(1, 50).smap(double).ssum())
+  println(peeked())

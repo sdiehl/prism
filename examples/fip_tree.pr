@@ -1,15 +1,6 @@
--- FP^2 in-place tree relabel (Lorenzen/Leijen/Swierstra, ICFP 2023), statically
--- checked. `relabel` walks the tree rebuilding every `Node`, and the reuse pass
--- turns each rebuild into an in-place write over the cell it just dropped. The
--- annotation is `fbip`, not `fip`: when the scrutinee is consumed by reuse
--- Perceus dups each extracted field (subtree pointers, value), and a dup is
--- non-linear.
---
--- A full red-black insert with rebalancing is NOT allocation-free here:
--- rebalancing matches a deep pattern and rebuilds a DIFFERENT shape, so freed
--- and rebuilt cells do not line up one for one and the reuse credit cannot cover
--- every fresh node. relabel is the paper-sanctioned substitute, reusing every
--- node and proven so.
+-- Tree relabeling reuses each matched Node when it is uniquely owned.
+-- Doubling an arbitrary-precision Int can allocate a bignum, so the whole
+-- function cannot claim to be allocation-free even when its tree spine is reused.
 --
 -- Run with PRISM_REUSE_STATS=1 to see one reuse per node, PRISM_CHECK_LEAKS=1
 -- for zero live cells at exit.
@@ -21,7 +12,7 @@
 type Tree = Leaf | Node(Tree, Int, Tree)
 
 -- Double every label in place: each `Node` matched is rebuilt over its own cell.
-fbip fn relabel(t) =
+fn relabel(t) =
   match t of
     Leaf => Leaf
     Node(l, x, r) => Node(relabel(l), x + x, relabel(r))

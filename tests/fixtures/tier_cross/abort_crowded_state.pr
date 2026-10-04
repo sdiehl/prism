@@ -1,0 +1,56 @@
+-- Aborts the threaded convention has no room for. `f` raises two aborts that
+-- are answered by nested handlers, so its scope steps over two payload types
+-- at once; `recover` discharges an abort inside a producer whose accumulator
+-- is threaded past it, so the accumulator would have to survive the abort.
+-- Both are answered on the reified route, and every tier must print the
+-- inner catch's answer, the outer catch's answer, the recovered negation
+-- and the plain sum.
+
+error A(Int)
+
+error B(Int)
+
+effect Raise
+  raise(Int) : Int
+
+effect Tick
+  tick(Unit) : Int
+
+fn f(n) : Int ! {A, B} =
+  if n == 0 then
+    throw A(1)
+  elif n == 1 then
+    throw B(2)
+  else
+    n
+
+fn nested(n) =
+  try
+    try f(n) catch { A(x) => x + 10 }
+  catch
+    B(y) => y + 20
+
+fn total(n) : Int ! {Raise, Tick} =
+  let a = tick(())
+  if n == 0 then
+    raise(a)
+  else
+    a + n
+
+fn recover(n) : Int ! {Tick} =
+  handle total(n) with
+    raise(c) resume k => 0 - c
+    return r => r
+
+fn run_one(n) =
+  let f =
+    handle recover(n) with
+      tick(u) resume k => \(s) -> k(s)(s + 1)
+      return r => \(_s) -> r
+  f(1)
+
+fn main() =
+  println(nested(0))
+  println(nested(1))
+  println(run_one(0))
+  println(run_one(3))

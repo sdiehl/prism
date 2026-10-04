@@ -1,0 +1,25 @@
+-- A coherent stream consumed by a loop whose clause can leave through an
+-- abort. The stream is collected and re-emitted, so its consumer sits on the
+-- state channel, while the guard in the second loop reads past the end of a
+-- list and prunes the element by failing. The consumer's clauses must forward
+-- the abort's step and its answer re-raise it, and every tier must agree on
+-- which elements survive and on where an unpruned failure lands.
+
+fn guarded(prices) =
+  for i in srange(0, 4),
+      if at_list(prices, i) > 5 do
+    println(i)
+  at_list(prices, 4)
+
+fn main() =
+  for sq in sof(scollect(srange(1, 6))) do
+    println(sq * sq)
+  let prices = [10, 0, 30]
+  for i in srange(0, 6),
+      if at_list(prices, i) > 0 do
+    println(at_list(prices, i))
+  let total =
+    handle guarded(prices) with
+      never fail() => 0
+      return r => r
+  println(total)

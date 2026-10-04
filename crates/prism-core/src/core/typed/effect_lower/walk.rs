@@ -156,6 +156,38 @@ pub fn each_value<'a>(c: &'a TypedComp, f: &mut impl FnMut(&'a TypedValue)) {
     }
 }
 
+/// Every variable read a computation makes, through its sub-computations,
+/// the bodies of the thunks it holds, and the fields of its aggregates.
+pub fn each_var<'a>(c: &'a TypedComp, f: &mut impl FnMut(&'a TypedValue)) {
+    let mut stack = vec![ThunkFrame::Comp(c)];
+    while let Some(frame) = stack.pop() {
+        match frame {
+            ThunkFrame::Comp(comp) => {
+                each_subcomp(comp, &mut |child| stack.push(ThunkFrame::Comp(child)));
+                each_value(comp, &mut |value| stack.push(ThunkFrame::Value(value)));
+            }
+            ThunkFrame::Value(value) => match value.kind() {
+                TypedValueKind::Var { .. } => f(value),
+                TypedValueKind::Thunk(body) => stack.push(ThunkFrame::Comp(body)),
+                TypedValueKind::Reinterpret(inner)
+                | TypedValueKind::LoweredRepr { value: inner, .. }
+                | TypedValueKind::NewtypeRepr { value: inner, .. } => {
+                    stack.push(ThunkFrame::Value(inner));
+                }
+                TypedValueKind::Ctor { fields, .. }
+                | TypedValueKind::Tuple(fields)
+                | TypedValueKind::UnboxedTuple(fields) => {
+                    stack.extend(fields.iter().map(ThunkFrame::Value));
+                }
+                TypedValueKind::UnboxedRecord(fields) => {
+                    stack.extend(fields.iter().map(|(_, field)| ThunkFrame::Value(field)));
+                }
+                _ => {}
+            },
+        }
+    }
+}
+
 pub fn each_subcomp<'a>(c: &'a TypedComp, f: &mut impl FnMut(&'a TypedComp)) {
     match c.kind() {
         TypedCompKind::Bind(m, _, n) => {

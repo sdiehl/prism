@@ -48,8 +48,9 @@ use prism_syntax::names;
 use super::effect_lower::walk::{each_subcomp, each_value, thunks_in_comp, top_thunks_in_value};
 use super::facts::peel;
 use super::inline::calls_in;
+use crate::core::allocation::{io_is_free, literal_allocates, primitive_is_free};
 use crate::core::builtins::Builtin;
-use crate::core::{CoreOp, IoOp};
+use crate::core::CoreOp;
 use crate::types::ty::EffRow;
 
 use super::{TypedComp, TypedCompKind, TypedCoreFn, TypedPattern, TypedValue, TypedValueKind};
@@ -534,23 +535,12 @@ fn transfer(function: &TypedCoreFn, ctx: &Ctx<'_>) -> Flowing {
 /// Walk a body recording every fresh-cell site and every callable-parameter
 /// invocation, mirroring the allocation checker's witness inventory over
 /// typed Core: constructors, tuples, and thunks allocate; unboxed products
-/// and scalars do not; a `Reuse` head spends a token instead of allocating; a
-/// performed arena `alloc` still counts. Newtype coercions are transparent
-/// representation nodes at this phase, so no erased-constructor set is
+/// and immediate scalars do not; boxed scalars allocate; a `Reuse` head may
+/// allocate when its token is empty; a performed arena `alloc` still counts.
+/// Newtype coercions are transparent representation nodes at this phase, so no erased-constructor set is
 /// needed.
 fn alloc_comp(comp: &TypedComp, ctx: &Ctx<'_>, out: &mut Flowing) {
     match comp.kind() {
-        TypedCompKind::Reuse(_, value) => {
-            match &peel(value).kind {
-                TypedValueKind::Ctor { fields, .. } | TypedValueKind::Tuple(fields) => {
-                    for field in fields {
-                        alloc_value(field, out);
-                    }
-                }
-                _ => alloc_value(value, out),
-            }
-            return;
-        }
         TypedCompKind::Call { callee, args, .. } => {
             let view = ctx.callee(*callee);
             let (bound, slots) = view.allocation();
@@ -583,20 +573,19 @@ fn alloc_comp(comp: &TypedComp, ctx: &Ctx<'_>, out: &mut Flowing) {
             }
             return;
         }
-        TypedCompKind::Do { operation, .. } => {
-            if operation.as_str() == names::ALLOC_OP {
-                out.allocation = AllocBound::Unbounded;
-            }
+        TypedCompKind::Io(op, _) if !io_is_free(*op) => {
+            out.allocation = AllocBound::Unbounded;
         }
-        TypedCompKind::Io(op, _) => match op {
-            IoOp::Print | IoOp::PrintF | IoOp::PrintS | IoOp::PrintNl | IoOp::Srand => {}
-            IoOp::ReadInt | IoOp::ReadLine | IoOp::Rand => {
-                out.allocation = AllocBound::Unbounded;
-            }
-        },
-        // No per-op allocation attribute exists in the builtin registry yet,
-        // so every string/collection builtin is conservatively allocating.
-        TypedCompKind::StrBuiltin { .. } | TypedCompKind::RefNew(_) => {
+        TypedCompKind::Prim(op, _, _) if !primitive_is_free(*op) => {
+            out.allocation = AllocBound::Unbounded;
+        }
+        // Without a certified per-operation bound, runtime calls must fail closed.
+        TypedCompKind::Do { .. }
+        | TypedCompKind::Handle { .. }
+        | TypedCompKind::StrBuiltin { .. }
+        | TypedCompKind::RefNew(_)
+        | TypedCompKind::FloatBuiltin(..)
+        | TypedCompKind::Neg(..) => {
             out.allocation = AllocBound::Unbounded;
         }
         _ => {}
@@ -606,6 +595,9 @@ fn alloc_comp(comp: &TypedComp, ctx: &Ctx<'_>, out: &mut Flowing) {
 }
 
 fn alloc_value(value: &TypedValue, out: &mut Flowing) {
+    if literal_allocates(value.kind.literal_scalar_type()) {
+        out.allocation = AllocBound::Unbounded;
+    }
     match &peel(value).kind {
         TypedValueKind::Ctor { fields, .. } | TypedValueKind::Tuple(fields) => {
             out.allocation = AllocBound::Unbounded;
@@ -1571,6 +1563,23 @@ pub(crate) mod tests {
         assert_eq!(summary.capture, CaptureState::NoClosures);
         assert!(summary.callbacks.is_empty());
         assert_eq!(summary.cardinality, Cardinality::Unknown);
+    }
+
+    #[test]
+    fn boxed_literals_and_integer_arithmetic_are_not_allocation_free() {
+        let boxed = TypedValue::new(CoreType::Source(Type::U64), TypedValueKind::U64(7));
+        let arithmetic = TypedComp::new(
+            pure(int()),
+            TypedCompKind::Prim(CoreOp::Add, var("x"), lit(1)),
+        );
+        let table = summarize(&[
+            function("boxed", &[], ret(boxed)),
+            function("arithmetic", &["x"], arithmetic),
+            function("caller", &["x"], call("arithmetic", vec![var("x")])),
+        ]);
+        for name in ["boxed", "arithmetic", "caller"] {
+            assert_eq!(table[&sym(name)].allocation, AllocBound::Unbounded);
+        }
     }
 
     #[test]

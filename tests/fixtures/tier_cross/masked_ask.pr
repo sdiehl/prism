@@ -1,0 +1,43 @@
+-- A mask over a reified operation beside a threaded one. The mask crosses a
+-- function boundary, sits inside a thunk, nests twice, and the inner clause
+-- re-performs the operation it answers, while a counting handler around
+-- everything stays a state fold over the ticks the masked bodies perform.
+
+effect Ask
+  ask() : Int
+
+effect Tick
+  tick() : Unit
+
+fn crosses() =
+  tick()
+  ask() + mask<Ask>(ask())
+
+fn ticks(f) =
+  handle f() with
+    tick() resume k => 1 + k(())
+    return r => 0
+
+fn layered(f) =
+  handle (handle handle f() with {
+      ask() resume k => k(1),
+      return r => r
+    } with {
+      ask() resume k => k(ask() * 10),
+      return r => r
+    }) with
+    ask() resume k => k(100)
+    return r => r
+
+fn twice() =
+  tick()
+  let x = mask<Ask>(ask())
+  tick()
+  x + mask<Ask>(mask<Ask>(ask()))
+
+fn body() =
+  println(layered(\() -> crosses()))
+  println(layered(\() -> twice()))
+  println(layered(\() -> ask() + mask<Ask>(mask<Ask>(ask()) + ask())))
+
+fn main() = println(ticks(\() -> body()))

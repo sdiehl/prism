@@ -1,3 +1,4 @@
+mod allocation;
 pub mod builtins;
 pub mod cbpv;
 pub mod effect_abi;

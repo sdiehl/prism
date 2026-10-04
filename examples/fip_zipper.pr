@@ -1,10 +1,7 @@
--- Huet's zipper (Huet, "The Zipper", JFP 1997) navigated in place, FP^2-checked.
--- A `Loc` is the focused subtree paired with a `Ctx`, the one-hole context that
--- remembers the path to the root. Moving down rebuilds one `Loc` and one `Ctx`
--- frame. Moving up consumes a frame and rebuilds the parent `Loc`. Each step
--- frees exactly the cells it rebuilds, so the reuse pass turns every move into an
--- in-place pointer shuffle, proven `fbip` (not fip: retained subtree pointers are
--- dup'd when their cell is reused, and a dup is non-linear).
+-- Huet's zipper navigated with drop-guided cell reuse. Moving down rebuilds
+-- a location and a context frame; moving up rebuilds the parent location.
+-- Uniquely owned cells are reused. Shared cells require fresh allocation, so
+-- these functions do not claim an unconditional zero-allocation budget.
 --
 -- The walk descends left, left, then back up twice to where it started, reading
 -- the focused label at each stop.
@@ -27,17 +24,17 @@ type Ctx = Top | L(Ctx, Int, Tree) | R(Tree, Int, Ctx)
 
 type Loc = Loc(Tree, Ctx)
 
-fbip fn go_left(loc) =
+fn go_left(loc) =
   match loc of
     Loc(Br(l, x, r), c) => Loc(l, L(c, x, r))
     other => other
 
-fbip fn go_right(loc) =
+fn go_right(loc) =
   match loc of
     Loc(Br(l, x, r), c) => Loc(r, R(l, x, c))
     other => other
 
-fbip fn go_up(loc) =
+fn go_up(loc) =
   match loc of
     Loc(t, L(c, x, r)) => Loc(Br(t, x, r), c)
     Loc(t, R(l, x, c)) => Loc(Br(l, x, t), c)

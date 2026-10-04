@@ -1,0 +1,27 @@
+-- One operation, two handlers. The inner handler resumes `check` and the
+-- outer one aborts it, so which clause answers a perform depends only on
+-- which handler is nearest. Every tier must send the inner performs to the
+-- resuming clause, print their doubled values, and unwind the direct perform
+-- through the aborting clause without printing what follows it.
+
+effect Check
+  check(Int) : Int
+
+fn ask(n) =
+  let doubled = check(n)
+  println(doubled)
+  doubled + 1
+
+fn inner(n) =
+  handle ask(n) with
+    check(v) resume k => k(v * 2)
+    return r => r
+
+fn outer(n) =
+  handle inner(n) + ask(n) with
+    never check(v) => v - 100
+    return r => r
+
+fn main() =
+  println(outer(5))
+  println(outer(7))

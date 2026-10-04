@@ -21,8 +21,8 @@ mod tests;
 
 pub use check::TypedCorePhase;
 pub use compat::{
-    lowered_representation_conversion, representation_preserving, representation_preserving_stable,
-    union_rows,
+    core_subtype, core_type_eq, lowered_representation_conversion, representation_preserving,
+    representation_preserving_stable, union_rows,
 };
 pub use env::{ConstructorSig, MonoConstructor, MonoOperation, OperationSig, VerifyEnv};
 pub use instantiate::{
@@ -42,9 +42,6 @@ pub use subst::{
 
 pub(in crate::core::typed) use check::check_functions;
 pub(in crate::core::typed) use compat::row_included;
-
-#[cfg(test)]
-use compat::core_subtype;
 
 /// Positions whose failures are classified by name elsewhere in the tree.
 ///

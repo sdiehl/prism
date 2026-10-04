@@ -1,0 +1,20 @@
+effect Feed
+  feed(Int) : Unit
+
+type Step(e : Row) = Done(Int) | More(Int, () -> Step(e) ! {e})
+
+fn produce() : Int ! {Feed} =
+  feed(5)
+  8
+
+fn store(body : () -> Int ! {| e}) : Step(e) =
+  handle body() with
+    feed(n) resume k => More(n, \() -> k(()))
+    return r => Done(r)
+
+fn total(s) =
+  match s of
+    Done(n) => n
+    More(n, k) => n + total(k())
+
+fn main() = println(total(store(\() -> produce())))

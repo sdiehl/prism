@@ -1,0 +1,11 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/local_mono_nontail_effect.pr
+---
+2450
+peeked
+peeked
+peeked
+40
+=> ()

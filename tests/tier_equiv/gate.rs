@@ -1,12 +1,17 @@
 //! Whole-corpus effect-tier equivalence gate.
 //!
-//! Tier selection is a cost choice, so every forceable `EffectTier` position
-//! must produce the same canonical observation trace. Each position floors the
-//! cascade at one rung; the cascade still falls back to costlier rungs, and the
-//! whole-program monad is legal for every program, so all five positions lower
-//! every runnable corpus program with no skip logic. The auto position is the
-//! baseline: it is the only one that can take the pure and evidence rungs, so
-//! diffing every floor against it covers the full ladder.
+//! Tier selection is a cost choice, so every position must produce the same
+//! canonical observation trace. Each forceable `EffectTier` floors the cascade
+//! at one rung; the cascade still falls back to costlier rungs, and the
+//! whole-program monad is legal for every program, so every position lowers
+//! every runnable corpus program with no skip logic. Two unforced positions sit
+//! above the forced ladder: the default compiler, which offers the consolidated
+//! state route the whole program before any rung is asked, and the cascade
+//! behind it with that route off, which asks the state rung the narrower
+//! question the rung fixtures were written against. Diffing every floor against
+//! both covers the ladder and the route that reaches past it. An additional
+//! position explicitly enables continuation reification inside the consolidated
+//! route, so its semantics are checked even while that option defaults off.
 //!
 //! This proves lowered-Core semantic equivalence at interpreter cost, which is
 //! what lets it sweep the whole corpus and a generated corpus. The native tier
@@ -25,7 +30,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
-use prism::{default_roots, Config, EffectTier, ObservationTrace};
+use prism::driver::ArtifactField;
+use prism::{default_roots, Config, EffectTier, Observation, ObservationTrace};
 
 use crate::support::fuzzgen::{generate, generate_arena, shrink, Program, ProgramFamily};
 use crate::support::{
@@ -37,16 +43,18 @@ use crate::support::{
 /// this phase alone: pre-lowering Core is tier-independent by construction.
 const ENGAGEMENT_PHASE: &str = "lowered";
 
-/// Adjacent positions on the forced ladder. Each pair must change lowered Core
-/// somewhere in the corpus, otherwise two positions have collapsed and the
-/// sweep between them is vacuous.
-const ADJACENT_POSITIONS: [(usize, usize); 4] = [(0, 1), (1, 2), (2, 3), (3, 4)];
+/// Adjacent positions on the forced ladder, plus default versus reification.
+/// Each pair must change lowered Core somewhere in the corpus, otherwise the
+/// sweep between those positions is vacuous.
+const COMPARISON_PAIRS: [(usize, usize); 6] = [(0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (0, 6)];
 
-const ACTIVITY_LABELS: [&str; 4] = [
-    "auto versus state-fusion",
+const ACTIVITY_LABELS: [&str; 6] = [
+    "default versus cascade",
+    "cascade versus state-fusion",
     "state-fusion versus local-partial",
     "local-partial versus selective-free-monad",
     "selective-free-monad versus whole-program-free-monad",
+    "default versus reified continuations",
 ];
 
 /// Committed programs whose effect plans are known to move under forcing; they
@@ -60,13 +68,14 @@ const FIXTURE_CASES: &[&str] = &[
 /// Corpus programs scanned first by the engagement discovery, one per rung the
 /// blind alphabetical order reaches late. The local-partial rung in particular
 /// is chosen by exactly one corpus program, so without seeding it the scan
-/// walks most of the corpus (five lowerings per case) before the
+/// walks most of the corpus (one lowering per position, per case) before the
 /// local-partial/selective pair can engage.
 const ENGAGEMENT_SEED_CASES: &[&str] = &[
     "examples/accum.pr",
     "examples/eff_state.pr",
     "tests/cases/run/local_mono_combined.pr",
     "examples/eff_yield.pr",
+    "tests/cases/run/local_mono_multishot.pr",
 ];
 
 #[derive(Debug)]
@@ -77,23 +86,51 @@ struct Variant {
 
 impl Variant {
     fn tier(tier: EffectTier) -> Self {
+        Self::with(tier.label(), tier, true)
+    }
+
+    /// The unforced cascade with the consolidated state route off. The route is
+    /// offered the whole program before any rung is asked, so without this
+    /// position the unforced compiler and forced state-fusion lower every
+    /// effectful program alike and the first pair measures nothing.
+    fn cascade() -> Self {
+        Self::with("cascade", EffectTier::Auto, false)
+    }
+
+    fn reified() -> Self {
+        let mut variant = Self::with(ArtifactField::Reify.label(), EffectTier::Auto, true);
+        variant.config.update_flags(|flags| flags.reify = true);
+        variant
+    }
+
+    fn with(label: &'static str, tier: EffectTier, consolidate: bool) -> Self {
         let mut config = Config::default();
         config.update_flags(|flags| flags.effect_tier = tier);
+        config.update_flags(|flags| flags.consolidate = consolidate);
+        config.update_flags(|flags| flags.reify = false);
         config.update_flags(|flags| flags.compiler_cache = false);
         config.update_flags(|flags| flags.quiet = true);
-        Self {
-            label: tier.label(),
-            config,
-        }
+        Self { label, config }
     }
 }
 
+/// The unforced default first, then the cascade behind it, then the forced
+/// rungs. Every position must agree observation for observation, and adjacent
+/// ones must differ in lowered Core somewhere.
 fn variants() -> Vec<Variant> {
-    EffectTier::ALL.into_iter().map(Variant::tier).collect()
+    let mut all = vec![Variant::tier(EffectTier::Auto), Variant::cascade()];
+    all.extend(
+        EffectTier::ALL
+            .into_iter()
+            .filter(|tier| *tier != EffectTier::Auto)
+            .map(Variant::tier),
+    );
+    all.push(Variant::reified());
+    all
 }
 
 fn record_lowered_activity(lowered: &[&str], activity: &[AtomicUsize]) {
-    for (slot, (left, right)) in ADJACENT_POSITIONS.into_iter().enumerate() {
+    for (slot, (left, right)) in COMPARISON_PAIRS.into_iter().enumerate() {
         if lowered[left] != lowered[right] {
             activity[slot].fetch_add(1, Ordering::Relaxed);
         }
@@ -173,7 +210,7 @@ fn run_cases(cases: &[PathBuf], require_engagement: bool) {
     );
 
     eprintln!(
-        "tier-equiv: {} cases, {} tiers, {} lowered-Core evaluator runs",
+        "tier-equiv: {} cases, {} positions, {} lowered-Core evaluator runs",
         cases.len(),
         variants.len(),
         cases.len() * variants.len()
@@ -202,6 +239,7 @@ fn tier_equivalence_representative_sample() {
         "examples/eff_poly.pr",
         "examples/effectful_traverse.pr",
         "examples/imperative.pr",
+        "tests/cases/run/local_mono_multishot.pr",
         "tests/fixtures/tier_cross/thunk_param.pr",
         "tests/fixtures/tier_cross/convention_split_map.pr",
     ]
@@ -209,6 +247,65 @@ fn tier_equivalence_representative_sample() {
     .map(|case| root.join(case))
     .collect::<Vec<_>>();
     run_cases(&cases, false);
+}
+
+/// The effect trampoline brackets a tail hop the native code cannot make a
+/// tail call between `drive_enter` and `drive_leave`, spending a native
+/// stack budget the lowered-Core observer does not have. The observer must
+/// run the bracketed hop as a plain call and agree with the source
+/// interpreter, which never sees the brackets. Agreement between lowered
+/// positions alone cannot show that: every lowered position could fault on
+/// the same unknown builtin and still agree with each other.
+#[test]
+fn reified_drive_brackets_observe_like_the_interpreter() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let roots = default_roots(Path::new("."));
+    let full = source(&root.join("examples/delim.pr"));
+    let reified = Variant::reified();
+
+    let (trace, lowered) = prism::driver::observe_lowered_run_on(&full, &roots, &reified.config)
+        .expect("delim.pr lowers under reified continuations");
+    assert!(
+        lowered.contains("drive_enter(") && lowered.contains("drive_leave("),
+        "delim.pr no longer bounces under reified continuations, so this \
+         check is vacuous; pick a program that does:\n{lowered}"
+    );
+    assert!(
+        !trace
+            .observations
+            .iter()
+            .any(|observation| matches!(observation, Observation::Fault(_))),
+        "the lowered observer faulted on delim.pr: {:?}",
+        trace.observations
+    );
+
+    let mut out = Vec::new();
+    let mut input = std::io::Cursor::new(Vec::new());
+    let interpreted = prism::driver::observe_run_on(
+        &full,
+        &roots,
+        &mut out,
+        &mut input,
+        &reified.config,
+        Vec::new(),
+    )
+    .expect("delim.pr interprets");
+    assert_eq!(
+        trace, interpreted.canonical_trace,
+        "lowered observer and source interpreter disagree on delim.pr"
+    );
+
+    let stdout = trace
+        .observations
+        .iter()
+        .filter_map(|observation| match observation {
+            Observation::Stdout(bytes) => Some(bytes.as_slice()),
+            _ => None,
+        })
+        .flatten()
+        .copied()
+        .collect::<Vec<u8>>();
+    assert_eq!(String::from_utf8(stdout).unwrap(), "101\n111\n121\n");
 }
 
 // Keep engagement independent of the exact-cover CI split: isolated shard
@@ -357,7 +454,7 @@ fn generated_programs_have_identical_observation_traces_across_tiers() {
     }
 
     eprintln!(
-        "tier-fuzz: {total} generated programs, {} tiers, {} lowered-Core evaluator runs",
+        "tier-fuzz: {total} generated programs, {} positions, {} lowered-Core evaluator runs",
         variants.len(),
         total * variants.len()
     );

@@ -240,7 +240,20 @@ pub fn insert(env: &mut VerifyEnv) {
         CoreFnSig::new(
             vec![CoreQuantifier::Row(row)],
             vec![queue(residual.clone())],
-            pure(queue_view(residual)),
+            pure(queue_view(residual.clone())),
+        ),
+    );
+
+    env.insert_builtin_override(
+        Builtin::DriveEnter,
+        CoreFnSig::new(Vec::new(), Vec::new(), pure(source(Type::Int))),
+    );
+    env.insert_builtin_override(
+        Builtin::DriveLeave,
+        CoreFnSig::new(
+            vec![CoreQuantifier::Row(row)],
+            vec![source(Type::Int), eff(residual.clone())],
+            pure(eff(residual)),
         ),
     );
 }
@@ -288,12 +301,31 @@ pub fn try_word_bridge(value: TypedValue, expected: CoreType) -> Option<TypedVal
         return Some(value);
     }
     let word = word();
-    if !lowered_representation_conversion(value.ty(), &word)
-        || !lowered_representation_conversion(&word, &expected)
-    {
+    let packed = if value.ty() == &word {
+        value
+    } else {
+        if !lowered_representation_conversion(value.ty(), &word) {
+            return None;
+        }
+        lowered_repr(value, word.clone())
+    };
+    if expected == word {
+        return Some(packed);
+    }
+    if !lowered_representation_conversion(&word, &expected) {
         return None;
     }
-    Some(lowered_repr(lowered_repr(value, word), expected))
+    Some(lowered_repr(packed, expected))
+}
+
+/// Read a cell at a wider row, when its own row is closed and included.
+#[must_use]
+pub fn try_widen_cell(value: TypedValue, row: EffRow) -> Option<TypedValue> {
+    let expected = eff(row);
+    if value.ty() == &expected {
+        return Some(value);
+    }
+    lowered_representation_conversion(value.ty(), &expected).then(|| lowered_repr(value, expected))
 }
 
 #[must_use]

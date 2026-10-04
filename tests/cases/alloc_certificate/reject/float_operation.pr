@@ -1,0 +1,1 @@
+fn add(x : Float) : Float @ noalloc = x + x

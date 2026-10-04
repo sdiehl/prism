@@ -1,0 +1,35 @@
+-- A reified thunk kept in a state cell: the store's accumulator is a thunk
+-- over `Wrap`, written by `put`, read back by `get` and forced after the
+-- handler that answers `wrap` is already running. Every tier must print 6.
+
+effect Wrap
+  wrap(() -> Int ! {Wrap | e}) : Int
+
+effect Store
+  get() : () -> Int ! {Wrap}
+  put(() -> Int ! {Wrap}) : Unit
+
+fn run_wrap(action : () -> a ! {Wrap | e}) : a ! { | e} =
+  handle action() with
+    wrap(th) resume k => k(run_wrap(th))
+    return x => x
+
+fn run_store(
+  init : () -> Int ! {Wrap},
+  action : () -> a ! {Store | e}
+) : a ! { | e} =
+  let f =
+    handle action() with
+      get() resume k => \(s) -> k(s)(s)
+      put(v) resume k => \(_s) -> k(())(v)
+      return x => \(_s) -> x
+  f(init)
+
+fn inner() : Int ! {Wrap} = wrap(\() -> 4)
+
+fn driver() : Int ! {Wrap, Store} =
+  put(\() -> wrap(\() -> 5))
+  let th = get()
+  th() + wrap(\() -> 1)
+
+fn main() = println(run_store(inner, \() -> run_wrap(driver)))

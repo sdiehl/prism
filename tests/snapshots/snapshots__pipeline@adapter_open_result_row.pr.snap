@@ -284,7 +284,12 @@ fn adapt_v1_to_v2(action) =
       return r
 
 == llvm ==
-(skipped: typed effect lowering failed: typed effect lowering produced an unverifiable program: adapt_v1_to_v2 at body: function body row mismatch: stored {KvV2, %evr0}, expected a subrow of {%evr0})
+; ModuleID = 'prism'
+source_filename = "prism"
+
+@prism_native_kont_table = constant [725 x i8] c"scheme  prism-core-hash-v2\0Abundle  2fe02ec8b9b3743787b55dd5b6ce622c989bb861a3ada72c13e94664e21205e7\0Acompiler  <version>\0Atarget  <target>\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v2:2fe02ec8b9b3743787b55dd5b6ce622c989bb861a3ada72c13e94664e21205e7\0Aflag  stdlib-root  <stdlib-root>\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  reify  true\0Aflag  erasures  true\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  borrow-infer  true\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prismfn_adapt_v1_to_v2  ee935f7a10f6769da3f5d624efc4c60da1aa2e4392be4ff47e0005cc780ace19  adapt_v1_to_v2\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_state_map = constant [808 x i8] c"state-map 1\0Ascheme  prism-core-hash-v2\0Abundle  2fe02ec8b9b3743787b55dd5b6ce622c989bb861a3ada72c13e94664e21205e7\0Acompiler  <version>\0Atarget  <target>\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v2:2fe02ec8b9b3743787b55dd5b6ce622c989bb861a3ada72c13e94664e21205e7\0Aflag  stdlib-root  <stdlib-root>\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  reify  true\0Aflag  erasures  true\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  borrow-infer  true\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prismfn_adapt_v1_to_v2 ee935f7a10f6769da3f5d624efc4c60da1aa2e4392be4ff47e0005cc780ace19 adapt_v1_to_v2 arity 1 slots abi-word[arg0=%a0:word]\0A\00", section ",.prism_kont", align 1
+@llvm.used = appending global [2 x ptr] [ptr @prism_native_kont_table, ptr @prism_native_kont_state_map], section ",llvm.metadata"
 
 == run ==
 error: no main function

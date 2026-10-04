@@ -1,9 +1,6 @@
--- Deep recursion through an effect handler. `descend` is tail-recursive and
--- performs a State get/put each step, so the two tiers lower it differently:
--- state fusion turns it into a while loop, while evidence passing emits direct
--- self-calls that rely on native tail-call optimization. At this depth (far past
--- a naive stack limit) both must run in constant stack and agree, or the tiers
--- fork on termination. Pins that cross-tier parity.
+-- Deep recursion through a state handler. Every lowering route must run this
+-- program in constant stack and agree on its result. The allocation gate also
+-- compares short and long runs to detect a temporary state/result cell per step.
 effect State
   get() : Int
   put(Int) : Unit

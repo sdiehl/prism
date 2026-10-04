@@ -1,0 +1,28 @@
+-- A payload arrow over the operation's own row quantifier, forwarded by a
+-- handler whose clause row is generic: `run_wrap` names the operation only
+-- through its parameter, so the payload `wrap` carries is reified and the
+-- thunk it wraps reads the `Out` evidence of the scope that wrote it. Every
+-- tier must print the same two lines.
+
+effect Out
+  out(Int) : Unit
+
+effect Wrap
+  wrap(() -> Int ! {Wrap | e}) : Int
+
+fn run_wrap(action : () -> a ! {Wrap | e}) : a ! { | e} =
+  handle action() with
+    wrap(th) resume k => k(run_wrap(th))
+    return x => x
+
+fn inner() : Int ! {Out} =
+  out(7)
+  3
+
+fn driver() : Int ! {Wrap, Out} = wrap(inner)
+
+fn main() =
+  println(handle run_wrap(driver) with {
+    out(n) resume k => let _ = println(n) in k(()),
+    return r => r
+  })

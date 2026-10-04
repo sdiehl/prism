@@ -1,24 +1,42 @@
 //! Accumulator-threading transformation and local escape checks.
 
 mod rewrite;
+mod value;
 
+use super::super::checks::kind_name;
+use super::super::union_effects;
 use super::super::{
-    abi::try_word_bridge, as_var, binder_var, evidence::strip_resume, peel,
-    subtract::SubtractEffect, unit_value,
+    abi::try_word_bridge, as_var, binder_var, peel, subtract::SubtractEffect, unit_value,
 };
+use super::judgment::{judge_handle, HandleClass, HandleJudgment};
+use super::resume::strip_resume;
 use super::strip::strip_state;
 use super::uniformity::{
-    body_folds, branch_resumes, folds_op, forced_source_type, is_take, lexical_types, row_tail,
+    body_folds, branch_resumes, forced_source_type, is_take, lexical_types, row_tail,
 };
 use super::{
-    accumulator_type, bound_producer_result, clause_type, flow, free_comp_vars, free_value_vars,
-    instantiate_fn, is_fold, is_id_return, is_id_transformer, label_args, mem, names, produces,
-    source_type, substitute_core_type, substitute_terms, substitute_witnesses, union_rows,
-    BTreeMap, BTreeSet, CompSig, CoreFnSig, CoreInstantiation, CoreQuantifier, CoreType, DriftLog,
-    EffRow, FoldAKind, FoldPlan, Latent, Loc, OpIds, Retyped, Sig, StepAt, Sym, ThunkFlow, Type,
-    TypedBinder, TypedComp, TypedCompKind, TypedPattern, TypedValue, TypedValueKind, VerifyEnv,
-    STATE_ACC,
+    accumulator_type, bound_producer_result, carried_result, carried_value, carrier_ops,
+    clause_type, core_subtype, flow, free_comp_vars, free_value_vars, instantiate_constructor,
+    instantiate_fn, is_fold, is_id_transformer, label_args, label_instantiation, mem, names,
+    on_core_stack, pair_parts, pair_type, pair_value, passes_return, produces, source_type,
+    substitute_core_type, substitute_terms, substitute_witnesses, tail_kind, union_rows,
+    value_clause_type, widen_argument, widen_buried, widen_stored, Abort, Accumulator, BTreeMap,
+    BTreeSet, CompSig, CoreFnSig, CoreInstantiation, CoreQuantifier, CoreType, DriftLog, EffRow,
+    FoldAKind, FoldPlan, Latent, Loc, OpIds, Retyped, Sig, StateAnswerMode, StepAt, Sym, ThunkFlow,
+    Type, TypedBinder, TypedComp, TypedCompKind, TypedHandleOp, TypedPattern, TypedValue,
+    TypedValueKind, VerifyEnv, STATE_ACC,
 };
+use super::{generic_quantifiers, residual_row, unit_source, value_scheme, Channel};
+use crate::core::TypedHandler;
+
+/// The step a threaded result carries its pair inside, or `None` where the pair
+/// is the whole result. Read off the type rather than off the scope, because the
+/// same helpers run on both sides of the step: inside it a result still steps,
+/// past it the pair stands alone.
+fn carried_step(ty: &CoreType) -> Option<StepAt> {
+    let at = StepAt::of(ty)?;
+    pair_parts(&CoreType::Source(at.more.clone())).map(|_| at)
+}
 
 /// The argument of `g(n)` when a computation evaluates to a unary application
 /// of `g` through A-normal-form binds, the seed resolved to its source value.
@@ -57,6 +75,24 @@ fn anf_app_arg(g: Sym, c: &TypedComp) -> Option<TypedValue> {
     }
 }
 
+/// The accumulator binder and body of a clause written as a state transformer,
+/// which is the shape every arm of a fold handler has.
+fn transformer(body: &TypedComp) -> Option<(&TypedBinder, &TypedComp)> {
+    let TypedCompKind::Return(v) = body.kind() else {
+        return None;
+    };
+    let TypedValueKind::Thunk(t) = &peel(v).kind else {
+        return None;
+    };
+    let TypedCompKind::Lam(ps, inner) = t.kind() else {
+        return None;
+    };
+    let [acc] = ps.as_slice() else {
+        return None;
+    };
+    Some((acc, inner))
+}
+
 /// Whether a computation's head rebinds a live resume alias.
 fn is_alias_return(m: &TypedComp, aliases: &BTreeSet<Sym>) -> bool {
     matches!(m.kind(), TypedCompKind::Return(v)
@@ -70,11 +106,15 @@ fn resume_call(c: &TypedComp, aliases: &BTreeSet<Sym>) -> bool {
 }
 
 /// Classify a resume value against the fold lambda's accumulator parameter.
-pub(super) fn a_kind(a: &TypedValue, acc: Sym) -> Option<FoldAKind> {
+///
+/// The typed mirror of [`fold_argument`](crate::core::effect_shape), and
+/// `paired` admits the same widened shape there: a resume value of the clause's
+/// own, which travels beside the accumulator instead of being rebuilt from it.
+pub(super) fn a_kind(a: &TypedValue, acc: Sym, paired: bool) -> Option<FoldAKind> {
     match &peel(a).kind {
         TypedValueKind::Unit => Some(FoldAKind::Unit),
         TypedValueKind::Var { name, .. } if *name == acc => Some(FoldAKind::Acc),
-        _ => None,
+        _ => paired.then_some(FoldAKind::Value),
     }
 }
 
@@ -141,6 +181,11 @@ pub(super) struct Threader<'a> {
     /// strategies compose.
     pub ids: &'a OpIds,
     pub env: &'a VerifyEnv,
+    /// The environment as the program declared it, before every constructor
+    /// field was widened to its stored convention: what a field is read back
+    /// at is derived from what it was declared at, and only the declaration
+    /// says which operations that position carries.
+    pub declared: &'a VerifyEnv,
     pub latent: &'a Latent,
     pub flow: &'a ThunkFlow,
     /// Where a clause that almost matches a recognized shape is reported. It is
@@ -160,6 +205,16 @@ pub(super) struct Threader<'a> {
     /// from. Reading the pre-threading witness at a call, or retagging its
     /// leaves toward what a consumer expects, is how stale results survive.
     pub signatures: BTreeMap<Sym, CoreFnSig>,
+    /// The parameter positions the reified rewrite reads as cells, by
+    /// function. Such a position takes no threaded evidence: the cells
+    /// behind it capture the evidence in scope where they were built, and
+    /// no handler for a threaded operation stands between the building and
+    /// the forcing, since a handle over cells is promoted.
+    pub cells: BTreeMap<Sym, BTreeSet<usize>>,
+    /// The operations the reified rewrite answered with cells before
+    /// threading began: a position that still spells one of their labels
+    /// holds a value the rewrite typed without it.
+    pub reified: BTreeSet<Sym>,
     /// The one `Step` instantiation live in the scope being threaded, decided
     /// where the early-exit protocol is entered (a handle in early mode, a
     /// take) and consumed by every guard, lift, unwrap, constructor and
@@ -167,6 +222,23 @@ pub(super) struct Threader<'a> {
     /// reconstructing `Step(acc, acc)` at a use site from whatever type is
     /// nearby is how the take witnesses drifted.
     pub step: Option<StepAt>,
+    /// The abort live in the scope being threaded by value: the operation
+    /// whose clause never resumes, and the done type its payload has here.
+    /// Decided where a value scope is entered (a handle site with an abort
+    /// arm, a producer whose operations include one) and read by every guard,
+    /// lift and evidence type inside that scope.
+    pub abort: Abort,
+    /// Whether the value being rewritten is the one its declaration returns,
+    /// whose row the signature prepass fixed: a returned lambda binds the
+    /// ambient that row names inside its own type. Cleared by the first value
+    /// rewrite that reads it, so nothing nested inherits it.
+    pub returning: bool,
+    /// The ambient row the function being threaded binds on its own scheme for
+    /// the carrier it returns, when it has one. A returned lambda binds the
+    /// ambient its declared row names only where nothing outside it already
+    /// does; binding it twice leaves the inner one shadowing a quantifier the
+    /// caller has already instantiated.
+    pub scheme_row: Option<Sym>,
     /// The residual row where the threading currently runs: the producer's own
     /// ambient variable inside a producer, and the handle's residual at a
     /// handle site. Evidence types and call-site instantiations both read it,
@@ -181,6 +253,10 @@ pub(super) struct Threader<'a> {
     /// with a private counter would rename the fallback's tree, including where
     /// a name is minted before an arm that can still decline.
     pub fresh: &'a mut prism_common::fresh::Fresh,
+    /// The first reason the threading stopped, when it did: set by the
+    /// innermost site that refused a shape, read by the driver that reports
+    /// the drop, and cleared before each declaration is threaded.
+    pub why: Option<String>,
 }
 
 /// Constant context for the `stake` lowering: the downstream evidence, the
@@ -195,6 +271,682 @@ struct TakeSite<'a> {
 }
 
 impl Threader<'_> {
+    /// Refuse the shape being threaded, keeping the first reason given: an
+    /// outer site that fails because an inner one did adds nothing to it.
+    pub(super) fn bail<T>(&mut self, why: impl Into<String>) -> Option<T> {
+        self.why.get_or_insert_with(|| why.into());
+        None
+    }
+
+    /// Pass a threading's answer through, naming the innermost computation
+    /// dropped with no reason recorded so the decline can say where.
+    pub(super) fn dropped(&mut self, c: &TypedComp, out: Option<TypedComp>) -> Option<TypedComp> {
+        if out.is_none() && self.why.is_none() {
+            self.why = Some(format!(
+                "a {} dropped without a reason ({})",
+                kind_name(c.kind()),
+                c.sig()
+            ));
+        }
+        out
+    }
+
+    /// Whether a threaded scope yields the accumulator and the scope's own
+    /// value side by side rather than the accumulator alone. The
+    /// accumulator-only conventions are the cases where the value can be
+    /// recovered from the accumulator; where it cannot, the two travel
+    /// together, which is the ordinary state monad.
+    fn pairs(&self) -> bool {
+        self.plan.answer == StateAnswerMode::Pair
+    }
+
+    /// The step this scope's own value travels inside, where it both carries
+    /// that value and can leave through an abort. A take's two payloads are the
+    /// one accumulator, so its pair stays outside the step and this is `None`.
+    fn carried(&self) -> Option<StepAt> {
+        self.step
+            .clone()
+            .filter(|at| self.pairs() && at.more != at.done)
+    }
+
+    /// The done payload live here: the abort of an enclosing value scope, or
+    /// the one a stepped state scope already carries. A take's step is not one
+    /// of these, since its done payload is the accumulator itself.
+    pub(super) fn live_done(&self) -> Option<Type> {
+        if self.plan.early.short_circuits() {
+            return None;
+        }
+        self.abort
+            .as_ref()
+            .map(|(_, done)| done.clone())
+            .or_else(|| self.step.as_ref().map(|at| at.done.clone()))
+    }
+
+    /// What a handle's threaded body can perform: the operations it performs
+    /// directly and through the thunks in scope, among those this scope holds
+    /// evidence for, plus the handle's own. An abort answered further out is
+    /// among them, since the accumulator has to travel past it, while the
+    /// program's other operations are not, so they do not decide the step.
+    fn body_ops(
+        &self,
+        body: &TypedComp,
+        loc: &Loc,
+        evs: &BTreeMap<Sym, Sym>,
+        handler: &TypedHandler,
+    ) -> BTreeSet<Sym> {
+        let mut sig = flow::body_sig(body, self.latent);
+        flow::performed(body, loc, self.latent, self.flow, &mut sig);
+        sig.into_iter()
+            .map(|masked| masked.id)
+            .filter(|op| evs.contains_key(op))
+            .chain(handler.arms().iter().map(TypedHandleOp::name))
+            .collect()
+    }
+
+    /// The step a scope threading `acc` over `ops` runs under: the take
+    /// protocol's, where the program stops early, or the abort's, where the
+    /// scope can leave through one. `None` where the scope runs to its end.
+    fn scope_step(&self, acc: &CoreType, ops: &BTreeSet<Sym>) -> Option<StepAt> {
+        let source = source_type(acc).ok()?;
+        if self.plan.early.short_circuits() {
+            return Some(StepAt::new(source.clone(), source));
+        }
+        self.plan
+            .folds_an_abort(ops)
+            .then(|| Some(StepAt::new(source, self.live_done()?)))
+            .flatten()
+    }
+
+    /// `return #(st, v)`, what a threaded scope yields when the two travel
+    /// together.
+    fn yield_pair(&mut self, st: &TypedBinder, v: TypedValue) -> Option<TypedComp> {
+        let Some(at) = self.carried() else {
+            let Some(pair) = pair_value(binder_var(st), v) else {
+                return self.bail("a threaded value with no source spelling");
+            };
+            return Some(TypedComp::new(
+                CompSig::new(pair.ty().clone(), EffRow::Empty),
+                TypedCompKind::Return(pair),
+            ));
+        };
+        // The accumulator is stepped, so the pair goes inside `SMore` and a step
+        // already done travels on with the payload it stopped with: there is no
+        // value to put beside it.
+        let acc = TypedBinder::new(self.mint("a"), CoreType::Source(at.more.clone()));
+        let Some(pair) = carried_value(binder_var(&acc), v) else {
+            return self.bail("a threaded value with no source spelling");
+        };
+        let out = StepAt::new(source_type(pair.ty()).ok()?, at.done.clone());
+        let d = TypedBinder::new(self.mint("d"), CoreType::Source(at.done.clone()));
+        Some(TypedComp::new(
+            CompSig::new(out.ty(), EffRow::Empty),
+            TypedCompKind::Case(
+                binder_var(st),
+                vec![
+                    (
+                        at.more_pattern(acc),
+                        Self::returning(out.smore(pair), out.ty()),
+                    ),
+                    (
+                        at.done_pattern(d.clone()),
+                        Self::returning(out.sdone(binder_var(&d)), out.ty()),
+                    ),
+                ],
+            ),
+        ))
+    }
+
+    /// The binders a pair-yielding `head` takes apart into: the accumulator
+    /// under a fresh name, and the value under `name` when the tail reads it.
+    fn pair_binders(
+        &mut self,
+        head: &TypedComp,
+        name: Option<&TypedBinder>,
+    ) -> Option<(TypedBinder, Option<TypedBinder>)> {
+        let carried = carried_step(head.sig().result());
+        let pair = carried.as_ref().map_or_else(
+            || head.sig().result().clone(),
+            |at| CoreType::Source(at.more.clone()),
+        );
+        let Some((acc, value)) = pair_parts(&pair) else {
+            return self.bail("a threaded scope that did not carry its value");
+        };
+        // Where the pair rode inside a step, what the tail threads on is that
+        // step over the bare accumulator, not the accumulator the pair held.
+        let acc = match &carried {
+            Some(at) => StepAt::new(source_type(&acc).ok()?, at.done.clone()).ty(),
+            None => acc,
+        };
+        let acc = TypedBinder::new(self.mint("st"), acc);
+        let val = name.map(|b| TypedBinder::new(b.name(), value));
+        Some((acc, val))
+    }
+
+    /// Bind what `head` yields, take the pair apart, and run `tail` under the
+    /// two binders [`Self::pair_binders`] produced.
+    fn split_pair(
+        &mut self,
+        head: TypedComp,
+        acc: TypedBinder,
+        val: Option<TypedBinder>,
+        tail: TypedComp,
+    ) -> Option<TypedComp> {
+        let p = TypedBinder::new(self.mint("pr"), head.sig().result().clone());
+        let Some(at) = carried_step(head.sig().result()) else {
+            let case = TypedComp::new(
+                tail.sig().clone(),
+                TypedCompKind::Case(
+                    binder_var(&p),
+                    vec![(TypedPattern::Tuple(vec![Some(acc), val]), tail)],
+                ),
+            );
+            return Some(Self::bind(head, p, case));
+        };
+        // A stepped pair is taken apart in two: the step first, whose done side
+        // carries the tail's own stop rather than the head's, then the pair
+        // inside it, rewrapped as the step the tail threads on.
+        let pr = TypedBinder::new(self.mint("pr"), CoreType::Source(at.more.clone()));
+        let (bare, _) = pair_parts(&CoreType::Source(at.more.clone()))?;
+        let a = TypedBinder::new(self.mint("a"), bare);
+        let seat = StepAt::of(acc.ty())?;
+        let out = StepAt::of(tail.sig().result())?;
+        let d = TypedBinder::new(self.mint("d"), CoreType::Source(at.done.clone()));
+        let inner = Self::bind(
+            Self::returning(seat.smore(binder_var(&a)), acc.ty().clone()),
+            acc,
+            tail,
+        );
+        let taken = TypedComp::new(
+            inner.sig().clone(),
+            TypedCompKind::Case(
+                binder_var(&pr),
+                vec![(TypedPattern::Tuple(vec![Some(a), val]), inner)],
+            ),
+        );
+        let case = TypedComp::new(
+            taken.sig().clone(),
+            TypedCompKind::Case(
+                binder_var(&p),
+                vec![
+                    (at.more_pattern(pr), taken),
+                    (
+                        at.done_pattern(d.clone()),
+                        Self::returning(out.sdone(binder_var(&d)), out.ty()),
+                    ),
+                ],
+            ),
+        );
+        Some(Self::bind(head, p, case))
+    }
+
+    /// What a threaded scope over `st` yields for a scope whose own value has
+    /// type `value`.
+    fn threaded_result(&mut self, st: &TypedBinder, value: &CoreType) -> Option<CoreType> {
+        if !self.pairs() {
+            return Some(st.ty().clone());
+        }
+        let spelled = self.carried().map_or_else(
+            || pair_type(st.ty(), value),
+            |at| carried_result(&at, value),
+        );
+        spelled.map_or_else(
+            || self.bail("a producer result with no source spelling"),
+            Some,
+        )
+    }
+
+    /// Keep only the accumulator of what `head` yields, for a position whose
+    /// convention is the accumulator alone: a fold clause's evidence, or a
+    /// handle whose return clause is the identity transformer.
+    fn drop_value(&mut self, head: TypedComp) -> Option<TypedComp> {
+        if !self.pairs() {
+            return Some(head);
+        }
+        let (acc, _) = self.pair_binders(&head, None)?;
+        let read = TypedComp::new(
+            CompSig::new(acc.ty().clone(), EffRow::Empty),
+            TypedCompKind::Return(binder_var(&acc)),
+        );
+        self.split_pair(head, acc, None, read)
+    }
+
+    /// A stopping arm performed inside a threaded scope. Its clause answers
+    /// the payload its fold stops with rather than a step, because nothing
+    /// resumes past it and the step the payload belongs in is the one this
+    /// site threads, which is the site that knows what the scope carries.
+    #[allow(clippy::too_many_arguments)]
+    fn stop_do(
+        &mut self,
+        c: &TypedComp,
+        operation: &Sym,
+        instantiation: &[CoreInstantiation],
+        args: &[TypedValue],
+        evs: &BTreeMap<Sym, Sym>,
+        loc: &Loc,
+        st: &TypedBinder,
+    ) -> Option<TypedComp> {
+        let Some(step) = self.step.clone() else {
+            return self.bail(format!(
+                "`{}` stopping a scope that does not step",
+                operation.as_str()
+            ));
+        };
+        let ev = self.evidence(evs, *operation, st.ty())?;
+        let mut a: Vec<TypedValue> = args
+            .iter()
+            .map(|arg| self.rewrite_value(arg, loc, evs))
+            .collect::<Option<_>>()?;
+        a.push(binder_var(st));
+        let payload = CoreType::Source(step.done);
+        let stopped = Self::apply_clause_at(&ev, instantiation, a, payload.clone())?;
+        let threaded = self.threaded_result(st, c.sig().result())?;
+        let Some(out) = StepAt::of(&threaded) else {
+            return self.bail(format!(
+                "`{}` stopping a scope whose accumulator is not stepped",
+                operation.as_str()
+            ));
+        };
+        let d = TypedBinder::new(self.mint("d"), payload);
+        Some(Self::bind(
+            stopped,
+            d.clone(),
+            Self::returning(out.sdone(binder_var(&d)), out.ty()),
+        ))
+    }
+
+    /// A tail producer head that also carries its value: step the accumulator,
+    /// then yield it beside what the operation resumes with, since the tail is
+    /// where the scope's own value is decided.
+    #[allow(clippy::too_many_arguments)]
+    fn pair_do(
+        &mut self,
+        c: &TypedComp,
+        operation: &Sym,
+        instantiation: &[CoreInstantiation],
+        args: &[TypedValue],
+        evs: &BTreeMap<Sym, Sym>,
+        loc: &Loc,
+        st: &TypedBinder,
+    ) -> Option<TypedComp> {
+        let ev = self.evidence(evs, *operation, st.ty())?;
+        let mut a: Vec<TypedValue> = args
+            .iter()
+            .map(|arg| self.rewrite_value(arg, loc, evs))
+            .collect::<Option<_>>()?;
+        a.push(binder_var(st));
+        let paired = self.plan.paired(*operation);
+        let stepped = Self::apply_clause(&ev, instantiation, a, st, paired)?;
+        // A paired clause has already put the two together: its answer is this
+        // scope's answer, and rebuilding the pair here would only take apart
+        // what the evidence just built. Where the scope also steps, the two it
+        // put together are outside that step and the scope's are inside it.
+        if paired {
+            if self.carried().is_some() {
+                return self.bail(format!(
+                    "`{}` answering a pair beside a scope that can abort",
+                    operation.as_str()
+                ));
+            }
+            return Some(stepped);
+        }
+        let resumed = match self.plan.kinds.get(operation) {
+            Some(FoldAKind::Acc) => binder_var(st),
+            Some(FoldAKind::Unit) => unit_value(),
+            Some(FoldAKind::Value) => unreachable!("guarded above"),
+            None if c.sig().result() == &CoreType::Source(Type::Unit) => unit_value(),
+            None => {
+                return self.bail(format!(
+                    "`{}` in tail position resuming with a value the pair cannot carry",
+                    operation.as_str()
+                ))
+            }
+        };
+        let st2 = TypedBinder::new(self.mint("st"), st.ty().clone());
+        let yielded = match (self.plan.kinds.get(operation), self.carried()) {
+            // A read resumes with the accumulator it received, which in a
+            // stepped scope sits inside the step: the read is answered from
+            // that step's payload, and a step already done goes on as it is.
+            (Some(FoldAKind::Acc), Some(at)) => {
+                let old = TypedBinder::new(self.mint("a"), CoreType::Source(at.more.clone()));
+                let inner = self.yield_pair(&st2, binder_var(&old))?;
+                let out = StepAt::of(inner.sig().result())?;
+                let d = TypedBinder::new(self.mint("d"), CoreType::Source(at.done.clone()));
+                TypedComp::new(
+                    inner.sig().clone(),
+                    TypedCompKind::Case(
+                        binder_var(st),
+                        vec![
+                            (at.more_pattern(old), inner),
+                            (
+                                at.done_pattern(d.clone()),
+                                Self::returning(out.sdone(binder_var(&d)), out.ty()),
+                            ),
+                        ],
+                    ),
+                )
+            }
+            _ => self.yield_pair(&st2, resumed)?,
+        };
+        Some(Self::bind(stepped, st2, yielded))
+    }
+
+    /// An abort performed where an accumulator is threaded: apply its value
+    /// clause, keep going with the untouched accumulator where the operation
+    /// resumed, and stop the scope where it did not.
+    #[allow(clippy::too_many_arguments)]
+    fn abort_do(
+        &mut self,
+        operation: &Sym,
+        instantiation: &[CoreInstantiation],
+        args: &[TypedValue],
+        value: &CoreType,
+        evs: &BTreeMap<Sym, Sym>,
+        loc: &Loc,
+        st: &TypedBinder,
+    ) -> Option<TypedComp> {
+        let Some(step) = self.step.clone() else {
+            return self.bail("an abort performed where the scope cannot stop");
+        };
+        let ev = self.evidence(evs, *operation, st.ty())?;
+        let mut a: Vec<TypedValue> = args
+            .iter()
+            .map(|arg| self.rewrite_value(arg, loc, evs))
+            .collect::<Option<_>>()?;
+        if a.is_empty() {
+            a.push(unit_value());
+        }
+        let app = self.apply_value_clause(&ev, *operation, instantiation, a)?;
+        let Some(raised) = StepAt::of(app.sig().result()) else {
+            return self.bail("an abort whose clause does not answer a step");
+        };
+        let carried = self.carried().is_some();
+        let resumed = TypedBinder::new(
+            self.mint(if carried { "w" } else { "_w" }),
+            CoreType::Source(raised.more.clone()),
+        );
+        // The resuming arm is this tail, so a scope carrying its value carries
+        // what the operation resumed with. The scope that stops carries nothing
+        // beside its payload, which is why the pair rides inside the step.
+        let kept = if carried {
+            if CoreType::Source(raised.more.clone()) != *value {
+                return self.bail(format!(
+                    "abort `{}` resuming with a value this scope does not carry",
+                    operation.as_str()
+                ));
+            }
+            self.yield_pair(st, binder_var(&resumed))?
+        } else {
+            Self::returning(binder_var(st), st.ty().clone())
+        };
+        let Some(out) = StepAt::of(kept.sig().result()) else {
+            return self.bail("an abort in a scope whose accumulator is not stepped");
+        };
+        let d = TypedBinder::new(self.mint("d"), CoreType::Source(step.done));
+        let left = Self::returning(out.sdone(binder_var(&d)), out.ty());
+        let sv = TypedBinder::new(self.mint("sv"), app.sig().result().clone());
+        let case = TypedComp::new(
+            CompSig::new(
+                kept.sig().result().clone(),
+                union_effects(kept.sig().effects(), left.sig().effects()),
+            ),
+            TypedCompKind::Case(
+                binder_var(&sv),
+                vec![
+                    (raised.more_pattern(resumed), kept),
+                    (raised.done_pattern(d), left),
+                ],
+            ),
+        );
+        Some(Self::bind(app, sv, case))
+    }
+
+    /// Thread the accumulator through a bind whose head performs one of the
+    /// fused operations, rebinding the head's value only where the tail reads
+    /// it and guarding the tail where the scope can stop.
+    fn thread_producing_bind(
+        &mut self,
+        m: &TypedComp,
+        x: &TypedBinder,
+        n: &TypedComp,
+        evs: &BTreeMap<Sym, Sym>,
+        loc: &Loc,
+        st: &TypedBinder,
+    ) -> Option<TypedComp> {
+        let st2 = TypedBinder::new(self.mint("st"), st.ty().clone());
+        let tm = self.thread_st(m, evs, loc, st)?;
+        let mut loc2 = loc.clone();
+        loc2.insert(
+            x.name(),
+            flow::result_sig_in(m, loc, self.latent, self.flow),
+        );
+        let tn = self.thread_st(n, evs, &loc2, &st2)?;
+        let tn = if free_comp_vars(n).contains(&x.name()) {
+            // A read exposes the prior accumulator and a write exposes unit. A
+            // producing head outside those operation shapes has no value the
+            // threaded accumulator can recreate. Producer-answer plans decline;
+            // accumulator-answer plans admit only Unit, whose single inhabitant
+            // can be rebuilt, and assert that exclusion before doing so.
+            let Some(bound) =
+                bound_producer_result(self.plan.answer, self.op_tail_kind(m, loc, evs), st, x.ty())
+            else {
+                return self.bail("a producing head whose value the accumulator cannot recreate");
+            };
+            TypedComp::new(
+                tn.sig().clone(),
+                TypedCompKind::Bind(
+                    Box::new(TypedComp::new(
+                        CompSig::new(bound.ty().clone(), EffRow::Empty),
+                        TypedCompKind::Return(bound),
+                    )),
+                    x.clone(),
+                    Box::new(tn),
+                ),
+            )
+        } else {
+            tn
+        };
+        // In a stepped scope the producer stops once the accumulator yields
+        // `SDone`, guarding with the scope's one Step decision.
+        let tn = match self.step.clone() {
+            Some(step) => self.step_guard(&step, &st2, tn),
+            None => tn,
+        };
+        Some(Self::bind(tm, st2, tn))
+    }
+
+    /// Thread the accumulator through a call to a function planned as a
+    /// producer of the fused operations: pass the evidence its operations need
+    /// and the accumulator itself, and instantiate the quantifiers the plan
+    /// gave its signature at what this scope concretely threads.
+    #[allow(clippy::too_many_arguments)]
+    fn thread_producer_call(
+        &mut self,
+        c: &TypedComp,
+        callee: Sym,
+        instantiation: &[CoreInstantiation],
+        args: &[TypedValue],
+        evs: &BTreeMap<Sym, Sym>,
+        loc: &Loc,
+        st: &TypedBinder,
+    ) -> Option<TypedComp> {
+        // One evidence argument per fused operation latent in the callee,
+        // whatever channel each one takes, because that is the list its
+        // signature declares. A scope threading an accumulator can reach a
+        // producer that also carries a value-channel operation, and narrowing
+        // to the operations this scope threads would drop that argument.
+        let callee_ops: BTreeSet<Sym> = self
+            .latent
+            .get(&callee)
+            .map(|s| {
+                s.iter()
+                    .map(|m| m.id)
+                    .filter(|id| self.plan.ops.contains(id))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut a: Vec<TypedValue> = args
+            .iter()
+            .map(|arg| self.rewrite_value(arg, loc, evs))
+            .collect::<Option<_>>()?;
+        a.extend(self.evidence_args(evs, &callee_ops, st.ty())?);
+        // A producer of value-channel operations alone takes no accumulator
+        // and answers with its own value, stepped over the abort's payload
+        // when one of them aborts: the accumulator runs straight through it,
+        // and a step already done is this scope's own.
+        if self.plan.channel(&callee_ops) == Some(Channel::Value) {
+            return self.thread_value_producer_call(callee, instantiation, a, st);
+        }
+        a.push(binder_var(st));
+        // The callee's signature gained quantifiers when it was planned as a
+        // producer, and every reference must instantiate them: the state type
+        // at what the accumulator concretely is here, and the ambient row at
+        // the residual this call runs under.
+        let mut inst = instantiation.to_vec();
+        let numbered = {
+            let mut v: Vec<i64> = callee_ops
+                .iter()
+                .map(|op| self.ids.id(*op))
+                .collect::<Option<_>>()?;
+            v.sort_unstable();
+            v
+        };
+        let sig = self.signatures.get(&callee).cloned();
+        // An effect parameter the callee names no argument for is fixed here,
+        // by the label the row argument this call hands over spells.
+        for q in sig
+            .iter()
+            .flat_map(|sig| sig.quantifiers().iter().skip(instantiation.len()))
+        {
+            if let CoreQuantifier::Type(name) = q {
+                if names::is_effect_param(name.as_str()) {
+                    inst.push(CoreInstantiation::Type(
+                        self.effect_param(*name, instantiation),
+                    ));
+                }
+            }
+        }
+        let threading = accumulator_type(self.plan, &callee_ops, &numbered)?;
+        if threading.state.is_some() {
+            // The state quantifier is the BASE accumulator: a stepped scope's
+            // callee wraps its own Step around the declared accumulator, so
+            // instantiating at the stepped type would wrap twice.
+            let base = match &self.step {
+                Some(step) => step.more.clone(),
+                None => source_type(st.ty()).ok()?,
+            };
+            inst.push(CoreInstantiation::Type(base));
+        }
+        if threading.done.is_some() {
+            let Some(step) = &self.step else {
+                return self.bail("an aborting producer called outside a stepped scope");
+            };
+            inst.push(CoreInstantiation::Type(step.done.clone()));
+        }
+        // A callee that named its declared tail as its ambient carries that
+        // quantifier in declared position and gained no row: the slot the
+        // caller wrote is instantiated at this scope's row joined with the
+        // caller's residual argument. Any other callee gained the row last.
+        let named = sig
+            .as_ref()
+            .and_then(|sig| {
+                let EffRow::Var(tail) = sig.body().effects().tail() else {
+                    return None;
+                };
+                sig.quantifiers()
+                    .iter()
+                    .position(|q| matches!(q, CoreQuantifier::Row(name) if name == tail))
+            })
+            .filter(|slot| *slot < instantiation.len());
+        match (named, &sig) {
+            (Some(slot), Some(sig)) => {
+                let residual = self.residual_instantiation(&inst[slot..=slot]);
+                inst[slot] =
+                    CoreInstantiation::Row(self.widened(sig.body().effects(), &residual[0]));
+            }
+            _ => inst.push(CoreInstantiation::Row(sig.as_ref().map_or_else(
+                || self.row.clone(),
+                |sig| self.gained_row(sig.body().effects()),
+            ))),
+        }
+        let applied = sig.as_ref().and_then(|sig| instantiate_fn(sig, &inst).ok());
+        if let Some(applied) = applied {
+            for (arg, want) in a.iter().zip(applied.params()).take(args.len()) {
+                self.accepts(arg, want)?;
+            }
+        }
+        let result = self.threaded_result(st, c.sig().result())?;
+        Some(TypedComp::new(
+            CompSig::new(result, self.row.clone()),
+            TypedCompKind::Call {
+                callee,
+                instantiation: inst,
+                args: a,
+            },
+        ))
+    }
+
+    /// A call to a producer of value-channel operations from a scope threading
+    /// an accumulator: the call takes the value scope's arguments, and its
+    /// answer, stepped where the callee can abort, is read into this scope.
+    fn thread_value_producer_call(
+        &mut self,
+        callee: Sym,
+        instantiation: &[CoreInstantiation],
+        args: Vec<TypedValue>,
+        st: &TypedBinder,
+    ) -> Option<TypedComp> {
+        let sig = self.signatures.get(&callee)?.clone();
+        let inst = self.producer_instantiation(&sig, instantiation)?;
+        let answer = instantiate_fn(&sig, &inst).ok()?.body().result().clone();
+        let call = TypedComp::new(
+            CompSig::new(answer.clone(), self.row.clone()),
+            TypedCompKind::Call {
+                callee,
+                instantiation: inst,
+                args,
+            },
+        );
+        let r = TypedBinder::new(self.mint("r"), answer.clone());
+        let Some(raised) = StepAt::of(&answer) else {
+            let kept = self.value_through(st, binder_var(&r))?;
+            return Some(Self::bind(call, r, kept));
+        };
+        let Some(step) = self.step.clone() else {
+            return self.bail("an aborting producer called outside a stepped scope");
+        };
+        let v = TypedBinder::new(self.mint("v"), CoreType::Source(raised.more.clone()));
+        let kept = self.value_through(st, binder_var(&v))?;
+        let Some(out) = StepAt::of(kept.sig().result()) else {
+            return self.bail("an aborting producer called where the accumulator is not stepped");
+        };
+        let d = TypedBinder::new(self.mint("d"), CoreType::Source(step.done));
+        let left = Self::returning(out.sdone(binder_var(&d)), out.ty());
+        let case = TypedComp::new(
+            CompSig::new(
+                kept.sig().result().clone(),
+                union_effects(kept.sig().effects(), left.sig().effects()),
+            ),
+            TypedCompKind::Case(
+                binder_var(&r),
+                vec![
+                    (raised.more_pattern(v), kept),
+                    (raised.done_pattern(d), left),
+                ],
+            ),
+        );
+        Some(Self::bind(call, r, case))
+    }
+
+    /// What a scope yields once a value-channel operation answered `v` and
+    /// left the accumulator where it was.
+    fn value_through(&mut self, st: &TypedBinder, v: TypedValue) -> Option<TypedComp> {
+        if self.pairs() {
+            self.yield_pair(st, v)
+        } else {
+            Some(Self::returning(binder_var(st), st.ty().clone()))
+        }
+    }
+
     /// Thread `c`, whose accumulator is currently named `st`. `evs` maps each
     /// fused operation to the evidence active for it here.
     pub(super) fn thread_st(
@@ -204,7 +956,35 @@ impl Threader<'_> {
         loc: &Loc,
         st: &TypedBinder,
     ) -> Option<TypedComp> {
-        let ops: BTreeSet<Sym> = evs.keys().copied().collect();
+        // A bind spine is threaded a node at a time, so the recursion is as deep
+        // as the program's longest sequence; grow stack segments inside it, the
+        // same discipline the shared descent keeps.
+        let out = on_core_stack(|| self.thread_st_on_core_stack(c, evs, loc, st));
+        self.dropped(c, out)
+    }
+
+    fn thread_st_on_core_stack(
+        &mut self,
+        c: &TypedComp,
+        evs: &BTreeMap<Sym, Sym>,
+        loc: &Loc,
+        st: &TypedBinder,
+    ) -> Option<TypedComp> {
+        // A value-channel operation that resumes takes no accumulator and
+        // answers with its own value, so a scope threading state runs straight
+        // through it. Only an abort among them decides anything here, since the
+        // scope it leaves through is the one holding the accumulator.
+        let ops: BTreeSet<Sym> = evs
+            .keys()
+            .copied()
+            .filter(|op| !self.plan.value_shaped(*op) || self.plan.aborts.contains(op))
+            .collect();
+        // The value-channel operations this scope holds evidence for and does
+        // not thread. A head or tail performing only those is the value
+        // route's, where it stands: it takes the evidence its callees and
+        // carriers declare and answers with its own value, and the
+        // accumulator passes through it untouched.
+        let valued: BTreeSet<Sym> = evs.keys().copied().filter(|op| !ops.contains(op)).collect();
         Some(match c.kind() {
             // `let g = handle s(()) with <stake>; g(n)`: a parameter-passing
             // early-terminating handler, lowered via the `Step` protocol.
@@ -233,50 +1013,95 @@ impl Threader<'_> {
                 );
                 self.thread_st(&flat, evs, loc, st)?
             }
+            // A bind whose head performs an operation, where the head already
+            // carries its own value beside the accumulator: the binder reads
+            // that value straight off the pair, so no shape of head has to be
+            // one the threading can rebuild a value for.
+            TypedCompKind::Bind(m, x, n)
+                if self.pairs() && produces(m, loc, &ops, self.latent, self.flow) =>
+            {
+                let tm = self.thread_st(m, evs, loc, st)?;
+                let mut loc2 = loc.clone();
+                loc2.insert(
+                    x.name(),
+                    flow::result_sig_in(m, loc, self.latent, self.flow),
+                );
+                let reads = free_comp_vars(n).contains(&x.name());
+                let (st2, val) = self.pair_binders(&tm, reads.then_some(x))?;
+                if let Some(val) = &val {
+                    if val.ty() != x.ty() {
+                        self.retyped.insert(x.name(), val.ty().clone());
+                    }
+                }
+                let tn = self.thread_st(n, evs, &loc2, &st2)?;
+                self.split_pair(tm, st2, val, tn)?
+            }
             // A bind whose head performs an operation: thread the accumulator
             // through it and rebind. The head's result is bound only if the tail
             // still needs it: a read observes the pre-operation accumulator, a
             // write yields unit.
             TypedCompKind::Bind(m, x, n) if produces(m, loc, &ops, self.latent, self.flow) => {
-                let st2 = TypedBinder::new(self.mint("st"), st.ty().clone());
-                let tm = self.thread_st(m, evs, loc, st)?;
-                let mut loc2 = loc.clone();
-                loc2.insert(x.name(), flow::result_sig(m, loc, self.latent, self.flow));
-                let tn = self.thread_st(n, evs, &loc2, &st2)?;
-                let tn = if free_comp_vars(n).contains(&x.name()) {
-                    // A read exposes the prior accumulator and a write exposes
-                    // unit. A producing head outside those operation shapes has
-                    // no value the threaded accumulator can recreate.
-                    // Producer-answer plans decline; accumulator-answer plans
-                    // admit only Unit, whose single inhabitant can be rebuilt,
-                    // and assert that exclusion before doing so.
-                    let bound = bound_producer_result(
-                        self.plan.answer,
-                        self.op_tail_kind(m, loc, evs),
-                        st,
-                        x.ty(),
-                    )?;
-                    TypedComp::new(
-                        tn.sig().clone(),
-                        TypedCompKind::Bind(
-                            Box::new(TypedComp::new(
-                                CompSig::new(bound.ty().clone(), EffRow::Empty),
-                                TypedCompKind::Return(bound),
-                            )),
-                            x.clone(),
-                            Box::new(tn),
-                        ),
-                    )
+                self.thread_producing_bind(m, x, n, evs, loc, st)?
+            }
+            // An abort performed inside a threaded scope takes no accumulator:
+            // it never resumes, so its clause answers a step whose done payload
+            // is this scope's. The resuming arm is reachable only where another
+            // handler answers the operation without leaving, and the
+            // accumulator it left is still the one in hand.
+            TypedCompKind::Do {
+                operation,
+                instantiation,
+                args,
+            } if evs.contains_key(operation)
+                && ops.contains(operation)
+                && self.plan.value_shaped(*operation) =>
+            {
+                self.abort_do(
+                    operation,
+                    instantiation,
+                    args,
+                    c.sig().result(),
+                    evs,
+                    loc,
+                    st,
+                )?
+            }
+            // A stopping arm: an abort its own fold answers. It takes the
+            // accumulator like any other arm of that fold and never gives one
+            // back, so its clause hands back the payload the fold stops with
+            // and this site puts that payload into its own step.
+            TypedCompKind::Do {
+                operation,
+                instantiation,
+                args,
+            } if evs.contains_key(operation) && self.plan.stops(*operation) => {
+                self.stop_do(c, operation, instantiation, args, evs, loc, st)?
+            }
+            // A resuming value-channel operation in tail position answers with
+            // its own value and leaves the accumulator where it was, so the
+            // scope yields that accumulator, beside the value where the two
+            // travel together.
+            TypedCompKind::Do { operation, .. }
+                if evs.contains_key(operation) && !ops.contains(operation) =>
+            {
+                let m = self.rewrite(c, loc, evs)?;
+                let v = TypedBinder::new(self.mint("v"), m.sig().result().clone());
+                let rest = if self.pairs() {
+                    self.yield_pair(st, binder_var(&v))?
                 } else {
-                    tn
+                    Self::returning(binder_var(st), st.ty().clone())
                 };
-                // In early mode the producer stops once a stake yields
-                // `SDone`, guarding with the scope's one Step decision.
-                let tn = match (self.plan.early.short_circuits(), self.step.clone()) {
-                    (true, Some(step)) => self.step_guard(&step, &st2, tn),
-                    _ => tn,
-                };
-                Self::bind(tm, st2, tn)
+                Self::bind(m, v, rest)
+            }
+            // A tail producer head that also carries its value: step the
+            // accumulator, then yield it beside what the operation resumes
+            // with, since the tail is where the scope's own value is decided.
+            TypedCompKind::Do {
+                operation,
+                instantiation,
+                args,
+            } if self.pairs() && evs.contains_key(operation) => {
+                self.pair_do(c, operation, instantiation, args, evs, loc, st)?
             }
             // Tail producer heads append the accumulator and return the new one.
             TypedCompKind::Do {
@@ -290,17 +1115,28 @@ impl Threader<'_> {
                     .map(|arg| self.rewrite_value(arg, loc, evs))
                     .collect::<Option<_>>()?;
                 a.push(binder_var(st));
-                Self::apply_clause(&ev, instantiation, a, st)?
+                Self::apply_clause(&ev, instantiation, a, st, self.plan.paired(*operation))?
+            }
+            TypedCompKind::Return(v) if self.pairs() => {
+                let v2 = self.rewrite_value(v, loc, evs)?;
+                self.yield_pair(st, v2)?
             }
             TypedCompKind::Return(_) => TypedComp::new(
                 CompSig::new(st.ty().clone(), EffRow::Empty),
                 TypedCompKind::Return(binder_var(st)),
             ),
             TypedCompKind::If(v, t, e) => {
+                // A branch's row is read off the threaded branches, as the
+                // verifier reads it: one side may carry the fused evidence
+                // where the other returns outright.
                 let t2 = self.thread_st(t, evs, loc, st)?;
                 let e2 = self.thread_st(e, evs, loc, st)?;
+                let Ok(row) = union_rows(t2.sig().effects(), e2.sig().effects()) else {
+                    return self.bail("branches threaded at rows with distinct open tails");
+                };
+                let sig = CompSig::new(t2.sig().result().clone(), row);
                 TypedComp::new(
-                    t2.sig().clone(),
+                    sig,
                     TypedCompKind::If(v.clone(), Box::new(t2), Box::new(e2)),
                 )
             }
@@ -309,7 +1145,11 @@ impl Threader<'_> {
             // a head whose value the rewrite retyped retypes its binder and
             // every read after it.
             TypedCompKind::Bind(m, x, n) => {
-                let m2 = self.rewrite(m, loc, evs)?;
+                let m2 = if produces(m, loc, &valued, self.latent, self.flow) {
+                    self.thread_val(m, evs, loc, false)?
+                } else {
+                    self.rewrite_head(m, x, n, loc, evs)?
+                };
                 let x2 = if m2.sig().result() == x.ty() {
                     x.clone()
                 } else {
@@ -317,9 +1157,12 @@ impl Threader<'_> {
                     TypedBinder::new(x.name(), m2.sig().result().clone())
                 };
                 let mut loc2 = loc.clone();
-                loc2.insert(x.name(), flow::result_sig(m, loc, self.latent, self.flow));
+                loc2.insert(
+                    x.name(),
+                    flow::result_sig_in(m, loc, self.latent, self.flow),
+                );
                 let n2 = self.thread_st(n, evs, &loc2, st)?;
-                Self::bind(m2, x2, n2)
+                self.bound(m2, x2, n2)?
             }
             // A tail call to a producer: append this call site's evidence, in the
             // same ascending operation-id order the producer declares it in, and
@@ -329,64 +1172,12 @@ impl Threader<'_> {
                 instantiation,
                 args,
             } if produces(c, loc, &ops, self.latent, self.flow) => {
-                let callee_ops: BTreeSet<Sym> = self
-                    .latent
-                    .get(callee)
-                    .map(|s| {
-                        s.iter()
-                            .map(|m| m.id)
-                            .filter(|id| ops.contains(id))
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                let mut a: Vec<TypedValue> = args
-                    .iter()
-                    .map(|arg| self.rewrite_value(arg, loc, evs))
-                    .collect::<Option<_>>()?;
-                a.extend(self.evidence_args(evs, &callee_ops, st.ty())?);
-                a.push(binder_var(st));
-                // The callee's signature gained quantifiers when it was planned
-                // as a producer, and every reference must instantiate them: the
-                // state type at what the accumulator concretely is here, and the
-                // ambient row at the residual this call runs under.
-                let mut inst = instantiation.clone();
-                let numbered = {
-                    let mut v: Vec<i64> = callee_ops
-                        .iter()
-                        .map(|op| self.ids.id(*op))
-                        .collect::<Option<_>>()?;
-                    v.sort_unstable();
-                    v
-                };
-                if accumulator_type(self.plan, &callee_ops, &numbered)?
-                    .1
-                    .is_some()
-                {
-                    // (three-tuple now; .1 is still the state quantifier)
-                    // The state quantifier is the BASE accumulator: a stepped
-                    // scope's callee wraps its own Step around the declared
-                    // accumulator, so instantiating at the stepped type would
-                    // wrap twice.
-                    let base = match &self.step {
-                        Some(step) => step.done.clone(),
-                        None => source_type(st.ty()).ok()?,
-                    };
-                    inst.push(CoreInstantiation::Type(base));
-                }
-                inst.push(CoreInstantiation::Row(self.row.clone()));
-                TypedComp::new(
-                    CompSig::new(st.ty().clone(), self.row.clone()),
-                    TypedCompKind::Call {
-                        callee: *callee,
-                        instantiation: inst,
-                        args: a,
-                    },
-                )
+                self.thread_producer_call(c, *callee, instantiation, args, evs, loc, st)?
             }
             TypedCompKind::Case(v, arms) => {
                 let arms: Vec<_> = arms
                     .iter()
-                    .map(|(p, b)| Some((p.clone(), self.thread_st(b, evs, loc, st)?)))
+                    .map(|(p, b)| self.arm(p, |this| this.thread_st(b, evs, loc, st)))
                     .collect::<Option<_>>()?;
                 // The case's row is the residual it runs under, not whatever a
                 // single arm's tail locally reports: an arm ending in a bare
@@ -395,7 +1186,7 @@ impl Threader<'_> {
                 let result = arms.first().map(|(_, b)| b.sig().result().clone())?;
                 TypedComp::new(
                     CompSig::new(result, self.row.clone()),
-                    TypedCompKind::Case(v.clone(), arms),
+                    TypedCompKind::Case(self.scrutinee(v), arms),
                 )
             }
             // A force of an escaping producer thunk: the thunk gained evidence
@@ -410,47 +1201,75 @@ impl Threader<'_> {
                 args,
             } if produces(c, loc, &ops, self.latent, self.flow) => {
                 let TypedCompKind::Force(v) = callee.kind() else {
-                    return None;
+                    return self.bail("a producing application whose callee is not a force");
                 };
-                let v2 = self.retyped.rebuild(v);
+                let v2 = self.retyped.rebuild_through(v);
                 let CoreType::Thunk(thunk) = v2.ty().clone() else {
-                    return None;
+                    return self.bail("a forced producer that is not a thunk");
                 };
                 let CoreType::Function(fun) = thunk.result() else {
-                    return None;
+                    return self.bail("a forced producer thunk that is not a function");
                 };
                 let mut a: Vec<TypedValue> = args
                     .iter()
                     .map(|arg| self.rewrite_value(arg, loc, evs))
                     .collect::<Option<_>>()?;
-                let carried: BTreeSet<Sym> = flow::value_sig(v, loc, self.latent)
+                // One evidence argument per fused operation the carrier
+                // performs, whatever channel each one takes, because that is
+                // the list its widened type declares: a stored carrier of a
+                // value-channel operation beside the accumulator's takes
+                // both, and narrowing to the operations this scope threads
+                // would drop the first.
+                let carried: BTreeSet<Sym> = flow::value_sig_in(v, loc, self.latent, self.flow)
                     .into_iter()
                     .map(|masked| masked.id)
-                    .filter(|operation| ops.contains(operation))
+                    .filter(|operation| self.plan.ops.contains(operation))
                     .collect();
                 a.extend(self.evidence_args(evs, &carried, st.ty())?);
                 a.push(binder_var(st));
                 let mut inst = instantiation.clone();
                 for q in fun.quantifiers().iter().skip(instantiation.len()) {
                     match q {
+                        CoreQuantifier::Type(name) if names::is_effect_param(name.as_str()) => {
+                            inst.push(CoreInstantiation::Type(
+                                self.effect_param(*name, instantiation),
+                            ));
+                        }
+                        // A carrier that aborts binds a done payload beside its
+                        // accumulator, and only the name says which is which.
+                        CoreQuantifier::Type(name) if names::is_done_type(name.as_str()) => {
+                            let Some(step) = &self.step else {
+                                return self
+                                    .bail("an aborting carrier forced outside a stepped scope");
+                            };
+                            inst.push(CoreInstantiation::Type(step.done.clone()));
+                        }
                         CoreQuantifier::Type(_) => {
                             let base = match &self.step {
-                                Some(step) => step.done.clone(),
+                                Some(step) => step.more.clone(),
                                 None => source_type(st.ty()).ok()?,
                             };
                             inst.push(CoreInstantiation::Type(base));
                         }
                         CoreQuantifier::Row(_) => {
-                            inst.push(CoreInstantiation::Row(self.row.clone()));
+                            inst.push(CoreInstantiation::Row(
+                                self.gained_row(fun.body().effects()),
+                            ));
                         }
                     }
                 }
+                if let Ok(applied) = instantiate_fn(fun, &inst) {
+                    for (arg, want) in a.iter().zip(applied.params()).take(args.len()) {
+                        self.accepts(arg, want)?;
+                    }
+                }
                 let force = TypedComp::new(thunk.as_ref().clone(), TypedCompKind::Force(v2));
+                let result = self.threaded_result(st, c.sig().result())?;
                 TypedComp::new(
                     // The forced producer discharges its operations, so the App
                     // leaves the ambient residual, not the callee's stale source
                     // row.
-                    CompSig::new(st.ty().clone(), self.row.clone()),
+                    CompSig::new(result, self.row.clone()),
                     TypedCompKind::App {
                         callee: Box::new(force),
                         instantiation: inst,
@@ -458,12 +1277,37 @@ impl Threader<'_> {
                     },
                 )
             }
-            // A handle inside a producer is a re-emitting forwarder: it performs
-            // the operation again, so it threads rather than consumes.
-            TypedCompKind::Handle { .. } => self.thread_forward(c, evs, loc, st)?,
+            // A handle inside a producer either re-emits its operation, and so
+            // threads rather than consumes it, or discharges it in tail
+            // position, which the enclosing scope runs straight through.
+            TypedCompKind::Handle { .. } => {
+                if self.consumes(c) {
+                    self.thread_consumer(c, evs, loc, st)?
+                } else {
+                    self.thread_forward(c, evs, loc, st)?
+                }
+            }
+            // A tail performing only value-channel operations runs the value
+            // route where it stands and yields its answer beside the
+            // accumulator it never touched.
+            _ if produces(c, loc, &valued, self.latent, self.flow) => {
+                let m = self.thread_val(c, evs, loc, false)?;
+                let v = TypedBinder::new(self.mint("v"), m.sig().result().clone());
+                let rest = self.value_through(st, binder_var(&v))?;
+                Self::bind(m, v, rest)
+            }
+            // A tail that performs none of the fused operations still decides
+            // the scope's value, so a paired scope runs it and yields what it
+            // answered beside the accumulator it never touched.
+            _ if self.pairs() => {
+                let m = self.rewrite(c, loc, evs)?;
+                let v = TypedBinder::new(self.mint("v"), m.sig().result().clone());
+                let yielded = self.yield_pair(st, binder_var(&v))?;
+                Self::bind(m, v, yielded)
+            }
             // Take handles using the `Step` protocol and escaping producer thunks
             // carried by a pure head are not fused here.
-            _ => return None,
+            _ => return self.bail(format!("a {} in a state scope", kind_name(c.kind()))),
         })
     }
 
@@ -492,23 +1336,39 @@ impl Threader<'_> {
             return None;
         };
         let [clause] = ops.arms() else {
-            return None;
+            return self.bail("a forwarder with several arms");
         };
         // The forwarded body's final value passes straight through, so the return
-        // clause must be the identity: anything else would have to observe a value
-        // the threaded loop has already turned into an accumulator.
+        // clause must hand it on: anything else would have to observe a value the
+        // threaded loop has already turned into an accumulator.
         let erased_return = return_body.as_deref().map(|b| b.clone().erase());
-        if !evs.contains_key(&clause.name())
-            || !is_id_return(
-                return_binder.as_ref().map(TypedBinder::name),
-                erased_return.as_ref(),
-            )
-        {
-            return None;
+        if !evs.contains_key(&clause.name()) {
+            return self.bail(format!(
+                "a forwarder of `{}` without evidence in scope",
+                clause.name().as_str()
+            ));
+        }
+        if !passes_return(
+            return_binder.as_ref().map(TypedBinder::name),
+            erased_return.as_ref(),
+            self.plan.widen && unit_source(return_binder.as_ref()),
+        ) {
+            return self.bail(format!(
+                "a forwarder of `{}` whose return clause does not pass its value on",
+                clause.name().as_str()
+            ));
         }
         let mut aliases = BTreeSet::new();
         aliases.insert(clause.resume().name());
-        let stripped = strip_resume(clause.body(), &aliases, self.drift)?;
+        // A forwarder resumes in tail position. A clause that does not is a
+        // handler of another shape sitting where the threading expected one,
+        // and it has no shadow clause to establish.
+        let Some(stripped) = strip_resume(clause.body(), &aliases, self.drift) else {
+            return self.bail(format!(
+                "a handler of `{}` inside a producer whose clause is not a tail resumption",
+                clause.name().as_str()
+            ));
+        };
 
         // The final producer edge establishes the shadow's clause. Substitute
         // the edge's element and ambient tail through the body, keep every
@@ -578,6 +1438,9 @@ impl Threader<'_> {
         // into whatever the outer evidence is here.
         let acc = TypedBinder::new(self.mint("acc"), st.ty().clone());
         let ev_body = self.thread_st(&stripped, evs, loc, &acc)?;
+        // A clause is a state transformer under every convention, so a paired
+        // scope keeps only the accumulator at this boundary.
+        let ev_body = self.drop_value(ev_body)?;
         let mut ev_params = shadow_params;
         ev_params.push(acc);
         let lam = Self::lam(ev_params, ev_body);
@@ -607,8 +1470,121 @@ impl Threader<'_> {
         ))
     }
 
+    /// Whether a handle discharges its operations in tail position without
+    /// re-emitting them: a consumer, which threads nothing of its own.
+    fn consumes(&self, c: &TypedComp) -> bool {
+        self.plan.widen
+            && matches!(
+                judge_handle(c, self.latent, self.plan.widen, self.plan.reify),
+                Ok(HandleJudgment {
+                    class: HandleClass::Direct { abort: None },
+                    ..
+                })
+            )
+    }
+
+    /// Thread a direct consumer inside a live scope. Such a clause is a fold
+    /// clause that leaves the accumulator alone: it becomes evidence taking
+    /// the accumulator like any other arm and handing it back beside whatever
+    /// the clause resumes with, and the handled body goes on threading the
+    /// very same accumulator, so the scope reads straight through the handle.
+    fn thread_consumer(
+        &mut self,
+        c: &TypedComp,
+        evs: &BTreeMap<Sym, Sym>,
+        loc: &Loc,
+        st: &TypedBinder,
+    ) -> Option<TypedComp> {
+        let TypedCompKind::Handle {
+            body,
+            ops,
+            return_binder,
+            return_body,
+        } = c.kind()
+        else {
+            return None;
+        };
+        // The handled body decides this scope's value as much as any other
+        // tail does, so the return clause must hand that value on rather than
+        // observe one the threaded loop has already turned into state.
+        let erased_return = return_body.as_deref().map(|b| b.clone().erase());
+        if !passes_return(
+            return_binder.as_ref().map(TypedBinder::name),
+            erased_return.as_ref(),
+            self.plan.widen && unit_source(return_binder.as_ref()),
+        ) {
+            return self.bail("a consumer whose return clause does not pass its value on");
+        }
+        let under = self.handle_evidence(evs, ops)?;
+        // A clause is a value of the enclosing scope, so it answers with the
+        // evidence that scope holds and not with its siblings'.
+        let mut bound: Vec<(TypedBinder, TypedValue)> = Vec::new();
+        for clause in ops.arms() {
+            // An operation the value channel carries takes no accumulator here
+            // either: its clause is the one every other value-channel site
+            // calls.
+            let lam = if self.plan.value_shaped(clause.name()) {
+                self.direct_clause(clause, evs, loc, None)?
+            } else {
+                self.consumer_clause(clause, evs, loc, st)?
+            };
+            let ty = CoreType::Thunk(Box::new(lam.sig().clone()));
+            let ev = TypedBinder::new(*under.get(&clause.name())?, ty.clone());
+            self.evidence_types.insert(ev.name(), ty.clone());
+            let thunk = TypedValue::new(ty, TypedValueKind::Thunk(Box::new(lam)));
+            bound.push((ev, thunk));
+        }
+        let threaded = self.thread_st(body, &under, loc, st)?;
+        Some(bound.into_iter().rev().fold(threaded, |rest, (ev, thunk)| {
+            Self::bind(Self::returning(thunk, ev.ty().clone()), ev, rest)
+        }))
+    }
+
+    /// One clause of a direct consumer, as the evidence its perform sites
+    /// call: the operation's own parameters and the accumulator, then the
+    /// clause's body threaded through that accumulator, which leaves what it
+    /// resumes with exactly where the convention keeps the scope's value.
+    fn consumer_clause(
+        &mut self,
+        clause: &TypedHandleOp,
+        evs: &BTreeMap<Sym, Sym>,
+        loc: &Loc,
+        st: &TypedBinder,
+    ) -> Option<TypedComp> {
+        let aliases = BTreeSet::from([clause.resume().name()]);
+        let stripped = strip_resume(clause.body(), &aliases, self.drift)?;
+        // The performer binds the operation's declared result, so a clause of
+        // a unit-valued operation answers with unit whatever its body left
+        // behind.
+        let unit = CoreType::Source(Type::Unit);
+        let declared = value_scheme(self.env.operation(clause.name())?, clause.instantiation())?.2;
+        let stripped = if declared == unit && stripped.sig().result() != &unit {
+            let v = TypedBinder::new(self.mint("v"), stripped.sig().result().clone());
+            Self::bind(stripped, v, Self::returning(unit_value(), unit))
+        } else {
+            stripped
+        };
+        let acc = TypedBinder::new(self.mint("acc"), st.ty().clone());
+        let body = self.thread_st(&stripped, evs, loc, &acc)?;
+        // A clause takes the accumulator appended to the operation's own
+        // parameters, and a nullary operation's clause is not padded: the
+        // accumulator is the argument its perform sites pass.
+        let mut params = clause.params().to_vec();
+        params.push(acc);
+        let generic = if self.plan.entry.contains(&clause.name()) {
+            generic_quantifiers(
+                self.env.operation(clause.name())?,
+                clause.instantiation(),
+                &[],
+            )
+        } else {
+            Vec::new()
+        };
+        Some(Self::lam_quantified(generic, params, body))
+    }
+
     /// Lower a control consumer (a `for`/print loop): tail-resumptive but not
-    /// re-emitting, so its clause is a pure side effect over a unit state the
+    /// re-emitting, so each clause is a pure side effect over a unit state the
     /// producer threads unchanged, and its return clause runs on the final state.
     fn lower_consumer(
         &mut self,
@@ -625,64 +1601,148 @@ impl Threader<'_> {
         else {
             return None;
         };
-        let [clause] = ops.arms() else {
-            return None;
-        };
+        if ops.arms().is_empty() {
+            return self.bail("a consuming handler with no arms");
+        }
+        // The state a consumer threads is unit: it exists only so the clauses
+        // sit on the same edge the producer's do. An operation read elsewhere
+        // in the program pins that state to its own result, and this handler
+        // has no seed to offer at that type.
+        let threaded: BTreeSet<Sym> = ops
+            .arms()
+            .iter()
+            .map(TypedHandleOp::name)
+            .filter(|op| !self.plan.value_shaped(*op))
+            .collect();
+        if let Some(Accumulator::Pinned(ty)) = self.plan.accumulator_for(&threaded) {
+            if ty != CoreType::Source(Type::Unit) {
+                return self
+                    .bail("a consuming handler of an operation another scope reads for its state");
+            }
+        }
         let unit = CoreType::Source(Type::Unit);
-        let saved_row = mem::replace(&mut self.row, c.sig().effects().clone());
+        let row = self.handle_row(c)?;
+        let saved_row = mem::replace(&mut self.row, row);
+        let saved_evidence = self.evidence_types.clone();
+        let under = self.handle_evidence(evs, ops)?;
+        let saved_step = self.step.clone();
+        // The step the unit state runs under: the take protocol's, or the
+        // abort's live around this handle, whose payload every clause forwards
+        // and this handle re-raises where the abort escapes it.
+        let body_ops = self.body_ops(body, loc, evs, ops);
+        let step_at = self.scope_step(&unit, &body_ops);
+        let escapes = !self.plan.early.short_circuits() && self.passes_abort(c, loc);
+        if escapes && step_at.is_none() {
+            return self.bail("a consumer passing an abort outside a stepped scope");
+        }
+        if escapes && self.pairs() {
+            return self.bail("a consumer passing an abort beside a paired scope");
+        }
 
-        // Evidence: run the clause's side effects, then return the state.
-        let mut aliases = BTreeSet::new();
-        aliases.insert(clause.resume().name());
-        let stripped = strip_resume(clause.body(), &aliases, self.drift)?;
-        let st = TypedBinder::new(self.mint("st"), unit.clone());
-        let rewritten = self.rewrite(&stripped, loc, evs)?;
-        let d = TypedBinder::new(self.mint("d"), rewritten.sig().result().clone());
-        let ev_inner = TypedComp::new(
-            CompSig::new(unit.clone(), rewritten.sig().effects().clone()),
-            TypedCompKind::Bind(
-                Box::new(rewritten),
-                d,
-                Box::new(TypedComp::new(
-                    CompSig::new(unit.clone(), EffRow::Empty),
-                    TypedCompKind::Return(binder_var(&st)),
-                )),
-            ),
-        );
-        let mut ev_params = clause.params().to_vec();
-        let step_at = StepAt::new(Type::Unit, Type::Unit);
-        let ev_body = if self.plan.early.short_circuits() {
-            self.step = Some(step_at.clone());
-            let step = TypedBinder::new(self.mint("step"), step_at.ty());
-            let body = self.step_map(&step_at, &step, st, ev_inner);
-            ev_params.push(step);
-            body
-        } else {
-            ev_params.push(st);
-            ev_inner
-        };
-        let ev_lam = Self::lam(ev_params, ev_body);
-        let ev = TypedBinder::new(
-            *evs.get(&clause.name())?,
-            CoreType::Thunk(Box::new(ev_lam.sig().clone())),
-        );
-        self.evidence_types.insert(ev.name(), ev.ty().clone());
-        let ev_thunk = TypedValue::new(ev.ty().clone(), TypedValueKind::Thunk(Box::new(ev_lam)));
+        // Evidence: one lambda per arm, each running its clause's side effects
+        // and then returning the state. The arms of a consumer read and write
+        // nothing between them, because the state they share is unit, so they
+        // bind independently in clause order.
+        let mut bound: Vec<(TypedBinder, TypedValue)> = Vec::new();
+        for clause in ops.arms() {
+            // An operation the value channel carries takes no accumulator: its
+            // clause is the one every other value-channel site calls, and the
+            // state this handler threads runs past it untouched.
+            let ev_lam = if self.plan.value_shaped(clause.name()) {
+                self.direct_clause(clause, evs, loc, None)?
+            } else {
+                let aliases = BTreeSet::from([clause.resume().name()]);
+                let stripped = strip_resume(clause.body(), &aliases, self.drift)?;
+                let st = TypedBinder::new(self.mint("st"), unit.clone());
+                let mut ev_params = clause.params().to_vec();
+                // A clause that leaves through the abort live here runs as a
+                // value scope: its own answer is a step, and the state passes
+                // on inside `SMore` only where that answer did not leave.
+                let leaves = escapes && self.clause_leaves(clause, loc);
+                let ev_body = if let Some(at) = step_at.as_ref().filter(|_| leaves) {
+                    let threaded = self.thread_val(&stripped, evs, loc, true)?;
+                    let Some(got) = StepAt::of(threaded.sig().result()) else {
+                        return self.bail("a leaving clause whose answer is not a step");
+                    };
+                    let sv = TypedBinder::new(self.mint("sv"), got.ty());
+                    let w = TypedBinder::new(self.mint("w"), CoreType::Source(got.more.clone()));
+                    let d = TypedBinder::new(self.mint("d"), CoreType::Source(got.done.clone()));
+                    let passed = TypedComp::new(
+                        CompSig::new(at.ty(), EffRow::Empty),
+                        TypedCompKind::Case(
+                            binder_var(&sv),
+                            vec![
+                                (
+                                    got.more_pattern(w),
+                                    Self::returning(at.smore(binder_var(&st)), at.ty()),
+                                ),
+                                (
+                                    got.done_pattern(d.clone()),
+                                    Self::returning(at.sdone(binder_var(&d)), at.ty()),
+                                ),
+                            ],
+                        ),
+                    );
+                    let ev_inner = Self::bind(threaded, sv, passed);
+                    let step = TypedBinder::new(self.mint("step"), at.ty());
+                    let sd = TypedBinder::new(self.mint("sd"), CoreType::Source(at.done.clone()));
+                    let body = TypedComp::new(
+                        ev_inner.sig().clone(),
+                        TypedCompKind::Case(
+                            binder_var(&step),
+                            vec![
+                                (at.more_pattern(st), ev_inner),
+                                (
+                                    at.done_pattern(sd.clone()),
+                                    Self::returning(at.sdone(binder_var(&sd)), at.ty()),
+                                ),
+                            ],
+                        ),
+                    );
+                    ev_params.push(step);
+                    body
+                } else if let Some(at) = &step_at {
+                    let ev_inner = self.consumer_effects(&stripped, &st, loc, evs)?;
+                    let step = TypedBinder::new(self.mint("step"), at.ty());
+                    let body = self.step_fold(at, &step, st, ev_inner);
+                    ev_params.push(step);
+                    body
+                } else {
+                    let ev_inner = self.consumer_effects(&stripped, &st, loc, evs)?;
+                    ev_params.push(st);
+                    ev_inner
+                };
+                Self::lam(ev_params, ev_body)
+            };
+            let ev = TypedBinder::new(
+                *under.get(&clause.name())?,
+                CoreType::Thunk(Box::new(ev_lam.sig().clone())),
+            );
+            self.evidence_types.insert(ev.name(), ev.ty().clone());
+            let thunk = TypedValue::new(ev.ty().clone(), TypedValueKind::Thunk(Box::new(ev_lam)));
+            bound.push((ev, thunk));
+        }
+        if let Some(at) = &step_at {
+            self.step = Some(at.clone());
+        }
 
         // Seed unit, thread the producer, bind its result, run the return clause.
         let st0 = TypedBinder::new(
             self.mint("st"),
-            if self.plan.early.short_circuits() {
-                step_at.ty()
-            } else {
-                unit.clone()
-            },
+            step_at.as_ref().map_or_else(|| unit.clone(), StepAt::ty),
         );
-        let threaded = self.thread_st(body, evs, loc, &st0)?;
+        let threaded = self.thread_st(body, &under, loc, &st0)?;
         let fin = TypedBinder::new(self.mint("fin"), unit.clone());
-        let rv = return_binder
-            .clone()
-            .unwrap_or_else(|| TypedBinder::new(self.mint("r"), unit.clone()));
+        let rv = if let Some(b) = return_binder {
+            b.clone()
+        } else {
+            let ty = if self.pairs() {
+                pair_parts(threaded.sig().result())?.1
+            } else {
+                unit
+            };
+            TypedBinder::new(self.mint("r"), ty)
+        };
         let rb = match return_body {
             Some(b) => self.rewrite(b, loc, evs)?,
             None => TypedComp::new(
@@ -690,36 +1750,149 @@ impl Threader<'_> {
                 TypedCompKind::Return(binder_var(&rv)),
             ),
         };
-        let (seed, body_done) = if self.plan.early.short_circuits() {
-            (
-                step_at.smore(unit_value()),
-                self.seed_unwrap(&step_at, threaded),
-            )
-        } else {
-            (unit_value(), threaded)
-        };
+        let seed = step_at
+            .as_ref()
+            .map_or_else(unit_value, |at| at.smore(unit_value()));
         let bind = |head: TypedComp, x: TypedBinder, tail: TypedComp| Self::bind(head, x, tail);
         let read_fin = TypedComp::new(
             CompSig::new(fin.ty().clone(), EffRow::Empty),
             TypedCompKind::Return(binder_var(&fin)),
         );
-        let after = bind(body_done, fin, bind(read_fin, rv, rb));
+        // A consumer threads a unit state, so under the paired convention the
+        // value the return clause runs on is the pair's second component
+        // rather than that unit.
+        let after = match &step_at {
+            Some(at) if escapes => self.consumer_reraise(at, threaded, rv, rb)?,
+            _ if self.pairs() => {
+                let body_done = self.consumer_unwrap(step_at.as_ref(), threaded);
+                let (acc, value) = self.pair_binders(&body_done, Some(&rv))?;
+                self.split_pair(body_done, acc, value, rb)?
+            }
+            _ => {
+                let body_done = self.consumer_unwrap(step_at.as_ref(), threaded);
+                bind(body_done, fin, bind(read_fin, rv, rb))
+            }
+        };
+        self.evidence_types = saved_evidence;
         self.row = saved_row;
-        Some(bind(
+        // A take's step is the plan's and stays live for the tail that
+        // consumes it; an abort's step is this handle's own.
+        if !self.plan.early.short_circuits() {
+            self.step = saved_step;
+        }
+        let inner = bind(
             TypedComp::new(
-                CompSig::new(ev_thunk.ty().clone(), EffRow::Empty),
-                TypedCompKind::Return(ev_thunk),
+                CompSig::new(seed.ty().clone(), EffRow::Empty),
+                TypedCompKind::Return(seed),
             ),
-            ev,
+            st0,
+            after,
+        );
+        Some(bound.into_iter().rev().fold(inner, |tail, (ev, thunk)| {
             bind(
                 TypedComp::new(
-                    CompSig::new(seed.ty().clone(), EffRow::Empty),
-                    TypedCompKind::Return(seed),
+                    CompSig::new(thunk.ty().clone(), EffRow::Empty),
+                    TypedCompKind::Return(thunk),
                 ),
-                st0,
-                after,
+                ev,
+                tail,
+            )
+        }))
+    }
+
+    /// A consumer clause's side effects, then the unit state it was handed.
+    fn consumer_effects(
+        &mut self,
+        stripped: &TypedComp,
+        st: &TypedBinder,
+        loc: &Loc,
+        evs: &BTreeMap<Sym, Sym>,
+    ) -> Option<TypedComp> {
+        let rewritten = self.rewrite(stripped, loc, evs)?;
+        let d = TypedBinder::new(self.mint("d"), rewritten.sig().result().clone());
+        Some(TypedComp::new(
+            CompSig::new(st.ty().clone(), rewritten.sig().effects().clone()),
+            TypedCompKind::Bind(
+                Box::new(rewritten),
+                d,
+                Box::new(TypedComp::new(
+                    CompSig::new(st.ty().clone(), EffRow::Empty),
+                    TypedCompKind::Return(binder_var(st)),
+                )),
             ),
         ))
+    }
+
+    /// Unwrap a consumer's final unit state: bare where the scope runs to its
+    /// end, out of `SMore` where it steps. A take's `SDone` is its own answer;
+    /// an abort's cannot arrive at a handle that stops every operation raising
+    /// it, and that arm is an error.
+    fn consumer_unwrap(&mut self, step: Option<&StepAt>, threaded: TypedComp) -> TypedComp {
+        let Some(step) = step else {
+            return threaded;
+        };
+        if step.more == step.done {
+            return self.seed_unwrap(step, threaded);
+        }
+        let fin = TypedBinder::new(self.mint("fin"), step.ty());
+        let a = TypedBinder::new(self.mint("a"), CoreType::Source(step.more.clone()));
+        let d = TypedBinder::new(self.mint("d"), CoreType::Source(step.done.clone()));
+        let unreached = TypedComp::new(
+            CompSig::new(a.ty().clone(), EffRow::Empty),
+            TypedCompKind::Error(TypedValue::new(
+                CoreType::Source(Type::Str),
+                TypedValueKind::Str("ICE: an abort reached the handler that stops it".into()),
+            )),
+        );
+        let unwrap = TypedComp::new(
+            CompSig::new(a.ty().clone(), EffRow::Empty),
+            TypedCompKind::Case(
+                binder_var(&fin),
+                vec![
+                    (
+                        step.more_pattern(a.clone()),
+                        Self::returning(binder_var(&a), a.ty().clone()),
+                    ),
+                    (step.done_pattern(d), unreached),
+                ],
+            ),
+        );
+        Self::bind(threaded, fin, unwrap)
+    }
+
+    /// Answer a consumer the abort escapes: the return clause runs on a body
+    /// that ran to its end and its answer steps beside the abort re-raised.
+    fn consumer_reraise(
+        &mut self,
+        step: &StepAt,
+        threaded: TypedComp,
+        rv: TypedBinder,
+        rb: TypedComp,
+    ) -> Option<TypedComp> {
+        let fin = TypedBinder::new(self.mint("fin"), step.ty());
+        let a = TypedBinder::new(self.mint("a"), CoreType::Source(step.more.clone()));
+        let d = TypedBinder::new(self.mint("d"), CoreType::Source(step.done.clone()));
+        let out = StepAt::new(source_type(rb.sig().result()).ok()?, step.done.clone());
+        let r = TypedBinder::new(self.mint("r"), rb.sig().result().clone());
+        let row = rb.sig().effects().clone();
+        let more = Self::bind(
+            Self::returning(binder_var(&a), rv.ty().clone()),
+            rv,
+            Self::bind(
+                rb,
+                r.clone(),
+                Self::returning(out.smore(binder_var(&r)), out.ty()),
+            ),
+        );
+        let raised = Self::returning(out.sdone(binder_var(&d)), out.ty());
+        let answer = TypedComp::new(
+            CompSig::new(out.ty(), row),
+            TypedCompKind::Case(
+                binder_var(&fin),
+                vec![(step.more_pattern(a), more), (step.done_pattern(d), raised)],
+            ),
+        );
+        Some(Self::bind(threaded, fin, answer))
     }
 
     /// Lower a fold handle: bind one state-transformer evidence per clause, then
@@ -735,6 +1908,7 @@ impl Threader<'_> {
         c: &TypedComp,
         evs: &BTreeMap<Sym, Sym>,
         loc: &Loc,
+        halt: Option<Sym>,
     ) -> Option<TypedComp> {
         let TypedCompKind::Handle {
             body,
@@ -751,7 +1925,7 @@ impl Threader<'_> {
         let erased = clauses.clone().erase();
         let shared: Vec<Option<FoldAKind>> = erased
             .iter_with_use()
-            .map(|(clause, ru)| is_fold(clause, ru))
+            .map(|(clause, ru)| is_fold(clause, ru, self.plan.widen))
             .collect();
 
         // The accumulator's type at this handle is written on the clause lambdas
@@ -759,24 +1933,44 @@ impl Threader<'_> {
         // type the seed will arrive at. The minted state quantifier is never used
         // here; a handle is a concrete instantiation site, not a parametric one.
         // The handle's residual is the row the whole handle expression carries:
-        // what remains once its operations are discharged, which is exactly the
-        // row its evidence clauses run under and its producer calls instantiate.
-        let saved_row = mem::replace(&mut self.row, c.sig().effects().clone());
+        // what remains once its operations are discharged. Joined with the
+        // enclosing scope's row, it is the row its evidence clauses run under
+        // and its producer calls instantiate.
+        let row = self.handle_row(c)?;
+        let saved_row = mem::replace(&mut self.row, row);
+        let saved_evidence = self.evidence_types.clone();
+        let under = self.handle_evidence(evs, clauses)?;
+        let body_ops = self.body_ops(body, loc, evs, clauses);
+        let saved_step = self.step.clone();
+        // A stopping arm answers the handle, so the step's done payload is what
+        // its transformer returns and this site is where that payload lands.
+        let answer_ty = match halt {
+            Some(op) => Some(
+                clauses
+                    .arms()
+                    .iter()
+                    .find(|arm| arm.name() == op)
+                    .and_then(|arm| transformer(arm.body()))
+                    .and_then(|(_, inner)| source_type(inner.sig().result()).ok())?,
+            ),
+            // A producer beside an abort threads the step wherever it is
+            // carried, so a scope no abort reaches still forces stepped
+            // producers. Their done payload is never built, and the handle's
+            // own answer stands in for it: the payload arm then returns it
+            // exactly as a stopping arm's would.
+            None if self.plan.folds_an_abort(&body_ops)
+                && self.live_done().is_none()
+                && !self.plan.early.short_circuits() =>
+            {
+                let (_, inner) = return_body.as_deref().and_then(transformer)?;
+                Some(source_type(inner.sig().result()).ok()?)
+            }
+            None => None,
+        };
         let mut handle_acc: Option<CoreType> = None;
         let mut ev_binds: Vec<(TypedBinder, TypedValue)> = Vec::with_capacity(clauses.arms().len());
         for (index, clause) in clauses.arms().iter().enumerate() {
-            let TypedCompKind::Return(v) = clause.body().kind() else {
-                return None;
-            };
-            let TypedValueKind::Thunk(t) = &peel(v).kind else {
-                return None;
-            };
-            let TypedCompKind::Lam(ps, inner) = t.kind() else {
-                return None;
-            };
-            let [acc] = ps.as_slice() else {
-                return None;
-            };
+            let (acc, inner) = transformer(clause.body())?;
             // One handle threads one accumulator, so its clauses must agree on
             // the type; the gate's per-producer pin check already refused the
             // programs where they cannot.
@@ -784,28 +1978,39 @@ impl Threader<'_> {
                 Some(ty) if ty != acc.ty() => return None,
                 _ => handle_acc = Some(acc.ty().clone()),
             }
-            let mut aliases = BTreeSet::new();
-            aliases.insert(clause.resume().name());
-            let (stripped, kind) = strip_state(inner, &aliases, acc.name())?;
-            // The ported rewrite and the shared judgment must agree about what
-            // this clause resumes with. They are different code over different
-            // trees, so this is a real check, and it runs on every program rather
-            // than on the clauses a fixture happens to cover.
-            if shared.get(index).copied().flatten() != Some(kind) {
-                return None;
-            }
-            let ev_body = self.rewrite(&stripped, loc, evs)?;
+            let ends = halt == Some(clause.name());
+            let ev_body = if ends {
+                self.rewrite(inner, loc, evs)?
+            } else {
+                let mut aliases = BTreeSet::new();
+                aliases.insert(clause.resume().name());
+                let (stripped, kind) = strip_state(inner, &aliases, acc.name(), self.plan.widen)?;
+                // The ported rewrite and the shared judgment must agree about
+                // what this clause resumes with. They are different code over
+                // different trees, so this is a real check, and it runs on every
+                // program rather than on the clauses a fixture happens to cover.
+                if shared.get(index).copied().flatten() != Some(kind) {
+                    return None;
+                }
+                self.rewrite(&stripped, loc, evs)?
+            };
             let mut ev_params = clause.params().to_vec();
-            // In early mode the state is `Step Acc`: the evidence folds inside
-            // `SMore` and forwards `SDone` untouched, so a stake upstream can
-            // stop the loop.
-            let ev_body = if self.plan.early.short_circuits() {
-                let source = source_type(acc.ty()).ok()?;
-                let step_at = StepAt::new(source.clone(), source);
-                self.step = Some(step_at.clone());
-                let step = TypedBinder::new(self.mint("step"), step_at.ty());
-                let body = self.step_map(&step_at, &step, acc.clone(), ev_body);
-                ev_params.push(step);
+            // In a stepped scope the state is `Step Acc`: the evidence folds
+            // inside `SMore` and forwards `SDone` untouched, so a stake or an
+            // abort upstream can stop the loop.
+            let at = match &answer_ty {
+                Some(done) => Some(StepAt::new(source_type(acc.ty()).ok()?, done.clone())),
+                None => self.scope_step(acc.ty(), &body_ops),
+            };
+            let ev_body = if let Some(at) = at {
+                self.step = Some(at.clone());
+                let carrier = TypedBinder::new(self.mint("step"), at.ty());
+                let body = if ends {
+                    self.step_stop(&at, &carrier, acc.clone(), ev_body)
+                } else {
+                    self.step_fold(&at, &carrier, acc.clone(), ev_body)
+                };
+                ev_params.push(carrier);
                 body
             } else {
                 ev_params.push(acc.clone());
@@ -816,7 +2021,7 @@ impl Threader<'_> {
             // it: a handle is a concrete site, and its clause is the handler's
             // own monomorphic lambda, not the operation's scheme re-quantified.
             let ev = TypedBinder::new(
-                *evs.get(&clause.name())?,
+                *under.get(&clause.name())?,
                 CoreType::Thunk(Box::new(lam.sig().clone())),
             );
             self.evidence_types.insert(ev.name(), ev.ty().clone());
@@ -825,38 +2030,69 @@ impl Threader<'_> {
         }
 
         // `g = \(acc0) -> <body threaded from acc0>`, closing over the evidence.
-        // In early mode the seed is wrapped `SMore(acc0)` and the threaded
-        // loop's final `Step` is unwrapped back to the bare accumulator.
+        // In a stepped scope the seed is wrapped `SMore(acc0)`; where the loop
+        // only stops early the final `Step` is unwrapped back to the bare
+        // accumulator, and where it can abort it stays stepped, because the
+        // payload has nowhere to go until the handler that answers it.
         let acc0 = TypedBinder::new(self.mint("acc"), handle_acc?);
-        let g_body = if self.plan.early.short_circuits() {
-            let source = source_type(acc0.ty()).ok()?;
-            let step_at = StepAt::new(source.clone(), source);
+        let scope = match &answer_ty {
+            Some(done) => Some(StepAt::new(source_type(acc0.ty()).ok()?, done.clone())),
+            None => self.scope_step(acc0.ty(), &body_ops),
+        };
+        // A step whose two payloads coincide is read as a take's, whose pair
+        // travels outside the step, while the producers forced here were
+        // threaded with the pair inside it.
+        if halt.is_none() && self.pairs() && scope.as_ref().is_some_and(|at| at.more == at.done) {
+            return self.bail("a fold beside an abort whose answer is its own accumulator");
+        }
+        let g_body = if let Some(step_at) = scope.clone() {
             self.step = Some(step_at.clone());
             let st0 = TypedBinder::new(self.mint("st"), step_at.ty());
-            let threaded = self.thread_st(body, evs, loc, &st0)?;
+            let threaded = self.thread_st(body, &under, loc, &st0)?;
             let seeded = step_at.smore(binder_var(&acc0));
-            let unwrapped = self.seed_unwrap(&step_at, threaded);
+            let inner = if step_at.more == step_at.done {
+                self.seed_unwrap(&step_at, threaded)
+            } else {
+                threaded
+            };
             TypedComp::new(
-                unwrapped.sig().clone(),
+                inner.sig().clone(),
                 TypedCompKind::Bind(
                     Box::new(TypedComp::new(
                         CompSig::new(seeded.ty().clone(), EffRow::Empty),
                         TypedCompKind::Return(seeded),
                     )),
                     st0,
-                    Box::new(unwrapped),
+                    Box::new(inner),
                 ),
             )
         } else {
-            self.thread_st(body, evs, loc, &acc0)?
+            self.thread_st(body, &under, loc, &acc0)?
         };
-        let g_body = self.apply_state_return(
-            g_body,
-            return_binder.as_ref(),
-            return_body.as_deref(),
-            loc,
-            evs,
-        )?;
+        let aborting = scope.filter(|at| at.more != at.done);
+        let g_body = match &aborting {
+            None => self.apply_state_return(
+                g_body,
+                return_binder.as_ref(),
+                return_body.as_deref(),
+                loc,
+                evs,
+            )?,
+            Some(step_at) => {
+                let answered = self.stepped_return(
+                    g_body,
+                    step_at,
+                    answer_ty.is_some(),
+                    (return_binder.as_ref(), return_body.as_deref()),
+                    loc,
+                    evs,
+                )?;
+                // The step this handle answers is its own; an enclosing take's
+                // is the plan's and stays live for the tail that consumes it.
+                self.step = saved_step;
+                answered
+            }
+        };
         let g_lam = Self::lam(vec![acc0.clone()], g_body);
         // A thunk of a lambda is typed by the lambda's own signature; building
         // the type a second time by hand is how the two drift.
@@ -875,8 +2111,71 @@ impl Threader<'_> {
             );
             out = Self::bind(bound, binder, out);
         }
+        self.evidence_types = saved_evidence;
         self.row = saved_row;
         Some(out)
+    }
+
+    /// Apply a fold's return clause under a `Step`, keeping the abort's payload
+    /// on the outside.
+    ///
+    /// The scope leaves through an operation this handle does not answer, so its
+    /// result is still a step: the accumulator arm runs the transformer and
+    /// steps again at whatever the transformer answers, and the payload arm
+    /// re-raises untouched.
+    fn stepped_return(
+        &mut self,
+        threaded: TypedComp,
+        step: &StepAt,
+        answers: bool,
+        ret: (Option<&TypedBinder>, Option<&TypedComp>),
+        loc: &Loc,
+        evs: &BTreeMap<Sym, Sym>,
+    ) -> Option<TypedComp> {
+        // The threaded body says what its `SMore` holds: the accumulator, or the
+        // accumulator beside the value where the scope carries both. Either way
+        // the return clause runs past the step, on what the step held.
+        let at = carried_step(threaded.sig().result()).unwrap_or_else(|| step.clone());
+        let fin = TypedBinder::new(self.mint("fin"), at.ty());
+        let a = TypedBinder::new(self.mint("a"), CoreType::Source(at.more.clone()));
+        let bare = Self::returning(binder_var(&a), a.ty().clone());
+        let answered = self.apply_state_return(bare, ret.0, ret.1, loc, evs)?;
+        let d = TypedBinder::new(self.mint("d"), CoreType::Source(step.done.clone()));
+        let row = answered.sig().effects().clone();
+        // A stopping arm's payload is the handle's answer, so it is returned as
+        // it stands; an abort this handle does not answer is re-raised, and the
+        // answer steps beside it.
+        let (more, raised, result) = if answers {
+            let answer = answered.sig().result().clone();
+            (
+                answered,
+                Self::returning(binder_var(&d), answer.clone()),
+                answer,
+            )
+        } else {
+            let out = StepAt::new(
+                source_type(answered.sig().result()).ok()?,
+                step.done.clone(),
+            );
+            let r = TypedBinder::new(self.mint("r"), answered.sig().result().clone());
+            (
+                Self::bind(
+                    answered,
+                    r.clone(),
+                    Self::returning(out.smore(binder_var(&r)), out.ty()),
+                ),
+                Self::returning(out.sdone(binder_var(&d)), out.ty()),
+                out.ty(),
+            )
+        };
+        let answer = TypedComp::new(
+            CompSig::new(result, row),
+            TypedCompKind::Case(
+                binder_var(&fin),
+                vec![(at.more_pattern(a), more), (at.done_pattern(d), raised)],
+            ),
+        );
+        Some(Self::bind(threaded, fin, answer))
     }
 
     /// Apply a fold's state-transformer return clause to the threaded body's
@@ -896,7 +2195,7 @@ impl Threader<'_> {
     ) -> Option<TypedComp> {
         let rb = return_body?;
         if is_id_transformer(&rb.clone().erase()) {
-            return Some(threaded);
+            return self.drop_value(threaded);
         }
         let TypedCompKind::Return(v) = rb.kind() else {
             return None;
@@ -911,6 +2210,19 @@ impl Threader<'_> {
             return None;
         };
         let rbody = self.rewrite(body, loc, evs)?;
+        if self.pairs() {
+            // The scope carried both, so the transformer's state parameter and
+            // the handle's value binder are the pair's two components instead
+            // of one accumulator standing for both.
+            let named = return_binder.cloned();
+            let (fin, value) = self.pair_binders(&threaded, named.as_ref())?;
+            let read_fin = TypedComp::new(
+                CompSig::new(fin.ty().clone(), EffRow::Empty),
+                TypedCompKind::Return(binder_var(&fin)),
+            );
+            let inner = Self::bind(read_fin, s.clone(), rbody);
+            return self.split_pair(threaded, fin, value, inner);
+        }
         let fin = TypedBinder::new(self.mint("fin"), threaded.sig().result().clone());
         let r = return_binder
             .cloned()
@@ -1330,9 +2642,42 @@ impl Threader<'_> {
         Some((pattern, inner))
     }
 
+    /// [`Self::step_fold`] for a clause that ends the fold rather than
+    /// continuing it: the body computes the payload the fold stops with, and a
+    /// carrier that already stopped forwards the payload it holds. No step is
+    /// rebuilt, because the perform site puts this payload into the step it is
+    /// itself threading, which is the one that knows what the scope carries.
+    fn step_stop(
+        &mut self,
+        step: &StepAt,
+        sv: &TypedBinder,
+        acc: TypedBinder,
+        body: TypedComp,
+    ) -> TypedComp {
+        let out = CoreType::Source(step.done.clone());
+        let sd = TypedBinder::new(self.mint("sd"), out.clone());
+        let row = body.sig().effects().clone();
+        TypedComp::new(
+            CompSig::new(out.clone(), row),
+            TypedCompKind::Case(
+                binder_var(sv),
+                vec![
+                    (step.more_pattern(acc), body),
+                    (
+                        step.done_pattern(sd.clone()),
+                        TypedComp::new(
+                            CompSig::new(out, EffRow::Empty),
+                            TypedCompKind::Return(binder_var(&sd)),
+                        ),
+                    ),
+                ],
+            ),
+        )
+    }
+
     /// `\(.., acc) -> body` lifted to operate on `Step Acc`: fold inside
     /// `SMore`, forward `SDone` untouched.
-    fn step_map(
+    fn step_fold(
         &mut self,
         step: &StepAt,
         sv: &TypedBinder,
@@ -1340,7 +2685,7 @@ impl Threader<'_> {
         body: TypedComp,
     ) -> TypedComp {
         let r = TypedBinder::new(self.mint("r"), body.sig().result().clone());
-        let sd = TypedBinder::new(self.mint("sd"), acc.ty().clone());
+        let sd = TypedBinder::new(self.mint("sd"), CoreType::Source(step.done.clone()));
         let folded = step.smore(binder_var(&r));
         let forwarded = step.sdone(binder_var(&sd));
         // The SMore arm folds the body, which now honestly reports the ambient
@@ -1378,9 +2723,11 @@ impl Threader<'_> {
         )
     }
 
-    /// Stop the producer once a `stake` has yielded `SDone`, else run the rest.
+    /// Stop the producer once the accumulator has yielded `SDone`, else run the
+    /// rest. The step's two payloads are the same type only for a take; an
+    /// abort carries its own, so each arm reads the one its constructor holds.
     fn step_guard(&mut self, step: &StepAt, sv: &TypedBinder, cont: TypedComp) -> TypedComp {
-        let m = TypedBinder::new(self.mint("_w"), CoreType::Source(step.done.clone()));
+        let m = TypedBinder::new(self.mint("_w"), CoreType::Source(step.more.clone()));
         let d = TypedBinder::new(self.mint("_w"), CoreType::Source(step.done.clone()));
         TypedComp::new(
             cont.sig().clone(),
@@ -1423,4 +2770,15 @@ impl Threader<'_> {
         );
         Self::bind(threaded, fin, unwrap)
     }
+}
+
+/// The row a thunk type's body runs under, when `ty` is a thunk of a function.
+pub(super) fn thunk_row(ty: &CoreType) -> Option<&EffRow> {
+    let CoreType::Thunk(sig) = ty else {
+        return None;
+    };
+    let CoreType::Function(fun) = sig.result() else {
+        return None;
+    };
+    Some(fun.body().effects())
 }

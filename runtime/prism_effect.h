@@ -13,5 +13,7 @@ long prism_frame_bind(long next, long kfn, long env);
 long prism_frame_handle(long next, long table, long env);
 long prism_frame_mask(long next, long ops);
 long prism_kont_splice(long top, long base);
+long prism_drive_enter(void);
+long prism_drive_leave(long entered, long result);
 
 #endif /* PRISM_EFFECT_H */

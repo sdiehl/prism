@@ -1,0 +1,26 @@
+-- A handler with one tail-resumptive arm and one that resumes off the tail.
+-- The off-tail arm denies the closed-handler loop, and a confined region is not
+-- a whole-program one, so this shape is the seam where the two constant-stack
+-- mechanisms both step aside and the reified hops of the tail-resumptive arm
+-- become native frames. The loop is deep enough that a lowering which keeps the
+-- hops on the stack exhausts it, so the tiers disagree on whether the program
+-- terminates rather than on what it prints.
+
+effect Tick
+  tick() : Int
+  bump() : Int
+
+fn spin(n : Int) : Int ! {Tick} =
+  if n == 0 then
+    bump()
+  else
+    tick()
+    spin(n - 1)
+
+fn main() : Unit ! {IO} =
+  let total =
+    handle spin(1000000) with
+      tick() resume k => k(1)
+      bump() resume k => 1 + k(1)
+      return x => x
+  println(show(total))

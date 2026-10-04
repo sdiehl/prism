@@ -1,0 +1,44 @@
+-- Three adapters over one state consumer. Each adapter answers `ask` by
+-- performing `tell`, which the consumer threads as state: a direct clause,
+-- a clause that resumes through a thunk it forces, and a multishot clause.
+-- The consumer's handle must run as a cell alongside the adapters rather than
+-- as a threaded fold, and every tier must agree on the answers.
+effect Ask
+  ask() : Int
+
+effect Tell
+  tell() : Int
+
+fn direct(action : () -> Int ! {Ask | e}) : Int =
+  handle action() with
+    ask() resume k => k(tell() + 1)
+    return r => r
+
+fn through_thunk(action : () -> Int ! {Ask | e}) : Int =
+  handle action() with
+    ask() resume k =>
+      let th = \() -> k(tell() + 1)
+      th()
+    return r => r
+
+fn multishot(action : () -> Int ! {Ask | e}) : Int =
+  handle action() with
+    ask() resume k => k(tell() + 1) + k(0)
+    return r => r
+
+fn serve(action) =
+  let f =
+    handle action() with
+      tell() resume k => \(n) -> k(n)(n + 1)
+      return r => \(_n) -> r
+  f(10)
+
+fn client() : Int ! {Ask} = ask() + ask()
+
+fn main() =
+  println(serve(\() -> direct(client)))
+  println(serve(\() -> through_thunk(client)))
+  println(serve(\() -> multishot(client)))
+  println(
+      serve(\() -> direct(\() -> through_thunk(client) + multishot(client))),
+    )

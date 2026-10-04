@@ -207,8 +207,8 @@ pub(crate) fn handles_alloc(c: &TypedComp) -> bool {
 /// Higher-order specialization declines to clone a function this recognizes: a
 /// handler installer's handled computation is a thunk argument, and the
 /// effect-lowering passes recognize the installer by that thunk -- arena routes
-/// region roots through it, and the reified state and evidence lowerings key
-/// their handler frames on it. Splicing a constant callable into the clone
+/// region roots through it, and the reified state lowering keys its handler
+/// frames on it. Splicing a constant callable into the clone
 /// inlines the thunk away, which the erasures fuse over on the fast tiers but
 /// which faults on the reified tier, so the clone would make a tier observable.
 pub(crate) fn installs_handler(c: &TypedComp) -> bool {

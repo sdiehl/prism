@@ -2,7 +2,7 @@
 -- free locals become parameters (`base`), so the whole-call-tree check behind
 -- `@ noalloc` covers exactly that region while `tick` itself stays free to
 -- allocate.
-fn tick_region(base : Int) : Int @ noalloc = base + base
+fn tick_region(base : Int) : Int @ noalloc = base
 
 fn tick(n : Int) : Int =
   let base = n + 1

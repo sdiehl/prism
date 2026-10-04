@@ -560,6 +560,36 @@ fn case_of_case(x: &TypedBinder, rhs: &TypedComp, body: &TypedComp) -> Option<Ty
     }
 }
 
+// Consume a known result after an effectful sequence without materializing
+// its temporary product. Only the bind spine moves; effects retain their
+// order and no handler, branch or suspension boundary is crossed.
+fn case_of_sequence(x: &TypedBinder, rhs: &TypedComp, body: &TypedComp) -> Option<TypedComp> {
+    let cont = cont_on(x.name, body)?;
+    let mut free = free_comp_vars(body);
+    free.remove(&x.name);
+    let mut prefix = Vec::new();
+    let mut result = rhs;
+    while let TypedCompKind::Bind(head, binder, rest) = result.kind() {
+        if free.contains(&binder.name()) {
+            return None;
+        }
+        prefix.push((head, binder));
+        result = rest;
+    }
+    if prefix.is_empty() {
+        return None;
+    }
+    let mut out = cont.select(&ret_known(result)?)?;
+    for (head, binder) in prefix.into_iter().rev() {
+        let row = union_rows(head.sig().effects(), out.sig().effects()).ok()?;
+        out = TypedComp::new(
+            CompSig::new(out.sig().result().clone(), row),
+            TypedCompKind::Bind(head.clone(), binder.clone(), Box::new(out)),
+        );
+    }
+    Some(out)
+}
+
 impl Rewrite for Simplifier {
     type Ctx = Env;
 
@@ -605,6 +635,10 @@ impl Rewrite for Simplifier {
                     benv.bind(x.name, v);
                 }
                 let body2 = self.comp(body, &benv);
+                if let Some(sequence) = case_of_sequence(x, &rhs2, &body2) {
+                    self.ticks += 1;
+                    return sequence;
+                }
                 // Case-of-case (terminating-by-construction): when `rhs` is a
                 // case/if of known returns and `body` immediately scrutinizes
                 // `x`, float into the arms, collapsing the inner scrutinee on
@@ -1365,6 +1399,105 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    fn sequence_case_fixture(capture: bool) -> (TypedComp, VerifyEnv) {
+        let effect = sym("Ask");
+        let operation = sym("ask");
+        let mut env = VerifyEnv::new();
+        env.insert_operation(
+            operation,
+            OperationSig::new(
+                Vec::new(),
+                Vec::new(),
+                source(Type::Int),
+                Label::bare(effect),
+            ),
+        );
+        let row = EffRow::singleton(effect);
+        let pair = source(Type::UnboxedTuple(vec![Type::Int, Type::Int]));
+        let head = TypedComp::new(
+            CompSig::new(source(Type::Int), row.clone()),
+            TypedCompKind::Do {
+                operation,
+                instantiation: Vec::new(),
+                args: Vec::new(),
+            },
+        );
+        let rhs = TypedComp::new(
+            CompSig::new(pair.clone(), row.clone()),
+            TypedCompKind::Bind(
+                Box::new(head),
+                TypedBinder::new(sym("inner"), source(Type::Int)),
+                Box::new(ret(TypedValue::new(
+                    pair.clone(),
+                    TypedValueKind::UnboxedTuple(vec![var("inner", source(Type::Int)), int(0)]),
+                ))),
+            ),
+        );
+        let body = TypedComp::new(
+            pure(source(Type::Int)),
+            TypedCompKind::Case(
+                var("pair", pair.clone()),
+                vec![(
+                    TypedPattern::Tuple(vec![
+                        Some(TypedBinder::new(sym("selected"), source(Type::Int))),
+                        None,
+                    ]),
+                    ret(var(
+                        if capture { "inner" } else { "selected" },
+                        source(Type::Int),
+                    )),
+                )],
+            ),
+        );
+        (
+            TypedComp::new(
+                CompSig::new(source(Type::Int), row),
+                TypedCompKind::Bind(
+                    Box::new(rhs),
+                    TypedBinder::new(sym("pair"), pair),
+                    Box::new(body),
+                ),
+            ),
+            env,
+        )
+    }
+
+    #[test]
+    fn case_of_sequence_removes_the_product_and_preserves_the_effect() {
+        let (body, env) = sequence_case_fixture(false);
+        let input = verify(UncheckedTypedCore::<Elaborated>::new(one_fn(body)), &env).unwrap();
+        let (actual, _) = run_simplify(input.functions().to_vec(), &env);
+        let body = actual.functions()[0].body();
+        assert_eq!(body.sig().effects(), &EffRow::singleton(sym("Ask")));
+        let TypedCompKind::Bind(head, binder, rest) = body.kind() else {
+            panic!("the effectful prefix must remain");
+        };
+        assert!(
+            matches!(head.kind(), TypedCompKind::Do { operation, .. } if *operation == sym("ask"))
+        );
+        assert_eq!(
+            rest.kind(),
+            &TypedCompKind::Return(var(binder.name().as_str(), source(Type::Int)))
+        );
+    }
+
+    #[test]
+    fn case_of_sequence_refuses_to_capture_the_continuations_free_variable() {
+        let (body, env) = sequence_case_fixture(true);
+        let function = TypedCoreFn::new(
+            sym("f"),
+            vec![TypedBinder::new(sym("inner"), source(Type::Int))],
+            body.clone(),
+            CoreFnSig::new(Vec::new(), vec![source(Type::Int)], body.sig().clone()),
+            0,
+        );
+        verify(UncheckedTypedCore::<Elaborated>::new(vec![function]), &env).unwrap();
+        let TypedCompKind::Bind(rhs, binder, rest) = body.kind() else {
+            unreachable!();
+        };
+        assert!(case_of_sequence(binder, rhs, rest).is_none());
     }
 
     // `let t = thunk(...) in let r = force t in r` inlines the thunk body

@@ -92,18 +92,36 @@ const MAX_NAMED_DIVERGENCES: usize = 12;
 // so the list cannot outlive the gap it records. A row may only ever be added
 // with the construct that earned it.
 //
-// The one open construct: a return-position `@ linear` usage claim sets a
-// `linear` flag on the authority's fn item, and the shadow parser validates the
-// claim but carries no such field in its Decl or its codec, so every fn item
-// that makes the claim encodes without it. Closing the gap means threading the
-// flag through `lib/std/Syntax` (Ast.pr, Parse/Decl.pr, Codec.pr) the way
-// `no_alloc` already is.
+// Two open constructs.
+//
+// The first is a return-position usage claim. `@ linear` and `@ bounded_stack`
+// each set a flag on the authority's fn item; the shadow parser validates the
+// claim but carries no such field in its Decl or its codec, so it leaves the
+// claim on the return type as a usage fact and every fn item that makes one
+// encodes without the flag. The two claims are listed apart because a file
+// making only the stack claim is evidence for only that half. Closing the gap
+// means threading both flags through `lib/std/Syntax` (Ast.pr, Parse/Decl.pr,
+// Codec.pr) the way `no_alloc` already is.
+//
+// The second is a graded budget in decl position. `fip(1) fn f(..)` is a
+// modifier the shadow grammar does not admit at all: it stops at the open
+// paren, so the file is not encoded rather than encoded differently. Closing
+// that gap is a grammar change in `lib/std/Syntax/Parse/Decl.pr`, not a codec
+// one.
 const LINEAR_CLAIM: &str = "fn-item `@ linear` claim dropped by the shadow codec";
-const KNOWN_DIVERGENCES: [(&str, &str); 15] = [
+const STACK_CLAIM: &str = "fn-item `@ bounded_stack` claim dropped by the shadow codec";
+const GRADED_BUDGET: &str = "decl-position `fip(n)` budget the shadow grammar does not parse";
+const KNOWN_DIVERGENCES: [(&str, &str); 27] = [
     (
         "tests/cases/alloc_certificate/reject/composed_row_fresh.pr",
         LINEAR_CLAIM,
     ),
+    (
+        "tests/cases/callable_certificate/reject/graded_budget_callee.pr",
+        GRADED_BUDGET,
+    ),
+    ("tests/cases/fip_budget.pr", GRADED_BUDGET),
+    ("tests/cases/fip_budget_exceeded.pr", GRADED_BUDGET),
     (
         "tests/cases/linear_certificate/accept/composed_claims.pr",
         LINEAR_CLAIM,
@@ -153,12 +171,48 @@ const KNOWN_DIVERGENCES: [(&str, &str); 15] = [
         LINEAR_CLAIM,
     ),
     (
+        "tests/cases/stack_certificate/accept/allocating_tail_loop.pr",
+        STACK_CLAIM,
+    ),
+    (
         "tests/cases/stack_certificate/accept/composed_row_callee.pr",
         LINEAR_CLAIM,
     ),
     (
+        "tests/cases/stack_certificate/accept/fip_callee.pr",
+        STACK_CLAIM,
+    ),
+    (
+        "tests/cases/stack_certificate/accept/mutual_all_claimed.pr",
+        STACK_CLAIM,
+    ),
+    (
+        "tests/cases/stack_certificate/accept/trmc_cons_loop.pr",
+        STACK_CLAIM,
+    ),
+    (
         "tests/cases/stack_certificate/reject/composed_row_nontail.pr",
         LINEAR_CLAIM,
+    ),
+    (
+        "tests/cases/stack_certificate/reject/fbip_callee.pr",
+        STACK_CLAIM,
+    ),
+    (
+        "tests/cases/stack_certificate/reject/indirect_call.pr",
+        STACK_CLAIM,
+    ),
+    (
+        "tests/cases/stack_certificate/reject/mutual_partial.pr",
+        STACK_CLAIM,
+    ),
+    (
+        "tests/cases/stack_certificate/reject/nontail_recursion.pr",
+        STACK_CLAIM,
+    ),
+    (
+        "tests/cases/stack_certificate/reject/uncertified_callee.pr",
+        STACK_CLAIM,
     ),
 ];
 

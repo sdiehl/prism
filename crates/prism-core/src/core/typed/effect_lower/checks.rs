@@ -154,7 +154,7 @@ fn check_tails(
     }
 }
 
-const fn kind_name(kind: &TypedCompKind) -> &'static str {
+pub(super) const fn kind_name(kind: &TypedCompKind) -> &'static str {
     match kind {
         TypedCompKind::Return(_) => "return",
         TypedCompKind::Bind(..) => "bind",

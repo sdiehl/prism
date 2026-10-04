@@ -10,6 +10,7 @@ use prism_syntax::coeffect::CoeffectFact;
 use prism_syntax::kw::{AT, FBIP, FIP};
 use prism_syntax::names;
 
+use crate::core::allocation::{io_is_free, literal_allocates, primitive_is_free};
 use crate::core::builtins::{builtin, BuiltinKind};
 use crate::core::cbpv::{Comp, Core, CoreFn, CorePat, HandleOp, Value};
 use crate::core::fv::rebound;
@@ -32,7 +33,7 @@ use super::Sigs;
 //   over the reuse-lowered core (`check_alloc` below). A bare
 //   `Value::Ctor`/`Value::Tuple` is a fresh heap cell here (`prism_alloc(0)`
 //   mallocs and bumps the live count even for a nullary constructor), so the
-//   only allocation-free way to build is `Comp::Reuse` over a dropped cell.
+//   reuse token also retains a fresh-allocation fallback for shared input cells.
 //   The walk infers the budget a body needs: each fresh cell costs one,
 //   sequencing adds, branching takes the worst path, and every call site
 //   charges the callee's full declared budget, recursive calls included, so a
@@ -301,17 +302,13 @@ pub fn replayable_annots(prog: &Program<CorePhase>) -> BTreeSet<Sym> {
         .collect()
 }
 
-// Prims and builtins that allocate no heap cell, so an annotated body may call
-// them. Conservative: only arithmetic/comparison/IO primitives that the backend
-// lowers to immediates or a runtime call returning an immediate. Anything that
-// builds a constructor (e.g. string ops returning a boxed Str) is excluded.
+// Direct builtin calls with a known zero-cell implementation. Numeric and
+// string operations have their own Core nodes; the generic integer printer
+// is excluded because formatting a bignum allocates a temporary string.
 fn alloc_free_prim(name: &str) -> bool {
     matches!(
         builtin(name),
-        Some((
-            _,
-            BuiltinKind::Print | BuiltinKind::Println | BuiltinKind::Error | BuiltinKind::Srand
-        ))
+        Some((_, BuiltinKind::Error | BuiltinKind::Srand))
     )
 }
 
@@ -406,10 +403,9 @@ pub const fn subsumes(a: Fip, b: Fip) -> bool {
 // evaluation order. Every rejection the allocation walk can raise maps to one of
 // these; the driver renders them into the user diagnostic. The set is exactly the
 // nodes that materialize a heap cell (`Ctor`/`Tuple`/`Closure`) or admit an
-// uncertified callee (`UncertifiedCall`/`IndirectCall`/`Builtin`); no other Core
-// node allocates under this check.
+// uncertified callee or runtime operation. Unknown runtime costs fail closed.
 enum AllocWitness {
-    // A fresh constructor cell built outside a `reuse` token.
+    // A constructor cell, including a reuse token's fresh fallback.
     Ctor(Sym),
     // A fresh tuple cell.
     Tuple,
@@ -431,6 +427,7 @@ enum AllocWitness {
     // `with_arena` handler out of a bump region, but still a fresh cell: arena
     // allocation is cheap, not absent, so `@ noalloc` must reject it too.
     AllocOp,
+    Runtime(&'static str),
 }
 
 // Collects up to `ALLOC_WITNESS_LIMIT` witnesses while counting the total, so the
@@ -461,34 +458,16 @@ impl Witnesses {
     }
 }
 
-#[derive(Clone, Copy)]
-enum ValueHead {
-    Fresh,
-    Reused,
-}
-
 enum AllocFrame<'a> {
     Comp(&'a Comp),
-    Value(&'a Value, ValueHead),
+    Value(&'a Value),
     Reduce(AllocReduce),
 }
 
 enum AllocReduce {
-    Add {
-        children: usize,
-        base: Alloc,
-    },
-    Join {
-        children: usize,
-    },
-    Indirect {
-        children: usize,
-        certified: bool,
-    },
-    Handler {
-        base_children: usize,
-        clauses: usize,
-    },
+    Add { children: usize, base: Alloc },
+    Join { children: usize },
+    Indirect { children: usize, certified: bool },
 }
 
 fn reduce_alloc(results: &mut Vec<Alloc>, children: usize, base: Alloc) -> Alloc {
@@ -509,11 +488,7 @@ where
         children: values.len(),
         base,
     }));
-    work.extend(
-        values
-            .rev()
-            .map(|value| AllocFrame::Value(value, ValueHead::Fresh)),
-    );
+    work.extend(values.rev().map(AllocFrame::Value));
 }
 
 // Walk an annotated body in evaluation order, recording every allocation
@@ -539,23 +514,19 @@ fn comp_alloc(
     let mut results = Vec::new();
     while let Some(frame) = work.pop() {
         match frame {
-            AllocFrame::Value(value, head) => match value {
+            AllocFrame::Value(value) => match value {
                 Value::Ctor(name, _, fields) => {
-                    let base = if matches!(head, ValueHead::Fresh) && !newtypes.contains(name) {
+                    let base = if newtypes.contains(name) {
+                        Alloc::ZERO
+                    } else {
                         out.push(AllocWitness::Ctor(*name));
                         Alloc::cells(1)
-                    } else {
-                        Alloc::ZERO
                     };
                     push_alloc_values(&mut work, fields.iter(), base);
                 }
                 Value::Tuple(fields) => {
-                    let base = if matches!(head, ValueHead::Fresh) {
-                        out.push(AllocWitness::Tuple);
-                        Alloc::cells(1)
-                    } else {
-                        Alloc::ZERO
-                    };
+                    out.push(AllocWitness::Tuple);
+                    let base = Alloc::cells(1);
                     push_alloc_values(&mut work, fields.iter(), base);
                 }
                 Value::Thunk(_) => {
@@ -572,11 +543,20 @@ fn comp_alloc(
                         Alloc::ZERO,
                     );
                 }
-                _ => results.push(Alloc::ZERO),
+                _ => {
+                    if literal_allocates(value.literal_scalar_type()) {
+                        out.push(AllocWitness::Runtime("boxed scalar literal"));
+                        results.push(Alloc::cells(1));
+                    } else {
+                        results.push(Alloc::ZERO);
+                    }
+                }
             },
             AllocFrame::Comp(comp) => match comp {
                 Comp::Reuse(_, value) => {
-                    work.push(AllocFrame::Value(value, ValueHead::Reused));
+                    // A token may be empty for a shared input; count the fresh
+                    // fallback until uniqueness is established as a checked fact.
+                    work.push(AllocFrame::Value(value));
                 }
                 Comp::WithReuse { freed, body, .. } => {
                     work.push(AllocFrame::Reduce(AllocReduce::Add {
@@ -584,7 +564,7 @@ fn comp_alloc(
                         base: Alloc::ZERO,
                     }));
                     work.push(AllocFrame::Comp(body));
-                    work.push(AllocFrame::Value(freed, ValueHead::Fresh));
+                    work.push(AllocFrame::Value(freed));
                 }
                 Comp::Call(callee, args) => {
                     let base = if users.contains(callee) {
@@ -615,16 +595,26 @@ fn comp_alloc(
                     work.push(AllocFrame::Comp(rest));
                     work.push(AllocFrame::Comp(first));
                 }
-                Comp::If(_, yes, no) => {
+                Comp::If(condition, yes, no) => {
+                    work.push(AllocFrame::Reduce(AllocReduce::Add {
+                        children: 2,
+                        base: Alloc::ZERO,
+                    }));
                     work.push(AllocFrame::Reduce(AllocReduce::Join { children: 2 }));
                     work.push(AllocFrame::Comp(no));
                     work.push(AllocFrame::Comp(yes));
+                    work.push(AllocFrame::Value(condition));
                 }
-                Comp::Case(_, arms) => {
+                Comp::Case(scrutinee, arms) => {
+                    work.push(AllocFrame::Reduce(AllocReduce::Add {
+                        children: 2,
+                        base: Alloc::ZERO,
+                    }));
                     work.push(AllocFrame::Reduce(AllocReduce::Join {
                         children: arms.len(),
                     }));
                     work.extend(arms.iter().rev().map(|(_, body)| AllocFrame::Comp(body)));
+                    work.push(AllocFrame::Value(scrutinee));
                 }
                 Comp::Lam(_, body) | Comp::Mask(_, body) => {
                     work.push(AllocFrame::Comp(body));
@@ -638,38 +628,53 @@ fn comp_alloc(
                         children: args.len() + 1,
                         certified: is_certified,
                     }));
-                    work.extend(
-                        args.iter()
-                            .rev()
-                            .map(|arg| AllocFrame::Value(arg, ValueHead::Fresh)),
-                    );
+                    work.extend(args.iter().rev().map(AllocFrame::Value));
                     work.push(AllocFrame::Comp(callee));
                 }
-                Comp::Prim(_, lhs, rhs) | Comp::RefSet(lhs, rhs) | Comp::InitAt(lhs, rhs) => {
+                Comp::Prim(op, lhs, rhs) => {
+                    let base = if primitive_is_free(*op) {
+                        Alloc::ZERO
+                    } else {
+                        out.push(AllocWitness::Runtime("numeric operation"));
+                        Alloc::Unlimited
+                    };
+                    push_alloc_values(&mut work, [lhs, rhs].into_iter(), base);
+                }
+                Comp::RefSet(lhs, rhs) | Comp::InitAt(lhs, rhs) => {
                     push_alloc_values(&mut work, [lhs, rhs].into_iter(), Alloc::ZERO);
                 }
                 Comp::Return(value)
                 | Comp::Force(value)
                 | Comp::Error(value)
-                | Comp::FloatBuiltin(_, value)
-                | Comp::Neg(_, value)
                 | Comp::UnboxedProject(value, _)
                 | Comp::Drop(value)
-                | Comp::RefNew(value)
                 | Comp::RefGet(value) => {
-                    work.push(AllocFrame::Value(value, ValueHead::Fresh));
+                    work.push(AllocFrame::Value(value));
+                }
+                Comp::FloatBuiltin(_, value) | Comp::Neg(_, value) | Comp::RefNew(value) => {
+                    out.push(AllocWitness::Runtime(comp.kind()));
+                    push_alloc_values(&mut work, [value].into_iter(), Alloc::Unlimited);
                 }
                 Comp::Do(op, args) => {
-                    let base = if op.as_str() == names::ALLOC_OP {
+                    if op.as_str() == names::ALLOC_OP {
                         out.push(AllocWitness::AllocOp);
-                        Alloc::cells(1)
                     } else {
+                        out.push(AllocWitness::Runtime("effect operation"));
+                    }
+                    push_alloc_values(&mut work, args.iter(), Alloc::Unlimited);
+                }
+                Comp::StrBuiltin(op, args) => {
+                    out.push(AllocWitness::Builtin(op.name().into()));
+                    push_alloc_values(&mut work, args.iter(), Alloc::Unlimited);
+                }
+                Comp::Io(op, args) => {
+                    let base = if io_is_free(*op) {
                         Alloc::ZERO
+                    } else {
+                        out.push(AllocWitness::Runtime(op.kind()));
+                        Alloc::Unlimited
                     };
                     push_alloc_values(&mut work, args.iter(), base);
-                }
-                Comp::StrBuiltin(_, args) | Comp::Io(_, args) => {
-                    push_alloc_values(&mut work, args.iter(), Alloc::ZERO);
                 }
                 Comp::Handle {
                     body,
@@ -677,9 +682,12 @@ fn comp_alloc(
                     ops,
                     ..
                 } => {
-                    work.push(AllocFrame::Reduce(AllocReduce::Handler {
-                        base_children: 1 + usize::from(return_body.is_some()),
-                        clauses: ops.len(),
+                    // Handler lowering may allocate continuation and environment
+                    // cells, independently of the source clause bodies.
+                    out.push(AllocWitness::Runtime("effect handler"));
+                    work.push(AllocFrame::Reduce(AllocReduce::Add {
+                        children: 1 + usize::from(return_body.is_some()) + ops.len(),
+                        base: Alloc::Unlimited,
                     }));
                     work.extend(ops.iter().rev().map(|op| AllocFrame::Comp(&op.body)));
                     if let Some(return_body) = return_body {
@@ -713,25 +721,6 @@ fn comp_alloc(
                                 out.push(AllocWitness::IndirectCall);
                                 grade.add(Alloc::Unlimited)
                             }
-                        }
-                        AllocReduce::Handler {
-                            base_children,
-                            clauses,
-                        } => {
-                            // Clause invocation multiplicity is unknown, so any
-                            // allocating clause makes the budget unbounded.
-                            let clause_grade = (0..clauses).fold(Alloc::ZERO, |grade, _| {
-                                if results
-                                    .pop()
-                                    .expect("allocation worklist handler has one result per clause")
-                                    == Alloc::ZERO
-                                {
-                                    grade
-                                } else {
-                                    Alloc::Unlimited
-                                }
-                            });
-                            reduce_alloc(&mut results, base_children, Alloc::ZERO).add(clause_grade)
                         }
                     };
                 results.push(grade);
@@ -784,8 +773,8 @@ fn render_alloc(want: Fip, fname: Sym, w: &Witnesses, inferred: Alloc) -> ClaimE
 
 fn witness_clause(w: &AllocWitness) -> String {
     match w {
-        AllocWitness::Ctor(name) => format!("constructor `{name}` is built fresh outside `reuse`"),
-        AllocWitness::Tuple => "a tuple is built fresh outside `reuse`".to_string(),
+        AllocWitness::Ctor(name) => format!("constructor `{name}` may allocate a fresh cell"),
+        AllocWitness::Tuple => "a tuple may allocate a fresh cell".to_string(),
         AllocWitness::Closure => "a lambda is materialized as a fresh closure cell".to_string(),
         AllocWitness::UncertifiedCall(callee) => {
             format!(
@@ -801,6 +790,9 @@ fn witness_clause(w: &AllocWitness) -> String {
         }
         AllocWitness::Builtin(name) => {
             format!("primitive `{name}` is not on the allocation-free allow-list")
+        }
+        AllocWitness::Runtime(kind) => {
+            format!("{kind} may allocate a fresh runtime cell")
         }
         AllocWitness::AllocOp => {
             "`alloc` carves a fresh cell from an arena, which is cheaper but not free".to_string()
@@ -2179,7 +2171,7 @@ mod tests {
             .find("constructor `First`")
             .expect("first witness is present");
         let second = message
-            .find("a tuple is built fresh")
+            .find("a tuple may allocate a fresh cell")
             .expect("second witness is present");
         let third = message
             .find("constructor `Third`")
@@ -2229,7 +2221,8 @@ mod tests {
         )
         .expect_err("ordinary one-field data must still allocate");
         assert!(
-            err.to_string().contains("constructor `Box` is built fresh"),
+            err.to_string()
+                .contains("constructor `Box` may allocate a fresh cell"),
             "{err}"
         );
     }
@@ -2256,7 +2249,11 @@ mod tests {
             &BTreeMap::new(),
         )
         .expect_err("allocation in an erased wrapper payload must remain visible");
-        assert!(err.to_string().contains("a tuple is built fresh"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("a tuple may allocate a fresh cell"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -2608,6 +2605,64 @@ mod tests {
     }
 
     #[test]
+    fn boxed_literals_and_case_scrutinees_spend_the_budget() {
+        for value in [Value::I64(7), Value::U64(7), Value::Float(1.5)] {
+            let f = one("f", 0, Comp::Return(value));
+            let core = Core {
+                fns: vec![f.clone()],
+            };
+            assert!(check(&core, &fip_of(&f), &["f"]).is_err());
+            let budget = Fips::from([(f.name, Fip::Fbip(1))]);
+            assert!(check(&core, &budget, &["f"]).is_ok());
+        }
+        let f = one(
+            "f",
+            0,
+            Comp::Case(
+                Value::Tuple(vec![Value::U64(7)]),
+                vec![(CorePat::Tuple(vec![None]), Comp::Return(Value::Unit))],
+            ),
+        );
+        let core = Core {
+            fns: vec![f.clone()],
+        };
+        assert!(check(&core, &Fips::from([(f.name, Fip::Fbip(1))]), &["f"]).is_err());
+        assert!(check(&core, &Fips::from([(f.name, Fip::Fbip(2))]), &["f"]).is_ok());
+    }
+
+    #[test]
+    fn reuse_keeps_its_fresh_allocation_fallback_in_the_budget() {
+        let f = one(
+            "f",
+            1,
+            Comp::Reuse(
+                "token".into(),
+                Value::Ctor("Cell".into(), 0, vec![Value::Var("p0".into())]),
+            ),
+        );
+        let core = Core {
+            fns: vec![f.clone()],
+        };
+        assert!(check(&core, &fip_of(&f), &["f"]).is_err());
+        assert!(check(&core, &Fips::from([(f.name, Fip::Fbip(1))]), &["f"]).is_ok());
+    }
+
+    #[test]
+    fn arithmetic_without_a_proven_bound_rejects_even_positive_budgets() {
+        let f = one(
+            "f",
+            1,
+            Comp::Prim(CoreOp::Add, Value::Var("p0".into()), Value::Int(1)),
+        );
+        let core = Core {
+            fns: vec![f.clone()],
+        };
+        let error = check(&core, &Fips::from([(f.name, Fip::Fbip(u32::MAX))]), &["f"])
+            .expect_err("unknown arithmetic cost must not satisfy a finite budget");
+        assert!(error.contains("numeric operation"), "{error}");
+    }
+
+    #[test]
     fn budget_counts_nested_aggregate_cells() {
         let f = one(
             "f",
@@ -2655,7 +2710,10 @@ mod tests {
         let grades: Fips = iter::once((f.name, Fip::Fip(u32::MAX))).collect();
         let err = check(&core, &grades, &["f"]).unwrap_err();
         assert!(err.contains("has no bounded allocation budget"), "{err}");
-        assert!(err.contains("constructor `Cell` is built fresh"), "{err}");
+        assert!(
+            err.contains("constructor `Cell` may allocate a fresh cell"),
+            "{err}"
+        );
     }
 
     #[test]

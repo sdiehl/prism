@@ -1,0 +1,1 @@
+fn join(x : String) : String @ noalloc = concat(x, x)

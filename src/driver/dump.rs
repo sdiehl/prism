@@ -489,7 +489,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
             Ok(pp_core_pretty(&lowered))
         }
         // The effect-lowering tier this program's handlers lower to (`pure`,
-        // `evidence`, `state-fusion`, `local-partial`, `selective-free-monad`,
+        // `state-fusion`, `local-partial`, `selective-free-monad`,
         // `whole-program-free-monad`). A pure cost classification, never
         // observable in output; `tests/perf_gate.rs` pins it per corpus program
         // so a silent fusion-to-free-monad collapse surfaces as a reviewable diff.

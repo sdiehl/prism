@@ -3,13 +3,14 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use prism::driver::effect_strategy_on;
 use prism::lineage::{
     record_fact, FactInput, FactLedger, FactOutcome, FactScope, QueryFact, QueryKind,
 };
 use prism::store::disk::Store;
 use prism::{
-    build_on_report, check_modules_on, with_prelude, CompilerSession, Config, NativeCacheStatus,
-    SessionStats,
+    build_on_report, check_modules_on, with_prelude, CompilerSession, Config, EffectStrategy,
+    NativeCacheStatus, SessionStats,
 };
 
 use crate::support::{assert_same_binary, require_cc, TempDir};
@@ -28,6 +29,68 @@ const RETIRED_EFFECT_PLAN_QUERIES: &str = "queries/effect-lowering-plan";
 const RETIRED_EFFECT_RESULT_QUERIES: &str = "queries/effect-lowering-result";
 const LINKED_NATIVE_RAW_QUERIES: &str = "queries/linked-native.raw";
 const LINKED_NATIVE_SEMANTIC_QUERIES: &str = "queries/linked-native.semantic";
+
+const REIFICATION_SOURCE: &str = "\
+effect Peek
+  peek(Int) : Int
+
+fn ask() : Int ! {Peek} = peek(4) + peek(7)
+
+fn peeked() =
+  handle ask() with
+    peek(n) resume k => k(n) + k(n * 2)
+    return r => r
+
+fn main() = println(peeked())
+";
+const REIFICATION_OUTPUT: &[u8] = b"66\n";
+
+#[test]
+fn reification_cache_separates_both_toggle_orders_and_preserves_warm_hits() {
+    require_cc();
+    let src = with_prelude(REIFICATION_SOURCE);
+    let roots = [prism::Root::Embedded(prism::stdlib::STDLIB)];
+    for first_reify in [false, true] {
+        let tmp = TempDir::new("compiler-cache", &format!("reify-{first_reify}"));
+        let mut cfg = Config::default();
+        cfg.update_flags(|flags| {
+            flags.compiler_cache = true;
+            flags.store_path = Some(tmp.store_root());
+            flags.query_threads = SEQUENTIAL_QUERY_THREADS;
+            flags.quiet = true;
+        });
+        for reify in [first_reify, !first_reify] {
+            cfg.update_flags(|flags| flags.reify = reify);
+            let strategy = effect_strategy_on(&src, Path::new("."), &cfg).unwrap();
+            assert_eq!(
+                strategy == EffectStrategy::StateFusion,
+                reify,
+                "the cache witness must engage two lowering implementations"
+            );
+            let cold_bin = tmp.join(format!("cold-{reify}"));
+            let cold = build_on_report(&src, &roots, &cold_bin, &cfg).unwrap();
+            assert_eq!(
+                cold.cache,
+                NativeCacheStatus::Write,
+                "reify={reify} reused the other convention's linked binary"
+            );
+            let warm_bin = tmp.join(format!("warm-{reify}"));
+            let warm = build_on_report(&src, &roots, &warm_bin, &cfg).unwrap();
+            assert_eq!(warm.cache, NativeCacheStatus::Hit);
+            assert_same_binary(
+                "same reification setting, cold versus warm",
+                &fs::read(&cold_bin).unwrap(),
+                &fs::read(&warm_bin).unwrap(),
+            );
+            for bin in [&cold_bin, &warm_bin] {
+                let run = Command::new(bin).output().unwrap();
+                assert!(run.status.success(), "{bin:?}: {:?}", run.status);
+                assert_eq!(run.stdout, REIFICATION_OUTPUT);
+                assert!(run.stderr.is_empty(), "{bin:?}: {:?}", run.stderr);
+            }
+        }
+    }
+}
 
 // Linked-artifact keys are output-path independent, so a rebuild of the same
 // program is a whole-binary hit that never replays the backend queries. The

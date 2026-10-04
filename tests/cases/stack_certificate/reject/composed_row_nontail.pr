@@ -1,8 +1,6 @@
--- The composed row is checked by the same drives as zero-budget `fip`: a
--- recursive call feeding a multiplication fails its `bounded_stack` fact with
--- the same witness a `fip` claim would draw, differing only in the claim the
--- diagnostic names and the weakening the message suggests.
-fn shrink(n : Int) : Int @ {bounded_stack, linear, noalloc} =
+-- The composed ownership/stack row permits arithmetic allocation, but rejects
+-- a recursive call feeding multiplication because it grows the native stack.
+fn shrink(n : Int) : Int @ {bounded_stack, linear} =
   if n == 0 then
     1
   else

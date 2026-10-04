@@ -1131,12 +1131,12 @@ fn a_confined_region_translates_and_leaves_no_raw_effects() {
 }
 
 #[test]
-fn a_region_reaching_through_an_island_handler_translates_and_verifies() {
+fn a_region_forwarding_through_an_island_handler_widens_instead() {
     // The forwarder forces what it is handed from inside a handler for an
-    // unrelated operation, so the operation the computation performs is in
-    // no row the forwarder's own body discharges. The thunk is still built
-    // at the monadic convention, and the bind inside it still suspends at
-    // the row its body performs, which is the pairing the verifier checks.
+    // unrelated operation, and that handler resumes in its own tail. Confined,
+    // every such hop is a closure call the backend cannot make a native tail
+    // call, one frame per hop, so the selective lowering refuses the shape
+    // and the cascade widens to the scope whose driver bounces the hop.
     let ops = OpIds::assign(&BTreeSet::from([
         Sym::from(fixtures::ASK_OP),
         Sym::from(fixtures::LEAK_OP),
@@ -1149,7 +1149,7 @@ fn a_region_reaching_through_an_island_handler_translates_and_verifies() {
     assert!(plan.members.contains(&Sym::from(fixtures::RUN)));
 
     let mut fresh = Fresh::new();
-    let mut lowered = lower_selective(
+    let refused = lower_selective(
         source.functions(),
         &ops,
         &mut fresh,
@@ -1161,14 +1161,9 @@ fn a_region_reaching_through_an_island_handler_translates_and_verifies() {
             native_enabled: true,
         },
     )
-    .expect("the region reaches through the island handler");
-    lowered.push(abi::ebind_fn());
-    lowered.push(abi::qapply_fn());
-    let mut env = VerifyEnv::new();
-    abi::insert(&mut env);
-    let typed = verify(UncheckedTypedCore::<EffectLowered>::new(lowered), &env)
-        .expect("island-handler output verifies");
-    crate::core::residual_effects(&typed.erase()).expect("no raw effects survive");
+    .expect_err("a confined forwarder resuming in its tail widens");
+    assert_eq!(refused.reason, Refusal::ForwardingResume);
+    assert_eq!(refused.function, Some(Sym::from(fixtures::RUN)));
 }
 
 #[test]

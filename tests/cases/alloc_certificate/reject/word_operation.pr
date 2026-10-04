@@ -1,0 +1,1 @@
+fn shift(x : U64) : U64 @ noalloc = u64_xor(x, x)

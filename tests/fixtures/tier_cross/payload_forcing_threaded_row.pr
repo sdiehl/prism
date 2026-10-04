@@ -1,0 +1,27 @@
+-- A reified payload whose row also names a threaded operation: the thunk
+-- `wrap` carries performs `Out` under the parameter's own `{Wrap, Out | e}`
+-- row, so the position that carries it both hands the cell and names the
+-- evidence its body reads. Every tier must print the same two lines.
+
+effect Out
+  out(Int) : Unit
+
+effect Wrap
+  wrap(() -> Int ! {Wrap, Out | e}) : Int
+
+fn run_wrap(action : () -> a ! {Wrap, Out | e}) : a ! {Out | e} =
+  handle action() with
+    wrap(th) resume k => k(run_wrap(th))
+    return x => x
+
+fn inner() : Int ! {Out} =
+  out(7)
+  3
+
+fn driver() : Int ! {Wrap, Out} = wrap(\() -> inner())
+
+fn main() =
+  println(handle run_wrap(driver) with {
+    out(n) resume k => let _ = println(n) in k(()),
+    return r => r
+  })

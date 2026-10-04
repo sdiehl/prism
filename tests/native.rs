@@ -25,6 +25,8 @@ mod support;
 
 #[path = "native/compiler_cache.rs"]
 mod compiler_cache;
+#[path = "native/effect_convention.rs"]
+mod effect_convention;
 #[path = "native/float_fmt.rs"]
 mod float_fmt;
 #[path = "native/float_math_conformance.rs"]

@@ -1465,6 +1465,15 @@ impl<'a> Machine<'a> {
                 [Rv::Int(_), v] => State::Ret(v.clone()),
                 _ => return Err("arena_exit: wrong args in lowered verifier".into()),
             },
+            // Stack-budget brackets: the verifier's frames are heap cells, so
+            // every hop nests and none is ever deferred to the driver. Whether
+            // a hop nests or bounces is a resource decision with no value
+            // counterpart, checked natively by the runtime's depth trap.
+            Node::DriveEnter => State::Ret(Rv::Int(1)),
+            Node::DriveLeave(args) => match atoms(&env, args)?.as_slice() {
+                [Rv::Int(_), v] => State::Ret(v.clone()),
+                _ => return Err("drive_leave: wrong args in lowered verifier".into()),
+            },
         })
     }
 
@@ -2436,6 +2445,28 @@ mod tests {
         let mut output = Vec::new();
         let mut input = std::io::Cursor::new(Vec::new());
         run_observed_lowered_with_args(&main_core(body), &mut output, &mut input, Vec::new())
+    }
+
+    #[test]
+    fn lowered_runtime_drive_brackets_grant_and_pass_the_hop_through() {
+        let unit = Sym::new("unit");
+        let hop = Sym::new("hop");
+        let body = Comp::Bind(
+            Box::new(Comp::StrBuiltin(Builtin::DriveEnter, vec![])),
+            unit,
+            Box::new(Comp::Bind(
+                Box::new(Comp::Return(Value::Int(7))),
+                hop,
+                Box::new(Comp::StrBuiltin(
+                    Builtin::DriveLeave,
+                    vec![Value::Var(unit), Value::Var(hop)],
+                )),
+            )),
+        );
+        assert_eq!(
+            observe_lowered(body).observations,
+            vec![Observation::Return("7".into())]
+        );
     }
 
     #[test]
