@@ -6,6 +6,7 @@
 
 use std::path::Path;
 
+use indoc::indoc;
 use prism::{check_on, default_roots, with_prelude};
 
 fn checks(src: &str) -> Result<(), String> {
@@ -18,12 +19,13 @@ fn checks(src: &str) -> Result<(), String> {
 // A pure function passed where an effectful function is expected. The pure
 // function generalizes with an open latent row, so it fits the slot by solving
 // that row variable to `{Beep}`, without a subsumption step.
-const WIDENS: &str = "\
-effect Beep\n\
-\x20 beep(Int) : Unit\n\
-fn use_it(f : (Int) -> Int ! {Beep}) : Int ! {Beep} = f(3)\n\
-fn pure_fn(x) = x + 1\n\
-fn go() : Int ! {Beep} = use_it(pure_fn)\n";
+const WIDENS: &str = indoc! {"
+    effect Beep
+      beep(Int) : Unit
+    fn use_it(f : (Int) -> Int ! {Beep}) : Int ! {Beep} = f(3)
+    fn pure_fn(x) = x + 1
+    fn go() : Int ! {Beep} = use_it(pure_fn)
+"};
 
 #[test]
 fn accepts_pure_via_row_solving() {
@@ -37,14 +39,15 @@ fn accepts_pure_via_row_solving() {
 // Ordinary effect code that never relies on widening: a row-polymorphic
 // higher-order function applied to an effectful argument. The row variable is
 // solved by unification, so this must be accepted just like any effect use.
-const POLY: &str = "\
-effect Beep\n\
-\x20 beep(Int) : Unit\n\
-fn apply(f, x) = f(x)\n\
-fn boom(n) : Int ! {Beep} =\n\
-\x20 beep(n)\n\
-\x20 n\n\
-fn go(n) : Int ! {Beep} = apply(boom, n)\n";
+const POLY: &str = indoc! {"
+    effect Beep
+      beep(Int) : Unit
+    fn apply(f, x) = f(x)
+    fn boom(n) : Int ! {Beep} =
+      beep(n)
+      n
+    fn go(n) : Int ! {Beep} = apply(boom, n)
+"};
 
 #[test]
 fn accepts_row_polymorphic_use() {

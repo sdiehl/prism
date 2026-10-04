@@ -9,6 +9,7 @@ use std::fmt::Write as _;
 use std::path::Path;
 use std::{fs, iter};
 
+use indoc::indoc;
 use prism::{default_roots, Config, EffectTier};
 
 use crate::support::{check_native_parity, require_cc, TempDir};
@@ -51,10 +52,13 @@ struct Candidate {
 
 impl Candidate {
     fn render(&self) -> String {
-        let mut source = String::from(
-            "effect Probe\n  left(Int) : Int\n  right(Int) : Int\n\n\
-             fn work() : Int ! {Probe} =\n",
-        );
+        let mut source = String::from(indoc! {"
+                effect Probe
+                  left(Int) : Int
+                  right(Int) : Int
+
+                fn work() : Int ! {Probe} =
+            "});
         for (index, call) in self.calls.iter().enumerate() {
             writeln!(
                 source,

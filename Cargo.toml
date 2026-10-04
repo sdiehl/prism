@@ -17,7 +17,7 @@ ariadne = "0.6"
 blake3 = "1"
 clap = { version = "4", features = ["derive"], optional = true }
 glob = { version = "0.3", optional = true }
-im = "15.1"
+imbl = "7"
 libmimalloc-sys = { version = "0.1", optional = true }
 logos = "0.16"
 marginalia = "0.4.0"
@@ -64,6 +64,7 @@ blake3 = "1"
 # Lean bench harness (no plotting/rayon pull-in): just the measurement engine for
 # the compile-time baseline corpus in `benches/compile.rs`.
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+indoc = "2"
 insta = { version = "1.41", features = ["glob"] }
 prism-core = { path = "crates/prism-core", features = ["test-hooks"] }
 rstest = "0.27.0"

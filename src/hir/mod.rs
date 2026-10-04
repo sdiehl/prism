@@ -521,6 +521,7 @@ mod tests {
     use crate::sym::Sym;
     use crate::syntax::desugar::desugar;
     use crate::types::check;
+    use indoc::indoc;
 
     fn checked(src: &str) -> Checked {
         let ParseResult { program, .. } = parse(src).expect("parses");
@@ -528,9 +529,11 @@ mod tests {
         check(&core).expect("checks")
     }
 
-    const SRC: &str = "type Point = Point { x: Int, y: Int }\n\
-                       fn get_x(p : Point) : Int = p.x\n\
-                       fn main() : Unit = println(get_x(Point { x = 1, y = 2 }))\n";
+    const SRC: &str = indoc! {"
+        type Point = Point { x: Int, y: Int }
+        fn get_x(p : Point) : Int = p.x
+        fn main() : Unit = println(get_x(Point { x = 1, y = 2 }))
+    "};
 
     #[test]
     fn build_lints_clean_on_checked_output() {
@@ -644,11 +647,12 @@ mod tests {
 
     #[test]
     fn lint_rejects_super_index_out_of_bounds() {
-        let c = checked(
-            "class Eq(a)\nclass Ord(a) given Eq(a)\n\
-             type Point = Point { x: Int, y: Int }\n\
-             fn get_x(p : Point) : Int = p.x\n",
-        );
+        let c = checked(indoc! {"
+                class Eq(a)
+                class Ord(a) given Eq(a)
+                type Point = Point { x: Int, y: Int }
+                fn get_x(p : Point) : Int = p.x
+            "});
         // A class with a single declared superclass; index 5 projects past it.
         let facts = NodeFacts {
             // Param(0) inner is deliberately unjudged, so exactly one violation.

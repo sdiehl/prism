@@ -17,6 +17,7 @@
 // adds information and only ever earlier; where there is no expectation to
 // consult, inference is exactly what it was.
 
+use indoc::indoc;
 use prism::{check, interpret, with_prelude};
 
 // The rendered error of a program expected not to type-check.
@@ -78,10 +79,10 @@ fn the_expected_domain_is_held_to_the_annotation_not_the_reverse() {
         "{POLY_CALLBACK}fn main() = println(use_poly(\\(f : (Int) -> Int) -> f(1)))\n"
     ));
 
-    let err = check_err(
-        "fn use_mono(k : ((Int) -> Int) -> Int) : Int = k(\\(x) -> x)\n\
-         fn main() = println(use_mono(\\(f : forall a. (a) -> a) -> f(1)))\n",
-    );
+    let err = check_err(indoc! {r"
+            fn use_mono(k : ((Int) -> Int) -> Int) : Int = k(\(x) -> x)
+            fn main() = println(use_mono(\(f : forall a. (a) -> a) -> f(1)))
+        "});
     assert!(
         err.contains("forall a. (a) -> a") && err.contains("(Int) -> Int"),
         "the refusal must name the annotation and the domain it was held to: {err}"
@@ -90,13 +91,13 @@ fn the_expected_domain_is_held_to_the_annotation_not_the_reverse() {
 
 // A wrapper whose type argument appears only under a function, so the argument
 // lambda's parameter type is reachable from the result and from nowhere else.
-const WRAP: &str = "\
-type Wrap(s) = MkWrap((s) -> Int)
+const WRAP: &str = indoc! {"
+    type Wrap(s) = MkWrap((s) -> Int)
 
-fn wrap(g) = MkWrap(g)
+    fn wrap(g) = MkWrap(g)
 
-type Pt = Pt { x : Int, y : Int }
-";
+    type Pt = Pt { x : Int, y : Int }
+"};
 
 // With the result declared, `s` is fixed before the lambda is looked at, and the
 // field access inside it has a record to resolve against.

@@ -24,6 +24,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::{env, fs};
 
+use indoc::indoc;
 use prism::error::Error;
 use prism::{build_on, default_roots, Config};
 
@@ -376,10 +377,13 @@ fn native_on_input(tag: &str, full: &str, input: &str) -> std::process::Output {
 #[test]
 fn read_int_keeps_full_i64_range() {
     require_cc();
-    let src = "fn echo2() : Unit ! {IO, Console} =\n  \
-               println(show_int(read_int()))\n  \
-               println(show_int(read_int()))\n\n\
-               fn main() : Unit ! {IO} = echo2()\n";
+    let src = indoc! {"
+        fn echo2() : Unit ! {IO, Console} =
+          println(show_int(read_int()))
+          println(show_int(read_int()))
+
+        fn main() : Unit ! {IO} = echo2()
+    "};
     let full = prism::with_prelude(src);
     let input = "4611686018427387905\n-4611686018427387905\n";
     let mut sink = Vec::new();
@@ -524,13 +528,15 @@ fn file_env_io_matches_interpreter() {
 #[test]
 fn show_char_non_scalar_matches_interpreter() {
     require_cc();
-    let src = "fn main() : Unit ! {IO} =\n  \
-               println(show_int(byte_len(show_char(chr(55295)))))\n  \
-               println(show_int(byte_len(show_char(chr(55296)))))\n  \
-               println(show_int(byte_len(show_char(chr(57343)))))\n  \
-               println(show_int(byte_len(show_char(chr(57344)))))\n  \
-               println(show_int(byte_len(show_char(chr(1114111)))))\n  \
-               println(show_int(byte_len(show_char(chr(1114112)))))\n";
+    let src = indoc! {"
+        fn main() : Unit ! {IO} =
+          println(show_int(byte_len(show_char(chr(55295)))))
+          println(show_int(byte_len(show_char(chr(55296)))))
+          println(show_int(byte_len(show_char(chr(57343)))))
+          println(show_int(byte_len(show_char(chr(57344)))))
+          println(show_int(byte_len(show_char(chr(1114111)))))
+          println(show_int(byte_len(show_char(chr(1114112)))))
+    "};
     let full = prism::with_prelude(src);
     let want = interpreted(&full);
     let out = native_on_input("show_char", &full, "");
@@ -553,10 +559,12 @@ fn show_char_non_scalar_matches_interpreter() {
 #[test]
 fn error_int_faults_like_interpreter() {
     require_cc();
-    let src = "fn main() : Unit ! {IO, Exn} =\n  \
-               println(show_int(7))\n  \
-               let _ = error(42)\n  \
-               println(show_int(99))\n";
+    let src = indoc! {"
+        fn main() : Unit ! {IO, Exn} =
+          println(show_int(7))
+          let _ = error(42)
+          println(show_int(99))
+    "};
     let full = prism::with_prelude(src);
     let mut sink = Vec::new();
     let res = prism::interpret_io_at(&full, Path::new("."), &mut sink, &mut std::io::empty());
@@ -593,10 +601,12 @@ fn error_int_faults_like_interpreter() {
 #[test]
 fn fatal_string_faults_like_interpreter() {
     require_cc();
-    let src = "fn main() : Unit ! {IO, Exn} =\n  \
-               println(show_int(7))\n  \
-               let _ = fatal(\"kaput\")\n  \
-               println(show_int(99))\n";
+    let src = indoc! {r#"
+        fn main() : Unit ! {IO, Exn} =
+          println(show_int(7))
+          let _ = fatal("kaput")
+          println(show_int(99))
+    "#};
     let full = prism::with_prelude(src);
     let mut sink = Vec::new();
     let res = prism::interpret_io_at(&full, Path::new("."), &mut sink, &mut std::io::empty());
@@ -668,8 +678,10 @@ fn polymorphic_print_requires_show_constraint() {
     // under `given Show(a)` prints through the dictionary, and a concrete,
     // monomorphic, or provably-empty-container print stays structural.
     for ok in [
-        "fn echo(x : a) : Unit ! {IO} given Show(a) = println(x)\n\
-         fn main() : Unit ! {IO} = echo(())\n",
+        indoc! {"
+            fn echo(x : a) : Unit ! {IO} given Show(a) = println(x)
+            fn main() : Unit ! {IO} = echo(())
+        "},
         "fn echo(x : Int) : Unit ! {IO} = println(x)\nfn main() : Unit ! {IO} = echo(5)\n",
         "fn main() : Unit ! {IO} = print(())\n",
         "fn main() : Unit ! {IO} = println([])\n",
@@ -690,17 +702,19 @@ fn polymorphic_print_requires_show_constraint() {
 fn polymorphic_show_print_dispatches_through_dictionary() {
     require_cc();
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let src = "type Color = Red | Green | Blue deriving (Show)\n\
-               fn shout(x : a) : Unit ! {IO} given Show(a) =\n  \
-                 print(\"[\")\n  \
-                 print(x)\n  \
-                 println(\"]\")\n\
-               fn main() : Unit ! {IO} =\n  \
-                 shout(42)\n  \
-                 shout(true)\n  \
-                 shout(false)\n  \
-                 shout(Green)\n  \
-                 shout([1, 2, 3])\n";
+    let src = indoc! {r#"
+        type Color = Red | Green | Blue deriving (Show)
+        fn shout(x : a) : Unit ! {IO} given Show(a) =
+          print("[")
+          print(x)
+          println("]")
+        fn main() : Unit ! {IO} =
+          shout(42)
+          shout(true)
+          shout(false)
+          shout(Green)
+          shout([1, 2, 3])
+    "#};
     let full = prism::with_prelude(src);
     let mut sink = Vec::new();
     let want = prism::interpret_io_at(&full, root, &mut sink, &mut std::io::empty())
@@ -729,25 +743,27 @@ fn polymorphic_show_print_dispatches_through_dictionary() {
 fn string_of_buf_lossy_matches_interpreter() {
     require_cc();
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let src = "fn push2(a, x, y) = buf_push(buf_push(a, x), y)\n\
-               fn push3(a, x, y, z) = buf_push(push2(a, x, y), z)\n\
-               fn e() = buf_empty()\n\
-               fn show_bytes(bs) : Unit ! {IO} =\n  \
-                 let s = string_of_buf(bs)\n  \
-                 println(byte_len(s))\n  \
-                 println(s)\n\
-               fn main() : Unit ! {IO} =\n  \
-                 show_bytes(push2(e(), 72, 105))\n  \
-                 show_bytes(push2(e(), 195, 169))\n  \
-                 show_bytes(buf_push(e(), 128))\n  \
-                 show_bytes(push2(e(), 255, 65))\n  \
-                 show_bytes(push2(e(), 192, 128))\n  \
-                 show_bytes(buf_push(e(), 195))\n  \
-                 show_bytes(push3(e(), 224, 128, 128))\n  \
-                 show_bytes(push3(e(), 226, 130, 172))\n  \
-                 show_bytes(push3(e(), 237, 160, 128))\n  \
-                 show_bytes(push2(e(), 240, 40))\n  \
-                 show_bytes(push2(e(), 240, 144))\n";
+    let src = indoc! {"
+        fn push2(a, x, y) = buf_push(buf_push(a, x), y)
+        fn push3(a, x, y, z) = buf_push(push2(a, x, y), z)
+        fn e() = buf_empty()
+        fn show_bytes(bs) : Unit ! {IO} =
+          let s = string_of_buf(bs)
+          println(byte_len(s))
+          println(s)
+        fn main() : Unit ! {IO} =
+          show_bytes(push2(e(), 72, 105))
+          show_bytes(push2(e(), 195, 169))
+          show_bytes(buf_push(e(), 128))
+          show_bytes(push2(e(), 255, 65))
+          show_bytes(push2(e(), 192, 128))
+          show_bytes(buf_push(e(), 195))
+          show_bytes(push3(e(), 224, 128, 128))
+          show_bytes(push3(e(), 226, 130, 172))
+          show_bytes(push3(e(), 237, 160, 128))
+          show_bytes(push2(e(), 240, 40))
+          show_bytes(push2(e(), 240, 144))
+    "};
     let full = prism::with_prelude(src);
     let mut sink = Vec::new();
     let want = prism::interpret_io_at(&full, root, &mut sink, &mut std::io::empty())
@@ -915,13 +931,15 @@ fn systemf_witnesses_pinned() {
     let full = source(Path::new("examples/systemf.pr"));
     assert_eq!(
         interpreted(&full),
-        "id                 : forall a. a -> a\n\
-         id[Int] 42         : Int\n\
-         implicit id true   : Bool\n\
-         higher rank        : (forall a. a -> a) -> Bool\n\
-         union-find         : (forall a. a) -> Int\n\
-         bad application    : error: application expects a function, got Int\n\
-         bad branches       : error: cannot unify Int with Bool\n"
+        indoc! {"
+            id                 : forall a. a -> a
+            id[Int] 42         : Int
+            implicit id true   : Bool
+            higher rank        : (forall a. a -> a) -> Bool
+            union-find         : (forall a. a) -> Int
+            bad application    : error: application expects a function, got Int
+            bad branches       : error: cannot unify Int with Bool
+        "}
     );
 }
 
@@ -934,12 +952,14 @@ fn systemf_dk_witnesses_pinned() {
     let full = source(Path::new("examples/systemf_dk.pr"));
     assert_eq!(
         interpreted(&full),
-        "id                 : forall a. a -> a\n\
-         id[Int] 42         : Int\n\
-         higher rank        : (forall a. a -> a) -> Bool\n\
-         impredicative      : forall a. a -> a\n\
-         bad application    : error: application expects a function, got Int\n\
-         bad argument       : error: no subtype rule for Int <: Bool\n"
+        indoc! {"
+            id                 : forall a. a -> a
+            id[Int] 42         : Int
+            higher rank        : (forall a. a -> a) -> Bool
+            impredicative      : forall a. a -> a
+            bad application    : error: application expects a function, got Int
+            bad argument       : error: no subtype rule for Int <: Bool
+        "}
     );
 }
 

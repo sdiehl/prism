@@ -10,15 +10,22 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use indoc::indoc;
 use prism::{check_modules_on, check_validated_on_in, default_roots, with_prelude, Config, Root};
 
 // The code the collision carries wherever it is found.
 const DUPLICATE_OP: &str = "E6007";
 
 // Two effects, one operation name, in a single source.
-const COLLIDING: &str = "effect Ping\n  beep(Int) : Unit\n\n\
-                         effect Pong\n  beep(Int) : Unit\n\n\
-                         fn main() = println(1)\n";
+const COLLIDING: &str = indoc! {"
+    effect Ping
+      beep(Int) : Unit
+
+    effect Pong
+      beep(Int) : Unit
+
+    fn main() = println(1)
+"};
 
 // A library module carrying the same collision, imported by a root that never
 // mentions the operation: the modular checker sees the module on its own.
@@ -29,9 +36,14 @@ fn module_roots() -> Vec<Root> {
         "modules".to_string(),
         BTreeMap::from([(
             "Beeper".to_string(),
-            "pub effect Ping\n  beep(Int) : Unit\n\n\
-             pub effect Pong\n  beep(Int) : Unit\n"
-                .to_string(),
+            indoc! {"
+                pub effect Ping
+                  beep(Int) : Unit
+
+                pub effect Pong
+                  beep(Int) : Unit
+            "}
+            .to_string(),
         )]),
     )]
 }

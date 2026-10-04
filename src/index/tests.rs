@@ -1,6 +1,8 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
+use indoc::indoc;
+
 use crate::core::DepGraph;
 use crate::driver::namespace_layers;
 use crate::sym::Sym;
@@ -115,15 +117,15 @@ fn merging_rebases_interned_span_indexes() {
     assert_eq!(shared, ["keyword", "type"]);
 }
 
-const SIMPLE: &str = "\
--- | Double a number.
-fn double(x: Int): Int = x * 2
+const SIMPLE: &str = indoc! {"
+    -- | Double a number.
+    fn double(x: Int): Int = x * 2
 
--- | Quadruple via double.
-pub fn quad(x: Int): Int = double(double(x))
+    -- | Quadruple via double.
+    pub fn quad(x: Int): Int = double(double(x))
 
-fn main(): Unit ! {IO} = print(show(quad(3)))
-";
+    fn main(): Unit ! {IO} = print(show(quad(3)))
+"};
 
 // The index must not be a second, parallel notion of identity. A definition's
 // address has to be the very digest the namespace layers assign it, or a
@@ -216,28 +218,28 @@ fn source_slices_and_doc_comments_are_exact() {
     assert_eq!(def(&index, "main").doc, None);
 }
 
-const KINDS: &str = "\
-type Color = Red | Green
+const KINDS: &str = indoc! {r#"
+    type Color = Red | Green
 
-alias Ints = List(Int)
+    alias Ints = List(Int)
 
-effect Ask
-  ask() : Int
+    effect Ask
+      ask() : Int
 
-class Pretty(a)
-  pretty : (a) -> String
+    class Pretty(a)
+      pretty : (a) -> String
 
-instance prettyColor : Pretty(Color)
-  fn pretty(c) = \"c\"
+    instance prettyColor : Pretty(Color)
+      fn pretty(c) = "c"
 
-pub let origin : Int = 0
+    pub let origin : Int = 0
 
-total fn ident(x: Int): Int = x
+    total fn ident(x: Int): Int = x
 
-fbip fn drop_it(c: Color): Unit = ()
+    fbip fn drop_it(c: Color): Unit = ()
 
-fn ask_twice(): Int ! {Ask} = ask() + ask()
-";
+    fn ask_twice(): Int ! {Ask} = ask() + ask()
+"#};
 
 // Every surface declaration kind uses its owning namespace layer.
 #[test]
@@ -283,14 +285,14 @@ fn erased_claims_are_carried_on_the_definition() {
     assert!(def(&index, "ask_twice").claims.is_empty());
 }
 
-const TESTED: &str = "\
-fn helper(x: Int): Int = x + 1
+const TESTED: &str = indoc! {"
+    fn helper(x: Int): Int = x + 1
 
-test fn helper_adds_one() =
-  if helper(1) == 2 then () else fail()
+    test fn helper_adds_one() =
+      if helper(1) == 2 then () else fail()
 
-fn main(): Unit = ()
-";
+    fn main(): Unit = ()
+"};
 
 // A `test fn` is stripped before production Core hashes anything, so without the
 // second test-mode pass a test would have no address and "which tests cover this
@@ -318,11 +320,11 @@ fn a_test_free_input_reports_an_empty_test_layer() {
     assert_eq!(index_of(SIMPLE).envelope.tests, TestLayer::Empty);
 }
 
-const SHADOWED: &str = "\
-fn apply_twice(map: (Int) -> Int, x: Int): Int = map(map(x))
+const SHADOWED: &str = indoc! {r"
+    fn apply_twice(map: (Int) -> Int, x: Int): Int = map(map(x))
 
-fn use_global(xs: List(Int)): List(Int) = map(\\(x) -> x, xs)
-";
+    fn use_global(xs: List(Int)): List(Int) = map(\(x) -> x, xs)
+"};
 
 // A link must cover the name and nothing else. Every other resolution site in
 // the renamer carries the span of the construct *around* the name, so this pins
@@ -477,18 +479,18 @@ fn in_body_refs_agree_with_the_calls_edges() {
     assert_eq!(refs, edges);
 }
 
-const MEMBERS: &str = "\
-type Tree = Leaf | Node(Tree, Tree)
+const MEMBERS: &str = indoc! {r#"
+    type Tree = Leaf | Node(Tree, Tree)
 
-effect Chime
-  ring() : Unit
+    effect Chime
+      ring() : Unit
 
-fn build(): Tree = Node(Leaf, Leaf)
+    fn build(): Tree = Node(Leaf, Leaf)
 
-fn ding(): Unit ! {Chime} = ring()
+    fn ding(): Unit ! {Chime} = ring()
 
-fn main(): Unit ! {IO} = print(show(str_len(\"x\")))
-";
+    fn main(): Unit ! {IO} = print(show(str_len("x")))
+"#};
 
 // Constructor and operation references resolve to their owning declarations.
 #[test]
@@ -587,19 +589,19 @@ fn no_reference_in_a_whole_program_index_is_left_unexplained() {
     );
 }
 
-const EFFECT_REFS: &str = "\
-effect Ask
-  ask() : Int
+const EFFECT_REFS: &str = indoc! {"
+    effect Ask
+      ask() : Int
 
-effect Chirp(a)
-  chirp(a) : Unit
+    effect Chirp(a)
+      chirp(a) : Unit
 
-fn one(): Int ! {Ask} = ask()
+    fn one(): Int ! {Ask} = ask()
 
-fn two(): Unit ! {Ask, Chirp(Int)} = chirp(ask())
+    fn two(): Unit ! {Ask, Chirp(Int)} = chirp(ask())
 
-fn main(): Unit = ()
-";
+    fn main(): Unit = ()
+"};
 
 // An effect-row reference covers the label without its argument list.
 #[test]
@@ -660,23 +662,23 @@ fn effect_row_labels_are_occurrences_over_the_label_name_alone() {
     );
 }
 
-const TYPE_REFS: &str = "\
-type Doc = Empty | Text(String) | Nest(Doc, Doc)
+const TYPE_REFS: &str = indoc! {r#"
+    type Doc = Empty | Text(String) | Nest(Doc, Doc)
 
-type Wrap = Wrap(Doc)
+    type Wrap = Wrap(Doc)
 
-alias Docs = List(Doc)
+    alias Docs = List(Doc)
 
-effect Render
-  emit_doc(Doc) : Unit
+    effect Render
+      emit_doc(Doc) : Unit
 
-class Pretty(a)
-  pretty : (a) -> Doc
+    class Pretty(a)
+      pretty : (a) -> Doc
 
-fn render(d: Doc): String = \"\"
+    fn render(d: Doc): String = ""
 
-fn main(): Unit = ()
-";
+    fn main(): Unit = ()
+"#};
 
 // A type is used by more than the functions over it. Without the types that embed
 // it, the classes whose methods mention it, and the effects whose operations carry
@@ -797,15 +799,13 @@ fn a_module_that_does_not_parse_is_carried_with_its_diagnostic() {
 // list it among its own members' users.
 #[test]
 fn a_declarations_own_member_sites_are_members_not_self_references() {
-    let index = index_of(
-        "\
-type Tree = Leaf | Node(Int, Tree, Tree)
+    let index = index_of(indoc! {"
+            type Tree = Leaf | Node(Int, Tree, Tree)
 
-fn singleton(n: Int): Tree = Node(n, Leaf, Leaf)
+            fn singleton(n: Int): Tree = Node(n, Leaf, Leaf)
 
-fn main(): Unit ! {IO} = ()
-",
-    );
+            fn main(): Unit ! {IO} = ()
+        "});
     let tree = def(&index, "Tree");
     let members: Vec<&str> = tree.members.iter().map(|m| m.name.as_str()).collect();
     assert_eq!(members, ["Leaf", "Node"]);
@@ -833,18 +833,16 @@ fn main(): Unit ! {IO} = ()
 // Effect-row aliases link to aliases referenced in their definitions.
 #[test]
 fn a_row_alias_links_to_the_aliases_it_mentions() {
-    let index = index_of(
-        "\
-effect Raise
-  raise(Int) : Int
+    let index = index_of(indoc! {r#"
+            effect Raise
+              raise(Int) : Int
 
-alias Boom = {Raise}
+            alias Boom = {Raise}
 
-alias App = {Boom}
+            alias App = {Boom}
 
-fn main(): Unit ! {IO} = print(\"ok\")
-",
-    );
+            fn main(): Unit ! {IO} = print("ok")
+        "#});
     let app = def(&index, "App");
     assert_eq!(app.kind, Kind::RowAlias);
     let linked: Vec<&str> = app.refs.iter().map(|r| r.target.as_str()).collect();
@@ -854,17 +852,17 @@ fn main(): Unit ! {IO} = print(\"ok\")
 }
 
 // A leaf edit, and the tower of definitions above it.
-const REV_OLD: &str = "\
-fn base(n: Int): Int = n + 1
+const REV_OLD: &str = indoc! {"
+    fn base(n: Int): Int = n + 1
 
-fn mid(n: Int): Int = base(n) * 2
+    fn mid(n: Int): Int = base(n) * 2
 
-fn top(n: Int): Int = mid(n) + mid(n)
+    fn top(n: Int): Int = mid(n) + mid(n)
 
-fn spare(n: Int): Int = n
+    fn spare(n: Int): Int = n
 
-fn main(): Unit ! {IO} = print(show(top(1)))
-";
+    fn main(): Unit ! {IO} = print(show(top(1)))
+"};
 
 fn status_of(diff: &super::IndexDiff, id: &str) -> Option<super::Status> {
     diff.entries.iter().find(|e| e.id == id).map(|e| e.status)
@@ -1150,12 +1148,13 @@ fn a_rendered_type_carries_its_own_links_and_highlighting() {
 
 #[test]
 fn an_imported_type_keeps_its_canonical_reference_outside_this_unit() {
-    let index = index_of(
-        "import Time (Duration)\n\
-         import Concurrent (Outcome, Completed)\n\n\
-         fn elapsed(d : Duration) : Duration = Duration(0)\n\
-         fn done() : Outcome(Int) = Completed(0)\n",
-    );
+    let index = index_of(indoc! {"
+            import Time (Duration)
+            import Concurrent (Outcome, Completed)
+
+            fn elapsed(d : Duration) : Duration = Duration(0)
+            fn done() : Outcome(Int) = Completed(0)
+        "});
     let elapsed = def(&index, "elapsed");
     let targets: BTreeSet<&str> = elapsed
         .refs
@@ -1210,15 +1209,15 @@ fn an_effect_reaches_the_definitions_that_handle_it() {
         .any(|e| e.kind == EdgeKind::Performs && e.from == "silence"),);
 }
 
-const HANDLED: &str = "\
-effect Chime
-  ring() : Unit
+const HANDLED: &str = indoc! {"
+    effect Chime
+      ring() : Unit
 
-fn ding(): Unit ! {Chime} = ring()
+    fn ding(): Unit ! {Chime} = ring()
 
-fn silence(): Unit = handle ding() with
-  ring() resume k => k(())
-";
+    fn silence(): Unit = handle ding() with
+      ring() resume k => k(())
+"};
 
 // Members come from their declaration so unused operations remain indexed.
 #[test]
@@ -1274,15 +1273,15 @@ fn an_instance_calls_what_its_methods_call() {
     assert_eq!(def(&index, "showPair").kind, Kind::Instance);
 }
 
-const INSTANCE_BODY: &str = "\
-class Show2(a)
-  show2 : (a) -> String
+const INSTANCE_BODY: &str = indoc! {"
+    class Show2(a)
+      show2 : (a) -> String
 
-fn render(s : String) : String = s
+    fn render(s : String) : String = s
 
-instance showPair : Show2(String)
-  fn show2(x) = render(x)
-";
+    instance showPair : Show2(String)
+      fn show2(x) = render(x)
+"};
 
 // An instance method is checked from inside its instance rather than as a
 // top-level function, so it never becomes a `DeclInfo` and its inferred effect row
@@ -1310,22 +1309,22 @@ fn an_instance_performs_what_its_methods_perform() {
         .any(|e| e.kind == EdgeKind::Performs && e.from == "quietInt"),);
 }
 
-const EFFECTFUL_INSTANCE: &str = "\
-effect Chime
-  ring() : Unit
+const EFFECTFUL_INSTANCE: &str = indoc! {"
+    effect Chime
+      ring() : Unit
 
-class Bell(a)
-  peal : (a) -> Unit ! {Chime}
+    class Bell(a)
+      peal : (a) -> Unit ! {Chime}
 
-class Hush(a)
-  still : (a) -> Unit ! {Chime}
+    class Hush(a)
+      still : (a) -> Unit ! {Chime}
 
-instance noisyInt : Bell(Int)
-  fn peal(x) = ring()
+    instance noisyInt : Bell(Int)
+      fn peal(x) = ring()
 
-instance quietInt : Hush(Int)
-  fn still(x) = ()
-";
+    instance quietInt : Hush(Int)
+      fn still(x) = ()
+"};
 
 // The signature answers "what does this take" and stops there; a reader in the
 // body wants to know what a name *is* where it is used. The checker stamps every
@@ -1398,7 +1397,7 @@ const TYPED: &str = "\
 fn shout(who : String) : String = concat(who, \"!\")
 ";
 
-const BINDERS: &str = "\
-fn sum_from(xs : List(Int)) : Int =
-  match xs of { Nil => 0, Cons(y, rest) => y + sum_from(rest) }
-";
+const BINDERS: &str = indoc! {"
+    fn sum_from(xs : List(Int)) : Int =
+      match xs of { Nil => 0, Cons(y, rest) => y + sum_from(rest) }
+"};

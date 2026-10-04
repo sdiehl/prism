@@ -16,6 +16,7 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use indoc::indoc;
 use prism::{default_roots, dump_at, interpret, interpret_io_on_with_args, with_prelude, Config};
 use prism_common::fixpoint::least_fixpoint;
 use serde_json::Value;
@@ -341,23 +342,25 @@ fn flow_harness(artifact: &Path) -> String {
 fn flow_pins_the_analysis_of_a_resolved_document() {
     assert_eq!(
         flow_harness(&flow_artifact()),
-        "calls flow_entry flow_even flow_shared\n\
-         calls flow_even flow_odd\n\
-         calls flow_lonely\n\
-         calls flow_odd flow_even flow_shared\n\
-         calls flow_orphan flow_lonely flow_shared\n\
-         calls flow_shared\n\
-         calls main flow_entry\n\
-         reaches flow_entry flow_even flow_odd flow_shared\n\
-         reaches flow_even flow_even flow_odd flow_shared\n\
-         reaches flow_lonely\n\
-         reaches flow_odd flow_even flow_odd flow_shared\n\
-         reaches flow_orphan flow_lonely flow_shared\n\
-         reaches flow_shared\n\
-         reaches main flow_entry flow_even flow_odd flow_shared\n\
-         live flow_entry flow_even flow_odd flow_shared main\n\
-         dead flow_lonely flow_orphan\n\
-         recursive flow_even flow_odd\n"
+        indoc! {"
+            calls flow_entry flow_even flow_shared
+            calls flow_even flow_odd
+            calls flow_lonely
+            calls flow_odd flow_even flow_shared
+            calls flow_orphan flow_lonely flow_shared
+            calls flow_shared
+            calls main flow_entry
+            reaches flow_entry flow_even flow_odd flow_shared
+            reaches flow_even flow_even flow_odd flow_shared
+            reaches flow_lonely
+            reaches flow_odd flow_even flow_odd flow_shared
+            reaches flow_orphan flow_lonely flow_shared
+            reaches flow_shared
+            reaches main flow_entry flow_even flow_odd flow_shared
+            live flow_entry flow_even flow_odd flow_shared main
+            dead flow_lonely flow_orphan
+            recursive flow_even flow_odd
+        "}
     );
 }
 

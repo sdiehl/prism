@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::fs;
 
+use indoc::indoc;
 use prism::{check_modules_on, CompilerSession, Config, DynFlags, Root, SessionStats};
 
 const SEQUENTIAL_THREADS: usize = 1;
@@ -227,10 +228,12 @@ fn durable_checked_hir_rehydrates_resolution_facts() {
         "hir-modules".to_string(),
         BTreeMap::from([(
             "B".to_string(),
-            "pub type Point = Point { x: Int }\n\
-             pub fn point() : Point = Point { x = 42 }\n\
-             pub fn read(p : Point) : Int = p.x\n"
-                .to_string(),
+            indoc! {"
+                pub type Point = Point { x: Int }
+                pub fn point() : Point = Point { x = 42 }
+                pub fn read(p : Point) : Int = p.x
+            "}
+            .to_string(),
         )]),
     )];
     let mut cfg = config(PARALLEL_THREADS);
@@ -266,9 +269,11 @@ fn deriving_module_uses_interface_scope_and_durable_checked_body() {
         "derived-modules".to_string(),
         BTreeMap::from([(
             "Shape".to_string(),
-            "pub type Shape = Circle(Int) | Square(Int) deriving (Eq)\n\
-             pub fn circle(n : Int) : Shape = Circle(n)\n"
-                .to_string(),
+            indoc! {"
+                pub type Shape = Circle(Int) | Square(Int) deriving (Eq)
+                pub fn circle(n : Int) : Shape = Circle(n)
+            "}
+            .to_string(),
         )]),
     )];
     module_roots.push(Root::Embedded(prism::stdlib::STDLIB));

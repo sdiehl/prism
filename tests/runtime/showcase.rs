@@ -2,6 +2,7 @@
 // `.replay` record/replay round trip, the durable exactly-once resume, and the
 // reverse-step debugger. Each checks the core guarantee end to end.
 
+use indoc::indoc;
 use prism::debug::trace;
 use prism::resolve::default_roots;
 use prism::{debug_on, diff_on, interpret_io_on, record_on, replay_on, with_prelude, Config};
@@ -21,94 +22,94 @@ fn diff(old: &str, new: &str) -> String {
 }
 
 // The corpus `collatz` program: two `var`/`while` loops over a shared step.
-const COLLATZ: &str = "\
-fn collatz_step(n) =
-  if even(n) then
-    n / 2
-  else
-    3 * n + 1
+const COLLATZ: &str = indoc! {"
+    fn collatz_step(n) =
+      if even(n) then
+        n / 2
+      else
+        3 * n + 1
 
-fn collatz_len(start : Int) : Int =
-  var n := start
-  var acc := 0
-  while n /= 1 do
-    n := collatz_step(n)
-    acc += 1
-  acc + 1
+    fn collatz_len(start : Int) : Int =
+      var n := start
+      var acc := 0
+      while n /= 1 do
+        n := collatz_step(n)
+        acc += 1
+      acc + 1
 
-fn collatz_max(start : Int) : Int =
-  var n := start
-  var peak := start
-  while n /= 1 do
-    peak := max(n, peak)
-    n := collatz_step(n)
-  peak
+    fn collatz_max(start : Int) : Int =
+      var n := start
+      var peak := start
+      while n /= 1 do
+        peak := max(n, peak)
+        n := collatz_step(n)
+      peak
 
-fn main() =
-  println(collatz_len(27))
-  println(collatz_max(27))
-";
+    fn main() =
+      println(collatz_len(27))
+      println(collatz_max(27))
+"};
 
 // A mechanical refactor of COLLATZ: functions reordered (both `var` loops swapped
 // relative to each other), every local and parameter renamed, comments rewritten,
 // whitespace changed. Nothing about behavior moves.
-const COLLATZ_REFACTOR: &str = "\
--- reordered, renamed, reformatted; same behavior
-fn main() =
-  println(collatz_len(27))
-  println(collatz_max(27))
+const COLLATZ_REFACTOR: &str = indoc! {"
+    -- reordered, renamed, reformatted; same behavior
+    fn main() =
+      println(collatz_len(27))
+      println(collatz_max(27))
 
-fn collatz_max(origin : Int) : Int =
-  var cur := origin
-  var peak := origin
-  while cur /= 1 do
-    peak := max(cur, peak)
-    cur := collatz_step(cur)
-  peak
+    fn collatz_max(origin : Int) : Int =
+      var cur := origin
+      var peak := origin
+      while cur /= 1 do
+        peak := max(cur, peak)
+        cur := collatz_step(cur)
+      peak
 
-fn collatz_len(origin : Int) : Int =
-  var cur := origin
-  var count := 0
-  while cur /= 1 do
-    cur := collatz_step(cur)
-    count += 1
-  count + 1
+    fn collatz_len(origin : Int) : Int =
+      var cur := origin
+      var count := 0
+      while cur /= 1 do
+        cur := collatz_step(cur)
+        count += 1
+      count + 1
 
-fn collatz_step(m) =
-  if even(m) then
-    m / 2
-  else
-    3 * m + 1
-";
+    fn collatz_step(m) =
+      if even(m) then
+        m / 2
+      else
+        3 * m + 1
+"};
 
 // A real logic edit: the odd-case constant in the shared `collatz_step` moves.
-const COLLATZ_EDIT: &str = "\
-fn collatz_step(n) =
-  if even(n) then
-    n / 2
-  else
-    3 * n + 7
+const COLLATZ_EDIT: &str = indoc! {"
+    fn collatz_step(n) =
+      if even(n) then
+        n / 2
+      else
+        3 * n + 7
 
-fn collatz_len(start : Int) : Int =
-  var n := start
-  var acc := 0
-  while n /= 1 do
-    n := collatz_step(n)
-    acc += 1
-  acc + 1
+    fn collatz_len(start : Int) : Int =
+      var n := start
+      var acc := 0
+      while n /= 1 do
+        n := collatz_step(n)
+        acc += 1
+      acc + 1
 
-fn collatz_max(start : Int) : Int =
-  var n := start
-  var peak := start
-  while n /= 1 do
-    peak := max(n, peak)
-    n := collatz_step(n)
-  peak
+    fn collatz_max(start : Int) : Int =
+      var n := start
+      var peak := start
+      while n /= 1 do
+        peak := max(n, peak)
+        n := collatz_step(n)
+      peak
 
-fn main() =
-  println(collatz_len(27))
-  println(collatz_max(27))
-";
+    fn main() =
+      println(collatz_len(27))
+      println(collatz_max(27))
+"};
 
 #[test]
 fn pure_refactor_diffs_to_zero() {
@@ -117,9 +118,11 @@ fn pure_refactor_diffs_to_zero() {
     let out = diff(COLLATZ, COLLATZ_REFACTOR);
     assert_eq!(
         out,
-        "diff: 0 changed, 0 added, 0 removed, 4 unchanged\n\
-         text-only: 3 respelled, behavior held (collatz_len, collatz_max, collatz_step)\n\
-         cone: 0 affected\n",
+        indoc! {"
+            diff: 0 changed, 0 added, 0 removed, 4 unchanged
+            text-only: 3 respelled, behavior held (collatz_len, collatz_max, collatz_step)
+            cone: 0 affected
+        "},
         "a pure refactor is zero behavioral changes with the respellings named"
     );
 }
@@ -205,13 +208,13 @@ fn logic_edit_reports_the_changed_def_and_its_exact_cone() {
 
 // Record a program against a fixed input, then replay it with no input, asserting
 // the transcript is reproduced byte for byte.
-const GREET: &str = "\
-fn main() =
-  println(\"name?\")
-  let who = read_line()
-  println(\"hi {who}\")
-  println(\"n={mod(rand(), 100)}\")
-";
+const GREET: &str = indoc! {r#"
+    fn main() =
+      println("name?")
+      let who = read_line()
+      println("hi {who}")
+      println("n={mod(rand(), 100)}")
+"#};
 
 #[test]
 fn replay_reproduces_the_recorded_run_byte_for_byte() {
@@ -371,19 +374,19 @@ fn durable_resume_is_exactly_once_across_a_crash() {
 
 // A deterministic program (no input) that exercises `var`/`while` so the native
 // backend and the interpreter both have real work to agree on.
-const ATTEST_PROG: &str = "\
-fn collatz_len(start : Int) : Int =
-  var n := start
-  var acc := 0
-  while n /= 1 do
-    n := if even(n) then n / 2 else 3 * n + 1
-    acc += 1
-  acc + 1
+const ATTEST_PROG: &str = indoc! {r#"
+    fn collatz_len(start : Int) : Int =
+      var n := start
+      var acc := 0
+      while n /= 1 do
+        n := if even(n) then n / 2 else 3 * n + 1
+        acc += 1
+      acc + 1
 
-fn main() =
-  println(\"attest me\")
-  println(collatz_len(27))
-";
+    fn main() =
+      println("attest me")
+      println(collatz_len(27))
+"#};
 
 #[test]
 fn attest_emits_the_green_identical_line() {

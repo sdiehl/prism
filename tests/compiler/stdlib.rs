@@ -5,6 +5,7 @@
 
 use std::path::Path;
 
+use indoc::indoc;
 use prism::{check, interpret, with_prelude};
 
 const RECURSION_LAWS: &str = include_str!("../stdlib_fixtures/recursion_laws.pr");
@@ -51,12 +52,14 @@ fn stdlib_module_is_importable_qualified() {
 fn control_recursion_laws_effects_and_order_hold() {
     assert_eq!(
         out(RECURSION_LAWS),
-        "tree structural laws: OK, passed 100 tests.\n\
-term structural laws: OK, passed 100 tests.\n\
-materialized cata-ana equals hylo: OK, passed 100 tests.\n\
-true\n\
-(5, [\"a\", \"branch\", \"b\", \"c\"])\n\
-true\n"
+        indoc! {r#"
+            tree structural laws: OK, passed 100 tests.
+            term structural laws: OK, passed 100 tests.
+            materialized cata-ana equals hylo: OK, passed 100 tests.
+            true
+            (5, ["a", "branch", "b", "c"])
+            true
+        "#}
     );
 }
 

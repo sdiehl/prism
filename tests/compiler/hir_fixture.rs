@@ -25,6 +25,7 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use indoc::indoc;
 use serde_json::Value;
 
 // The directory of paired source/golden fixtures, relative to the crate root.
@@ -44,9 +45,11 @@ const HIR_FIXTURE_SCHEMA: &str = "prism-hir-fixture-v2";
 // The dump phase that renders the fixture.
 const HIR_PHASE: &str = "hir";
 
-const SRC: &str = "type Point = Point { x: Int, y: Int }\n\
-                   fn get_x(p : Point) : Int = p.x\n\
-                   fn main() : Unit = println(show(get_x(Point { x = 1, y = 2 })))\n";
+const SRC: &str = indoc! {"
+    type Point = Point { x: Int, y: Int }
+    fn get_x(p : Point) : Int = p.x
+    fn main() : Unit = println(show(get_x(Point { x = 1, y = 2 })))
+"};
 
 fn fixture_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join(FIXTURE_DIR)

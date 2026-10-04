@@ -11,6 +11,8 @@
 use std::io::Write;
 use std::process::{Command, Stdio};
 
+use indoc::indoc;
+
 // What a program prints, which for these is the splice's output as the rest of
 // the language sees it: an ordinary string.
 fn run(src: &str) -> String {
@@ -25,8 +27,11 @@ fn refused(src: &str) -> String {
 
 #[test]
 fn a_quotation_renders_the_declaration_with_its_leading_comment() {
-    let out = run("-- Twice its argument.\nfn double(x : Int) : Int = x * 2\n\
-                   fn main() = print(reflect fn double)\n");
+    let out = run(indoc! {"
+        -- Twice its argument.
+        fn double(x : Int) : Int = x * 2
+        fn main() = print(reflect fn double)
+    "});
     assert_eq!(
         out,
         "-- Twice its argument.\nfn double(x : Int) : Int = x * 2"
@@ -35,8 +40,10 @@ fn a_quotation_renders_the_declaration_with_its_leading_comment() {
 
 #[test]
 fn a_quotation_renders_a_type_declaration_too() {
-    let out = run("type Light = Red | Amber | Green\n\
-                   fn main() = print(reflect type Light)\n");
+    let out = run(indoc! {"
+        type Light = Red | Amber | Green
+        fn main() = print(reflect type Light)
+    "});
     assert_eq!(out, "type Light = Red | Amber | Green");
 }
 
@@ -82,9 +89,13 @@ fn the_documentation_generator_answers_a_quotation() {
     let module = prism::ModuleSource {
         dotted: "Quoting".to_string(),
         title: "Quoting".to_string(),
-        source: "-- | Twice its argument.\npub fn double(x : Int) : Int = x * 2\n\n\
-                 pub fn shown() : String = reflect fn double\n"
-            .to_string(),
+        source: indoc! {"
+            -- | Twice its argument.
+            pub fn double(x : Int) : Int = x * 2
+
+            pub fn shown() : String = reflect fn double
+        "}
+        .to_string(),
         source_path: "Quoting.pr".to_string(),
         is_prelude: false,
     };
@@ -132,8 +143,15 @@ fn a_prompt_expression_quotes_the_session() {
 
 #[test]
 fn a_quotation_round_trips_through_the_formatter() {
-    let src = "fn double(x : Int) : Int = x * 2\n\ntype Light = Red | Amber | Green\n\n\
-               fn main() =\n  print(reflect fn double)\n  print(reflect type Light)\n";
+    let src = indoc! {"
+        fn double(x : Int) : Int = x * 2
+
+        type Light = Red | Amber | Green
+
+        fn main() =
+          print(reflect fn double)
+          print(reflect type Light)
+    "};
     let once = prism::format(src).expect("must parse");
     assert!(once.contains("reflect fn double"), "{once}");
     assert!(once.contains("reflect type Light"), "{once}");

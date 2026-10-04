@@ -5,6 +5,7 @@
 // hostile-input rejection, the typed round trip, RFC 3339 arithmetic, and the
 // Time record/replay round trip (a real clock read reproduced byte-for-byte).
 
+use indoc::indoc;
 use prism::resolve::default_roots;
 use prism::{interpret_io_on, record_on, replay_on, with_prelude, Config};
 use std::io::Cursor;
@@ -79,14 +80,16 @@ fn json_parser_is_total_on_hostile_input() {
     let src = include_str!("../fixtures/runtime/time_json_3.pr");
     assert_eq!(
         run(src),
-        "line 1 col 5: unterminated array\n\
-         line 1 col 8: expected string key in object\n\
-         line 1 col 4: trailing input after top-level value\n\
-         line 1 col 8: trailing input after top-level value\n\
-         line 1 col 14: unterminated string\n\
-         line 1 col 1: unexpected character\n\
-         line 1 col 1: unexpected end of input\n\
-         line 1 col 513: maximum nesting depth exceeded\n"
+        indoc! {"
+            line 1 col 5: unterminated array
+            line 1 col 8: expected string key in object
+            line 1 col 4: trailing input after top-level value
+            line 1 col 8: trailing input after top-level value
+            line 1 col 14: unterminated string
+            line 1 col 1: unexpected character
+            line 1 col 1: unexpected end of input
+            line 1 col 513: maximum nesting depth exceeded
+        "}
     );
 }
 
@@ -102,14 +105,16 @@ fn time_rfc3339_formats_and_parses() {
     let src = include_str!("../fixtures/runtime/time_json_5.pr");
     assert_eq!(
         run(src),
-        "1970-01-01T00:00:00Z\n\
-         2025-07-04T11:54:56.123456789Z\n\
-         2026-07-04T12:34:56Z\n\
-         2026-07-04T12:34:56.123456789Z\n\
-         2026-07-04T10:34:56Z\n\
-         2026-07-04T18:04:56Z\n\
-         none\n\
-         none\n"
+        indoc! {"
+            1970-01-01T00:00:00Z
+            2025-07-04T11:54:56.123456789Z
+            2026-07-04T12:34:56Z
+            2026-07-04T12:34:56.123456789Z
+            2026-07-04T10:34:56Z
+            2026-07-04T18:04:56Z
+            none
+            none
+        "}
     );
 }
 

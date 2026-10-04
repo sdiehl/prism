@@ -4,24 +4,28 @@
 
 ## 0.23.0
 
-- Effect lowering: made the consolidated state route with continuation reification the default, retaining the legacy fallback for unsupported shapes.
-- Effect lowering: removed the separate evidence-passing engine and incorporated its direct handler operations into state lowering.
-- Handlers: expanded lowering for non-tail resumptions, multishot continuations, nested state handlers, aborts, and effectful callbacks.
-- Callable conventions: preserve representation across polymorphic instantiations, constructor and newtype fields, stored resumptions, and separate handler scopes.
-- Typechecker: equate a handler clause's effect arguments with those performed by the handled action, rejecting mismatched stream element types.
-- Stack safety: repaired trampoline handling of indirect calls, forwarded resumptions, and mixed-arity effect cycles; added deep native regression tests.
-- Optimizer: eliminate temporary known products consumed immediately after an effectful sequence, preserving effect order and avoiding per-iteration state/result allocations.
-- Resumptions: pure closures capturing reified resumptions recover their declared result representation, including through local aliases.
-- Verification: carry transformed constructor environments with lowered functions and strengthen checks for callable and effect-row compatibility.
-- Testing: expanded interpreter/native and cross-tier coverage for callable storage, masking, handler boundaries, and optimized and unoptimized execution.
-- Performance: on the 365-program tier manifest, free-monad classifications fell from 119 in v0.22 to four; 167 of 171 effectful programs now use the consolidated state route.
-- Allocation costs: among 363 comparable manifest entries, 130 decreased and 230 were unchanged; `examples/mask.pr` increased from 128 to 138 cells, `deep_effect_recursion.pr` from three to four, and `nested_patterns.pr` from nine to ten.
-
-- Allocation certificates: account for boxed scalar literals and branch scrutinees and shared-cell reuse fallbacks; reject effect lowering, arithmetic and runtime operations without a proven allocation bound. Previously accepted unsound `noalloc` claims now fail with an allocation diagnostic.
-- Viewer: revision field diffs, open changes by default, and bulk review controls.
-- Typechecker: quantify every effect-operation signature type variable and give handler clauses fresh rigid identities.
+- Effect lowering: the consolidated state route with reified continuations is now the default.
+- Effect lowering: unsupported shapes keep the legacy fallback; the evidence engine is retired.
+- Effect lowering: direct handler operations from the evidence engine now lower through state.
+- Handlers: lowering covers non-tail and multishot resumptions, nested state, aborts, and callbacks.
+- Callable conventions: representation survives polymorphic instantiation and constructor fields.
+- Callable conventions: stored resumptions and separate handler scopes keep their representation.
+- Typechecker: handler clause effect arguments must match the action, rejecting mismatched streams.
+- Typechecker: every effect-operation type variable is quantified, clauses get fresh rigid names.
+- Specification: operation type variables instantiate per perform site, effect parameters per row.
+- Stack safety: trampolines handle indirect calls, forwarded resumptions, and mixed-arity cycles.
+- Stack safety: deep native regression tests guard the repaired trampoline paths.
+- Optimizer: known products consumed after an effectful sequence no longer allocate per iteration.
+- Resumptions: pure closures over reified resumptions recover their declared result representation.
+- Verification: lowered functions carry constructor environments, callable and row checks tighten.
+- Testing: cross-tier coverage for callable storage, masking, handler bounds, and optimizer levels.
+- Performance: free-monad tier programs fell from 119 to four; 167 of 171 take the state route.
+- Allocation costs: of 363 manifest entries 130 fell, 230 held, and three rose, `mask.pr` most.
+- Allocation certificates: boxed literals, branch scrutinees, and shared-cell reuse are accounted.
+- Allocation certificates: unsound `noalloc` claims accepted before now fail with a diagnostic.
+- Viewer: revision fields show as diffs, changes open by default, and bulk review controls exist.
 - Dependencies: incorporated the dependency updates from public main.
-- Development: retain complete failure diagnostics from artifact acceptance runs.
+- Tooling: artifact acceptance runs retain complete failure diagnostics.
 
 ## 0.22.0
 

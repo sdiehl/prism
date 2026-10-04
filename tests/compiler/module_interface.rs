@@ -1,3 +1,4 @@
+use indoc::indoc;
 use prism::core::Digest;
 use prism::types::NominalRepr;
 use prism::{
@@ -70,10 +71,10 @@ fn interface_projection_is_versioned_and_self_verifying() {
 
 #[test]
 fn multiplicity_rows_survive_the_interface() {
-    let interface = interface(
-        "pub fn twice(g : ((Int) -> Int) @ many, x : Int) : Int = g(g(x))\n\
-         pub fn apply1(g : ((Int) -> Int) @ once, x : Int) : Int = g(x)\n",
-    );
+    let interface = interface(indoc! {"
+            pub fn twice(g : ((Int) -> Int) @ many, x : Int) : Int = g(g(x))
+            pub fn apply1(g : ((Int) -> Int) @ once, x : Int) : Int = g(x)
+        "});
     let env = interface.exported_value_env().unwrap();
     assert_eq!(
         env.get(&Sym::from("twice")).expect("exported twice").show(),
@@ -144,10 +145,10 @@ fn effectful_exported_value_scheme_rehydrates_once() {
 
 #[test]
 fn transparent_data_shape_and_constructor_facts_rehydrate() {
-    let interface = interface(
-        "pub type Shape = Circle(Int) | Square(Int) deriving (Eq)\n\
-         pub fn area(_shape : Shape) : Int = 0\n",
-    );
+    let interface = interface(indoc! {"
+            pub type Shape = Circle(Int) | Square(Int) deriving (Eq)
+            pub fn area(_shape : Shape) : Int = 0
+        "});
     let json = interface.to_json().unwrap();
     let decoded = ModuleInterface::from_json(&json).unwrap();
     let seed = decoded.rehydrate().unwrap().typecheck_seed();
@@ -178,10 +179,10 @@ fn transparent_data_shape_and_constructor_facts_rehydrate() {
 
 #[test]
 fn opaque_data_rehydrates_shape_without_constructors() {
-    let interface = interface(
-        "opaque type Counter = Counter(Int)\n\
-         pub fn zero() : Counter = Counter(0)\n",
-    );
+    let interface = interface(indoc! {"
+            opaque type Counter = Counter(Int)
+            pub fn zero() : Counter = Counter(0)
+        "});
     let seed = interface.rehydrate().unwrap().typecheck_seed();
     assert!(seed.data_types()["Counter"].ctors.is_empty());
     assert_eq!(seed.data_types()["Counter"].repr, NominalRepr::BoxedCell);
@@ -194,10 +195,10 @@ fn opaque_data_rehydrates_shape_without_constructors() {
 
 #[test]
 fn opaque_newtype_keeps_transparent_representation_evidence() {
-    let interface = interface(
-        "opaque newtype Zero = Zero(Unit)\n\
-         pub fn zero() : Zero = Zero(())\n",
-    );
+    let interface = interface(indoc! {"
+            opaque newtype Zero = Zero(Unit)
+            pub fn zero() : Zero = Zero(())
+        "});
     let seed = interface.rehydrate().unwrap().typecheck_seed();
     assert!(seed.data_types()["Zero"].ctors.is_empty());
     assert_eq!(seed.data_types()["Zero"].repr, NominalRepr::Transparent);

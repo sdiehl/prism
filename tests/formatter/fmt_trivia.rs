@@ -1,3 +1,5 @@
+use indoc::indoc;
+
 // Snapshot tests for comment and blank-line (trivia) preservation through
 // the formatter, across every offside surface that can carry it. Inputs are
 // inline rather than `.pr` fixtures so they stay out of the recursive
@@ -30,210 +32,244 @@ macro_rules! trivia_case {
 // Leading, between-statement, and pre-result comments in a function body.
 trivia_case!(
     fn_body_statements,
-    "fn main() =\n\
-     \x20 -- bind the first\n\
-     \x20 let x = 1\n\
-     \x20 -- bind the second\n\
-     \x20 let y = 2\n\
-     \x20 -- combine them\n\
-     \x20 x + y\n"
+    indoc! {"
+        fn main() =
+          -- bind the first
+          let x = 1
+          -- bind the second
+          let y = 2
+          -- combine them
+          x + y
+    "}
 );
 
 // Messy intra-line spacing still normalizes while keeping every comment.
 trivia_case!(
     fn_body_messy_input,
-    "fn  main ( ) =\n\
-     \x20 -- leading\n\
-     \x20 let   x  =  1\n\
-     \x20 -- trailing\n\
-     \x20 x\n"
+    indoc! {"
+        fn  main ( ) =
+          -- leading
+          let   x  =  1
+          -- trailing
+          x
+    "}
 );
 
 // A comment trailing a binding on the same line stays on that line instead of
 // being relocated above the next statement.
 trivia_case!(
     trailing_same_line_comments,
-    "fn test() =\n\
-     \x20 let x = 1 -- trailing on x\n\
-     \x20 let y = x + 2 -- and on y\n\
-     \x20 y\n"
+    indoc! {"
+        fn test() =
+          let x = 1 -- trailing on x
+          let y = x + 2 -- and on y
+          y
+    "}
 );
 
 // Comments above match arms and inside an arm's body block.
 trivia_case!(
     match_arm_comments,
-    "fn classify(n : Int) : String =\n\
-     \x20 -- dispatch on the value\n\
-     \x20 match n of\n\
-     \x20   -- the zero case\n\
-     \x20   0 => \"zero\"\n\
-     \x20   -- everything else\n\
-     \x20   _ =>\n\
-     \x20     -- build the label\n\
-     \x20     let s = \"nonzero\"\n\
-     \x20     s\n"
+    indoc! {r#"
+        fn classify(n : Int) : String =
+          -- dispatch on the value
+          match n of
+            -- the zero case
+            0 => "zero"
+            -- everything else
+            _ =>
+              -- build the label
+              let s = "nonzero"
+              s
+    "#}
 );
 
 // Comments in each branch of an if / elif / else chain.
 trivia_case!(
     if_elif_else_comments,
-    "fn sign(n : Int) : Int =\n\
-     \x20 if n == 0 then\n\
-     \x20   -- exactly zero\n\
-     \x20   0\n\
-     \x20 elif n > 0 then\n\
-     \x20   -- strictly positive\n\
-     \x20   1\n\
-     \x20 else\n\
-     \x20   -- strictly negative\n\
-     \x20   9\n"
+    indoc! {"
+        fn sign(n : Int) : Int =
+          if n == 0 then
+            -- exactly zero
+            0
+          elif n > 0 then
+            -- strictly positive
+            1
+          else
+            -- strictly negative
+            9
+    "}
 );
 
 // Comments in a `for` loop body.
 trivia_case!(
     for_body_comments,
-    "fn loop_it(xs : List(Int)) : Unit =\n\
-     \x20 for x in xs do\n\
-     \x20   -- visit each element\n\
-     \x20   println(show(x))\n"
+    indoc! {"
+        fn loop_it(xs : List(Int)) : Unit =
+          for x in xs do
+            -- visit each element
+            println(show(x))
+    "}
 );
 
 // Handler block: a comment above the first arm, between arms, and after the
 // whole `with handler` block.
 trivia_case!(
     handler_comments,
-    "effect State\n\
-     \x20 get() : Int\n\
-     \x20 put(Int) : Unit\n\
-     \n\
-     fn run() : Int ! {State} =\n\
-     \x20 -- install the handler\n\
-     \x20 with handler\n\
-     \x20   -- read the cell\n\
-     \x20   get() resume k => k(42)\n\
-     \x20   -- write the cell\n\
-     \x20   put(v) resume k => k(())\n\
-     \x20 -- after the handler is in scope\n\
-     \x20 let a = get()\n\
-     \x20 a\n"
+    indoc! {"
+        effect State
+          get() : Int
+          put(Int) : Unit
+
+        fn run() : Int ! {State} =
+          -- install the handler
+          with handler
+            -- read the cell
+            get() resume k => k(42)
+            -- write the cell
+            put(v) resume k => k(())
+          -- after the handler is in scope
+          let a = get()
+          a
+    "}
 );
 
 // A named handler instance carries the same trivia surfaces.
 trivia_case!(
     named_handler_comments,
-    "effect State\n\
-     \x20 get() : Int\n\
-     \n\
-     fn run() : Int ! {State} =\n\
-     \x20 -- a named handler\n\
-     \x20 with h <- handler\n\
-     \x20   get() resume k => k(7)\n\
-     \x20 -- use it\n\
-     \x20 h.get()\n"
+    indoc! {"
+        effect State
+          get() : Int
+
+        fn run() : Int ! {State} =
+          -- a named handler
+          with h <- handler
+            get() resume k => k(7)
+          -- use it
+          h.get()
+    "}
 );
 
 // A `let` whose value is itself a laid-out block.
 trivia_case!(
     let_value_block_comments,
-    "fn pick(b : Bool) : Int =\n\
-     \x20 let r =\n\
-     \x20   -- choose a branch\n\
-     \x20   if b then\n\
-     \x20     -- the yes side\n\
-     \x20     1\n\
-     \x20   else\n\
-     \x20     -- the no side\n\
-     \x20     2\n\
-     \x20 r\n"
+    indoc! {"
+        fn pick(b : Bool) : Int =
+          let r =
+            -- choose a branch
+            if b then
+              -- the yes side
+              1
+            else
+              -- the no side
+              2
+          r
+    "}
 );
 
 // Grouped comments and a blank line that deliberately separates two groups.
 trivia_case!(
     grouped_and_blank_separated,
-    "fn doc() : Int =\n\
-     \x20 -- first group line one\n\
-     \x20 -- first group line two\n\
-     \n\
-     \x20 -- second group after a blank divider\n\
-     \x20 let x = 1\n\
-     \x20 let y = 2\n\
-     \x20 x + y\n"
+    indoc! {"
+        fn doc() : Int =
+          -- first group line one
+          -- first group line two
+
+          -- second group after a blank divider
+          let x = 1
+          let y = 2
+          x + y
+    "}
 );
 
 // Top-level trivia: a header comment, comments between declarations, and a
 // trailing comment after the final declaration.
 trivia_case!(
     toplevel_comments,
-    "-- module header\n\
-     fn first() : Int = 1\n\
-     -- between declarations\n\
-     fn second() : Int = 2\n\
-     -- dangling tail comment\n"
+    indoc! {"
+        -- module header
+        fn first() : Int = 1
+        -- between declarations
+        fn second() : Int = 2
+        -- dangling tail comment
+    "}
 );
 
 // try / catch arms.
 trivia_case!(
     trycatch_comments,
-    "error Boom\n\
-     \n\
-     fn guarded() : Int =\n\
-     \x20 try\n\
-     \x20   -- the risky part\n\
-     \x20   throw Boom\n\
-     \x20 catch\n\
-     \x20   -- recover from Boom\n\
-     \x20   Boom => 0\n"
+    indoc! {"
+        error Boom
+
+        fn guarded() : Int =
+          try
+            -- the risky part
+            throw Boom
+          catch
+            -- recover from Boom
+            Boom => 0
+    "}
 );
 
 // A trailing-lambda call whose block body carries comments.
 trivia_case!(
     trailing_lambda_comments,
-    "fn walk(xs : List(Int)) : Unit =\n\
-     \x20 xs.foreach() fn(x)\n\
-     \x20   -- handle one item\n\
-     \x20   println(show(x))\n"
+    indoc! {"
+        fn walk(xs : List(Int)) : Unit =
+          xs.foreach() fn(x)
+            -- handle one item
+            println(show(x))
+    "}
 );
 
 // `var` mutable bindings interleaved with comments.
 trivia_case!(
     var_decl_comments,
-    "fn counter() : Int =\n\
-     \x20 -- start at zero\n\
-     \x20 var n := 0\n\
-     \x20 -- bump it\n\
-     \x20 n := n + 1\n\
-     \x20 n\n"
+    indoc! {"
+        fn counter() : Int =
+          -- start at zero
+          var n := 0
+          -- bump it
+          n := n + 1
+          n
+    "}
 );
 
 // A comment between call arguments must survive: the flat one-line join would
 // drop it, so the formatter keeps the call in its laid-out source form.
 trivia_case!(
     call_arg_comments,
-    "fn main() : Int =\n\
-     \x20 foo(\n\
-     \x20   1,  -- keep me\n\
-     \x20   2,\n\
-     \x20 )\n"
+    indoc! {"
+        fn main() : Int =
+          foo(
+            1,  -- keep me
+            2,
+          )
+    "}
 );
 
 // Comments inside a list literal are preserved the same way.
 trivia_case!(
     list_element_comments,
-    "fn main() : List(Int) =\n\
-     \x20 [\n\
-     \x20   1,  -- one\n\
-     \x20   2,  -- two\n\
-     \x20 ]\n"
+    indoc! {"
+        fn main() : List(Int) =
+          [
+            1,  -- one
+            2,  -- two
+          ]
+    "}
 );
 
 // Comments inside a tuple literal are preserved the same way.
 trivia_case!(
     tuple_element_comments,
-    "fn main() =\n\
-     \x20 (\n\
-     \x20   1,  -- x coord\n\
-     \x20   2,  -- y coord\n\
-     \x20 )\n"
+    indoc! {"
+        fn main() =
+          (
+            1,  -- x coord
+            2,  -- y coord
+          )
+    "}
 );
 
 // Consecutive imports form one tight block: blank lines between two imports
@@ -241,11 +277,13 @@ trivia_case!(
 // the declarations below by a single blank line.
 trivia_case!(
     import_block_spacing,
-    "import Data.List (append)\n\
-     \n\
-     import Data.Map (map_empty)\n\
-     -- picks the ordered set\n\
-     import Data.Set (set_from_list)\n\
-     \n\
-     fn main() = append([1], [2])\n"
+    indoc! {"
+        import Data.List (append)
+
+        import Data.Map (map_empty)
+        -- picks the ordered set
+        import Data.Set (set_from_list)
+
+        fn main() = append([1], [2])
+    "}
 );

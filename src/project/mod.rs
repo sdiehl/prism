@@ -735,6 +735,7 @@ fn load_project_rec(arg: &Path, visiting: &mut Vec<PathBuf>) -> Result<Project, 
 #[cfg(test)]
 mod tests {
     use super::{hash_pin, parse_hash_pin, DepSource, License, Manifest};
+    use indoc::indoc;
     use std::path::PathBuf;
 
     const VERSION: &str = "0.1.0";
@@ -776,14 +777,15 @@ license = "MIT"
     fn parses_optional_package_metadata() {
         let m = Manifest::parse(&manifest(
             "demo",
-            "description = \"A small demo.\"\n\
-             homepage = \"https://example.com/demo\"\n\
-             issues = \"https://example.com/demo/issues\"\n\
-             online-doc = \"https://docs.example.com/demo\"\n\
-             repo = \"git+https://example.com/demo.git\"\n\
-             changes-files = [\"CHANGES.md\"]\n\
-             license-files = [\"LICENSE\"]\n\
-             readme-files = [\"README.md\", \"GUIDE.md\"]",
+            indoc! {r#"
+                description = "A small demo."
+                homepage = "https://example.com/demo"
+                issues = "https://example.com/demo/issues"
+                online-doc = "https://docs.example.com/demo"
+                repo = "git+https://example.com/demo.git"
+                changes-files = ["CHANGES.md"]
+                license-files = ["LICENSE"]
+                readme-files = ["README.md", "GUIDE.md"]"#},
             "[bin]\nentry = \"src/main.pr\"\n",
         ))
         .unwrap();
@@ -866,8 +868,14 @@ entry = "src/main.pr"
         let m = Manifest::parse(&manifest(
             "app",
             "",
-            "[bin]\nentry = \"src/main.pr\"\n\n\
-             [dependencies]\ngeo = { path = \"../geo\" }\nutil = \"../util\"\n",
+            indoc! {r#"
+                [bin]
+                entry = "src/main.pr"
+
+                [dependencies]
+                geo = { path = "../geo" }
+                util = "../util"
+            "#},
         ))
         .unwrap();
         let mut deps: Vec<_> = m

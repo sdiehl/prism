@@ -3,7 +3,7 @@ pub(super) use crate::types::{collect_row_vars, for_each_row_tail};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Deref;
 
-use im::{OrdMap, OrdSet};
+use imbl::{OrdMap, OrdSet};
 use marginalia::Span;
 
 use super::{CtorInfo, DataInfo, EffOpInfo, NominalRepr, Tc, TypeParameter};

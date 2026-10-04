@@ -11,6 +11,7 @@
 use std::io::Write;
 use std::process::{Command, Stdio};
 
+use indoc::indoc;
 use prism::error::{ErrKind, Frame, TypeError};
 use prism::Error;
 
@@ -490,27 +491,36 @@ fn usage_row_on_non_function_type_is_rejected() {
 // Capturing a local closure, a `var` cell, or another nonportable value is
 // rejected (E6060). It composes with `@ once` in the teleport contract.
 
-const PORTABLE_TOP_LEVEL_OK: &str = "fn work() : Int = 42\n\
-                                     fn run(f : (() -> Int) @ portable) : Int = f()\n\
-                                     fn main() = println(run(\\() -> work()))\n";
+const PORTABLE_TOP_LEVEL_OK: &str = indoc! {r"
+    fn work() : Int = 42
+    fn run(f : (() -> Int) @ portable) : Int = f()
+    fn main() = println(run(\() -> work()))
+"};
 
-const PORTABLE_SCALAR_PARAM_OK: &str = "fn run(f : (() -> Int) @ portable) : Int = f()\n\
-                                        fn mk(x : Int) : Int = run(\\() -> x)\n\
-                                        fn main() = println(mk(7))\n";
+const PORTABLE_SCALAR_PARAM_OK: &str = indoc! {r"
+    fn run(f : (() -> Int) @ portable) : Int = f()
+    fn mk(x : Int) : Int = run(\() -> x)
+    fn main() = println(mk(7))
+"};
 
-const PORTABLE_CAPTURE_CLOSURE: &str = "fn run(f : (() -> Int) @ portable) : Int = f()\n\
-                                        fn o(g : (Int) -> Int) : Int = run(\\() -> g(1))\n\
-                                        fn main() = println(o(\\(n) -> n))\n";
+const PORTABLE_CAPTURE_CLOSURE: &str = indoc! {r"
+    fn run(f : (() -> Int) @ portable) : Int = f()
+    fn o(g : (Int) -> Int) : Int = run(\() -> g(1))
+    fn main() = println(o(\(n) -> n))
+"};
 
-const PORTABLE_CAPTURE_VAR: &str = "fn run(f : (() -> Int) @ portable) : Int = f()\n\
-                                    fn mk() : Int =\n  \
-                                    var c := 3\n  \
-                                    run(\\() -> c)\n\
-                                    fn main() = println(mk())\n";
+const PORTABLE_CAPTURE_VAR: &str = indoc! {r"
+    fn run(f : (() -> Int) @ portable) : Int = f()
+    fn mk() : Int =
+      var c := 3
+      run(\() -> c)
+    fn main() = println(mk())
+"};
 
-const TELEPORT_ONCE_PORTABLE_TWICE: &str =
-    "fn teleport(f : (() -> Int) @ {once, portable}) : Int = f() + f()\n\
-     fn main() = println(teleport(\\() -> 1))\n";
+const TELEPORT_ONCE_PORTABLE_TWICE: &str = indoc! {r"
+        fn teleport(f : (() -> Int) @ {once, portable}) : Int = f() + f()
+        fn main() = println(teleport(\() -> 1))
+    "};
 
 #[test]
 fn portable_admits_code_refs_and_portable_data() {
@@ -544,50 +554,60 @@ fn portable_rejects_nonportable_captures() {
 // refused. Without this a nullary wrapper would carry any unportable value,
 // including a live resource handle, across the boundary.
 
-const PORTABLE_DATA_PARAM_OK: &str = "type Point = Point(Int, Int)\n\
-                                      fn run(f : (() -> Int) @ portable) : Int = f()\n\
-                                      fn fst(p : Point) : Int =\n  \
-                                      match p of\n    \
-                                      Point(x, _) => x\n\
-                                      fn mk(p : Point) : Int = run(\\() -> fst(p))\n\
-                                      fn main() = println(mk(Point(1, 2)))\n";
+const PORTABLE_DATA_PARAM_OK: &str = indoc! {r"
+    type Point = Point(Int, Int)
+    fn run(f : (() -> Int) @ portable) : Int = f()
+    fn fst(p : Point) : Int =
+      match p of
+        Point(x, _) => x
+    fn mk(p : Point) : Int = run(\() -> fst(p))
+    fn main() = println(mk(Point(1, 2)))
+"};
 
-const PORTABLE_RECURSIVE_DATA_OK: &str = "type Nums = Nil | Cons(Int, Nums)\n\
-                                          fn run(f : (() -> Int) @ portable) : Int = f()\n\
-                                          fn head(ns : Nums) : Int =\n  \
-                                          match ns of\n    \
-                                          Nil => 0\n    \
-                                          Cons(n, _) => n\n\
-                                          fn mk(ns : Nums) : Int = run(\\() -> head(ns))\n\
-                                          fn main() = println(mk(Cons(1, Nil)))\n";
+const PORTABLE_RECURSIVE_DATA_OK: &str = indoc! {r"
+    type Nums = Nil | Cons(Int, Nums)
+    fn run(f : (() -> Int) @ portable) : Int = f()
+    fn head(ns : Nums) : Int =
+      match ns of
+        Nil => 0
+        Cons(n, _) => n
+    fn mk(ns : Nums) : Int = run(\() -> head(ns))
+    fn main() = println(mk(Cons(1, Nil)))
+"};
 
-const PORTABLE_CAPTURE_WRAPPED_CLOSURE: &str = "type Box = Box(() -> Int)\n\
-                                                fn run(f : (() -> Int) @ portable) : Int = f()\n\
-                                                fn open(b : Box) : Int =\n  \
-                                                match b of\n    \
-                                                Box(g) => g()\n\
-                                                fn mk(b : Box) : Int = run(\\() -> open(b))\n\
-                                                fn main() = println(mk(Box(\\() -> 1)))\n";
+const PORTABLE_CAPTURE_WRAPPED_CLOSURE: &str = indoc! {r"
+    type Box = Box(() -> Int)
+    fn run(f : (() -> Int) @ portable) : Int = f()
+    fn open(b : Box) : Int =
+      match b of
+        Box(g) => g()
+    fn mk(b : Box) : Int = run(\() -> open(b))
+    fn main() = println(mk(Box(\() -> 1)))
+"};
 
-const PORTABLE_CAPTURE_OPAQUE: &str = "opaque newtype Tok = Tok(Int)\n\
-                                       fn run(f : (() -> Int) @ portable) : Int = f()\n\
-                                       fn open(t : Tok) : Int =\n  \
-                                       match t of\n    \
-                                       Tok(n) => n\n\
-                                       fn mk(t : Tok) : Int = run(\\() -> open(t))\n\
-                                       fn main() = println(mk(Tok(7)))\n";
+const PORTABLE_CAPTURE_OPAQUE: &str = indoc! {r"
+    opaque newtype Tok = Tok(Int)
+    fn run(f : (() -> Int) @ portable) : Int = f()
+    fn open(t : Tok) : Int =
+      match t of
+        Tok(n) => n
+    fn mk(t : Tok) : Int = run(\() -> open(t))
+    fn main() = println(mk(Tok(7)))
+"};
 
 // The live-resource case the mobility boundary exists to refuse: a socket token
 // is an imported opaque type, so its representation is not evidence a caller may
 // use, and sealing a closure that holds one must not typecheck.
-const PORTABLE_CAPTURE_SOCKET: &str = "import Net (..)\n\
-     import Teleport (..)\n\
-     fn hold(s : Stream) : Unit ! {IO} = println(1)\n\
-     fn seal_it(s : Stream) : Result(Unit, MoveError) ! {Placement, IO | e} =\n\
-     \x20 teleport(\\() -> hold(s))\n\
-     fn main() : Unit ! {IO} =\n\
-     \x20 println(show(run_net(\\() ->\n\
-     \x20   run_here(\\() -> with_tcp_connection(\"127.0.0.1:9\", seal_it)))))\n";
+const PORTABLE_CAPTURE_SOCKET: &str = indoc! {r#"
+    import Net (..)
+    import Teleport (..)
+    fn hold(s : Stream) : Unit ! {IO} = println(1)
+    fn seal_it(s : Stream) : Result(Unit, MoveError) ! {Placement, IO | e} =
+      teleport(\() -> hold(s))
+    fn main() : Unit ! {IO} =
+      println(show(run_net(\() ->
+        run_here(\() -> with_tcp_connection("127.0.0.1:9", seal_it)))))
+"#};
 
 #[test]
 fn portable_admits_data_whose_fields_are_portable() {
@@ -635,14 +655,18 @@ fn teleport_once_portable_composes_both_contracts() {
 // single-use contract on the closure handed to it. A closure that captures a
 // nonportable local is rejected (E6060) exactly as a hand-written `@ portable`
 // parameter would be.
-const STDLIB_TELEPORT_OK: &str = "import Teleport (..)\n\
-                                  fn work() : Unit ! {IO} = println(42)\n\
-                                  fn main() = println(show(run_here(\\() -> teleport(work))))\n";
+const STDLIB_TELEPORT_OK: &str = indoc! {r"
+    import Teleport (..)
+    fn work() : Unit ! {IO} = println(42)
+    fn main() = println(show(run_here(\() -> teleport(work))))
+"};
 
-const STDLIB_TELEPORT_NONPORTABLE: &str = "import Teleport (..)\n\
-     fn o(g : (Int) -> Int) : Result(Unit, MoveError) ! {Placement, IO | e} =\n\
-     \x20 teleport(\\() -> println(g(1)))\n\
-     fn main() = println(show(run_here(\\() -> o(\\(n) -> n))))\n";
+const STDLIB_TELEPORT_NONPORTABLE: &str = indoc! {r"
+    import Teleport (..)
+    fn o(g : (Int) -> Int) : Result(Unit, MoveError) ! {Placement, IO | e} =
+      teleport(\() -> println(g(1)))
+    fn main() = println(show(run_here(\() -> o(\(n) -> n))))
+"};
 
 #[test]
 fn stdlib_teleport_enforces_the_mobility_contract() {
@@ -667,10 +691,12 @@ fn stdlib_teleport_enforces_the_mobility_contract() {
 // `var` escape check). An argument that is not a closure literal, top-level
 // function, or same-contract relay cannot be checked and is rejected (E6062).
 
-const NOESCAPE_PRE: &str = "type Builder = MkBuilder(Int)\n\
-                            fn finish(b : Builder) : Int =\n  \
-                            match b of\n    \
-                            MkBuilder(n) => n\n";
+const NOESCAPE_PRE: &str = indoc! {"
+    type Builder = MkBuilder(Int)
+    fn finish(b : Builder) : Int =
+      match b of
+        MkBuilder(n) => n
+"};
 
 fn noescape_src(rest: &str) -> String {
     format!("{NOESCAPE_PRE}{rest}")
@@ -678,10 +704,10 @@ fn noescape_src(rest: &str) -> String {
 
 #[test]
 fn noescape_consuming_callback_checks() {
-    let ok = noescape_src(
-        "fn with_builder(f : (Builder @ noescape) -> Int) : Int = f(MkBuilder(7))\n\
-         fn main() = println(with_builder(\\(b) -> finish(b)))\n",
-    );
+    let ok = noescape_src(indoc! {r"
+            fn with_builder(f : (Builder @ noescape) -> Int) : Int = f(MkBuilder(7))
+            fn main() = println(with_builder(\(b) -> finish(b)))
+        "});
     assert!(
         prism::check(&prism::with_prelude(&ok)).is_ok(),
         "a callback that only consumes its scoped token must check"
@@ -690,25 +716,25 @@ fn noescape_consuming_callback_checks() {
 
 #[test]
 fn noescape_direct_escapes_are_rejected() {
-    let returned = noescape_src(
-        "fn keep(f : (Builder @ noescape) -> Builder) : Int = 0\n\
-         fn main() = println(keep(\\(b) -> b))\n",
-    );
-    let embedded = noescape_src(
-        "fn keep(f : (Builder @ noescape) -> (Builder, Int)) : Int = 0\n\
-         fn main() = println(keep(\\(b) -> (b, 1)))\n",
-    );
-    let captured = noescape_src(
-        "fn keep(f : (Builder @ noescape) -> (() -> Int)) : Int = 0\n\
-         fn main() = println(keep(\\(b) -> \\() -> finish(b)))\n",
-    );
-    let aliased = noescape_src(
-        "fn keep(f : (Builder @ noescape) -> Builder) : Int = 0\n\
-         fn leak(b : Builder) : Builder =\n  \
-         let x = b\n  \
-         x\n\
-         fn main() = println(keep(leak))\n",
-    );
+    let returned = noescape_src(indoc! {r"
+            fn keep(f : (Builder @ noescape) -> Builder) : Int = 0
+            fn main() = println(keep(\(b) -> b))
+        "});
+    let embedded = noescape_src(indoc! {r"
+            fn keep(f : (Builder @ noescape) -> (Builder, Int)) : Int = 0
+            fn main() = println(keep(\(b) -> (b, 1)))
+        "});
+    let captured = noescape_src(indoc! {r"
+            fn keep(f : (Builder @ noescape) -> (() -> Int)) : Int = 0
+            fn main() = println(keep(\(b) -> \() -> finish(b)))
+        "});
+    let aliased = noescape_src(indoc! {"
+            fn keep(f : (Builder @ noescape) -> Builder) : Int = 0
+            fn leak(b : Builder) : Builder =
+              let x = b
+              x
+            fn main() = println(keep(leak))
+        "});
     for (what, src) in [
         ("returned token", returned),
         ("token embedded in returned data", embedded),
@@ -721,11 +747,11 @@ fn noescape_direct_escapes_are_rejected() {
 
 #[test]
 fn noescape_uncheckable_argument_is_rejected() {
-    let src = noescape_src(
-        "fn use1(f : (Builder @ noescape) -> Int) : Int = f(MkBuilder(3))\n\
-         fn pick(g : (Builder) -> Int) : Int = use1(g)\n\
-         fn main() = println(pick(finish))\n",
-    );
+    let src = noescape_src(indoc! {"
+            fn use1(f : (Builder @ noescape) -> Int) : Int = f(MkBuilder(3))
+            fn pick(g : (Builder) -> Int) : Int = use1(g)
+            fn main() = println(pick(finish))
+        "});
     assert_eq!(once_code(&src, "uncheckable noescape argument"), "E6062");
 }
 
@@ -762,9 +788,11 @@ fn projection_error(src: &str, what: &str) {
 #[test]
 fn constructor_specific_field_projection_is_rejected() {
     projection_error(
-        "type Shape = Circle { radius: Int } | Square { side: Int }\n\
-         fn radius(s : Shape) : Int = s.radius\n\
-         fn main() = println(0)\n",
+        indoc! {"
+            type Shape = Circle { radius: Int } | Square { side: Int }
+            fn radius(s : Shape) : Int = s.radius
+            fn main() = println(0)
+        "},
         "constructor-specific field projection",
     );
 }
@@ -775,9 +803,11 @@ fn constructor_specific_field_projection_is_rejected() {
 #[test]
 fn common_field_projection_without_multi_arm_evidence_is_rejected() {
     projection_error(
-        "type Tagged = A { id: Int, kind: String } | B { id: Int }\n\
-         fn tag_id(t : Tagged) : Int = t.id\n\
-         fn main() = println(0)\n",
+        indoc! {"
+            type Tagged = A { id: Int, kind: String } | B { id: Int }
+            fn tag_id(t : Tagged) : Int = t.id
+            fn main() = println(0)
+        "},
         "common field projection",
     );
 }
@@ -787,10 +817,12 @@ fn common_field_projection_without_multi_arm_evidence_is_rejected() {
 #[test]
 fn nested_sum_field_projection_is_rejected() {
     projection_error(
-        "type Tagged = A { id: Int } | B { id: Int }\n\
-         type Outer = Outer { inner: Tagged }\n\
-         fn tag_id(outer : Outer) : Int = outer.inner.id\n\
-         fn main() = println(0)\n",
+        indoc! {"
+            type Tagged = A { id: Int } | B { id: Int }
+            type Outer = Outer { inner: Tagged }
+            fn tag_id(outer : Outer) : Int = outer.inner.id
+            fn main() = println(0)
+        "},
         "nested sum field projection",
     );
 }
@@ -800,31 +832,33 @@ fn nested_sum_field_projection_is_rejected() {
 #[test]
 fn partial_projection_does_not_fall_back_to_ufcs() {
     projection_error(
-        "type Shape = Circle { radius: Int } | Square { side: Int }\n\
-         fn radius(_shape : Shape) : Int = 99\n\
-         fn read(shape : Shape) : Int = shape.radius\n\
-         fn main() = println(0)\n",
+        indoc! {"
+            type Shape = Circle { radius: Int } | Square { side: Int }
+            fn radius(_shape : Shape) : Int = 99
+            fn read(shape : Shape) : Int = shape.radius
+            fn main() = println(0)
+        "},
         "partial projection with a same-named function",
     );
 }
 
 #[test]
 fn single_constructor_field_projection_checks() {
-    let src = prism::with_prelude(
-        "type Box = Box { value: Int }\n\
-         fn value(box : Box) : Int = box.value\n\
-         fn main() = println(value(Box { value = 22 }))\n",
-    );
+    let src = prism::with_prelude(indoc! {"
+            type Box = Box { value: Int }
+            fn value(box : Box) : Int = box.value
+            fn main() = println(value(Box { value = 22 }))
+        "});
     prism::check(&src).expect("a single-constructor field projection must check");
 }
 
 #[test]
 fn record_spread_from_unrefined_sum_is_rejected() {
-    let src = prism::with_prelude(
-        "type Shape = Circle { radius: Int } | Square { side: Int }\n\
-         fn resize(shape : Shape) : Shape = Circle { ..shape, radius = 2 }\n\
-         fn main() = println(0)\n",
-    );
+    let src = prism::with_prelude(indoc! {"
+            type Shape = Circle { radius: Int } | Square { side: Int }
+            fn resize(shape : Shape) : Shape = Circle { ..shape, radius = 2 }
+            fn main() = println(0)
+        "});
     let err = prism::check(&src).expect_err("constructor spread must prove the base layout");
     let Error::Type(ty) = &err else {
         panic!("expected a type error, got: {err}");
@@ -837,11 +871,12 @@ fn record_spread_from_unrefined_sum_is_rejected() {
 // and dropped, so a forgotten field became a silent wildcard.
 #[test]
 fn record_pattern_without_spread_must_bind_all_fields() {
-    let src = prism::with_prelude(
-        "type P = P { x: Int, y: Int }\n\
-         fn f(p : P) : Int = match p of\n  P { x = a } => a\n\
-         fn main() = println(show(f(P { x = 1, y = 2 })))\n",
-    );
+    let src = prism::with_prelude(indoc! {"
+            type P = P { x: Int, y: Int }
+            fn f(p : P) : Int = match p of
+              P { x = a } => a
+            fn main() = println(show(f(P { x = 1, y = 2 })))
+        "});
     let err = prism::check(&src).expect_err("a partial record pattern without `..` must reject");
     let Error::Type(ty) = &err else {
         panic!("expected a type error, got: {err}");
@@ -852,11 +887,12 @@ fn record_pattern_without_spread_must_bind_all_fields() {
 // The same pattern with `..` is well formed: the spread ignores `y`.
 #[test]
 fn record_pattern_with_spread_is_accepted() {
-    let src = prism::with_prelude(
-        "type P = P { x: Int, y: Int }\n\
-         fn f(p : P) : Int = match p of\n  P { x = a, .. } => a\n\
-         fn main() = println(show(f(P { x = 1, y = 2 })))\n",
-    );
+    let src = prism::with_prelude(indoc! {"
+            type P = P { x: Int, y: Int }
+            fn f(p : P) : Int = match p of
+              P { x = a, .. } => a
+            fn main() = println(show(f(P { x = 1, y = 2 })))
+        "});
     prism::check(&src).expect("a record pattern with `..` must be accepted");
 }
 
@@ -1060,12 +1096,12 @@ fn an_open_local_value_stays_monomorphic() {
 // evaluates them rather than refusing everything it is handed.
 #[test]
 fn repl_accepts_single_constructor_field_paths() {
-    let out = repl_transcript(
-        "type Box = Box { value: Int }\n\
-         let b = Box { value = 7 }\n\
-         b.value\n\
-         { b | value = 8 }\n",
-    );
+    let out = repl_transcript(indoc! {"
+            type Box = Box { value: Int }
+            let b = Box { value = 7 }
+            b.value
+            { b | value = 8 }
+        "});
     assert!(
         out.contains("7 : Int"),
         "the projection must evaluate: {out}"

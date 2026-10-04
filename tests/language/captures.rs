@@ -4,6 +4,7 @@
 // borrow, and effect-row facts the compiler already holds). Both are read-only
 // analyses, so these check their content and their determinism, not compilation.
 
+use indoc::indoc;
 use prism::{dump, with_prelude};
 
 fn cap(src: &str) -> String {
@@ -165,10 +166,10 @@ fn usage_summary_is_deterministic() {
 
 #[test]
 fn constrained_borrow_mask_includes_owned_dictionary_prefix() {
-    let out = usage(
-        "fn same(borrow x : a) : Bool given Eq(a) = x == x\n\
-         fn main() = println(same(1))\n",
-    );
+    let out = usage(indoc! {"
+            fn same(borrow x : a) : Bool given Eq(a) = x == x
+            fn main() = println(same(1))
+        "});
     let line = out
         .lines()
         .find(|line| line.split('\t').next() == Some("same"))

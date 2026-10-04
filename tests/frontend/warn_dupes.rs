@@ -8,6 +8,7 @@
 
 use std::path::Path;
 
+use indoc::indoc;
 use prism::{check_validated_on_in, default_roots, with_prelude, Config, Error, WarnDupes};
 
 // Type-check `src` under the two independent severities, returning its warning
@@ -41,9 +42,11 @@ fn check_default(src: &str) -> Result<Vec<String>, Error> {
 }
 
 // Two structurally identical user functions share one behavior hash.
-const CLONES: &str = "fn dupeAlpha(x: Int) = x + 1\n\
-                      fn dupeBeta(x: Int) = x + 1\n\
-                      fn main() = dupeAlpha(0) + dupeBeta(0)\n";
+const CLONES: &str = indoc! {"
+    fn dupeAlpha(x: Int) = x + 1
+    fn dupeBeta(x: Int) = x + 1
+    fn main() = dupeAlpha(0) + dupeBeta(0)
+"};
 
 // A verbatim reimplementation of the prelude's `id`.
 const STDLIB_DUPE: &str = "fn myIdentity(x) = x\nfn main() = myIdentity(0)\n";

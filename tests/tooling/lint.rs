@@ -9,6 +9,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{self, Command};
 
+use indoc::indoc;
+
 const PRISM: &str = env!("CARGO_BIN_EXE_prism");
 const FIXTURE: &str = "tests/fixtures/lint/codepoint_scan.pr";
 const CODE_KEY: &str = "code";
@@ -16,9 +18,10 @@ const MESSAGE_KEY: &str = "message";
 const FINDINGS_KEY: &str = "findings";
 
 // Non-canonical sources ensure formatting moves finding offsets.
-const MESSY_SCAN: &str =
-    "fn sum_codes(s:String,i:Int):Int=if i==str_len(s) then 0 else char_at(s,i)+sum_codes(s,i+1)\n\
-     fn main()=println(sum_codes(\"HI\",0))\n";
+const MESSY_SCAN: &str = indoc! {r#"
+        fn sum_codes(s:String,i:Int):Int=if i==str_len(s) then 0 else char_at(s,i)+sum_codes(s,i+1)
+        fn main()=println(sum_codes("HI",0))
+    "#};
 const MESSY_MAGIC: &str = "fn area(r:Int):Int=r*r*3\nfn main()=println(area(4))\n";
 const CORPUS: &[(&str, &str)] = &[("scan.pr", MESSY_SCAN), ("magic.pr", MESSY_MAGIC)];
 

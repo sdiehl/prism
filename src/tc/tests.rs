@@ -22,6 +22,8 @@ mod data_annotation_tests {
 }
 
 mod typed_hole_tests {
+    use indoc::indoc;
+
     use crate::parse::parse;
     use crate::resolve::resolve;
     use crate::syntax::desugar::desugar;
@@ -78,10 +80,9 @@ mod typed_hole_tests {
 
     #[test]
     fn polymorphic_candidates_are_ranked_by_real_subsumption() {
-        let program = core(
-            "fn identity(x) = x\n\
-             fn main() : ((Int) -> Int) ! {} = ?answer",
-        );
+        let program = core(indoc! {"
+                fn identity(x) = x
+                fn main() : ((Int) -> Int) ! {} = ?answer"});
         let checked = check_allow_holes(&program).expect("allow mode");
         let identity = checked.reports.holes[0]
             .candidates

@@ -74,7 +74,7 @@ struct Elab<'a> {
 // whole visible scope (which made elaborating an n-binder body O(n^2)).
 // Iteration stays name-ordered exactly like the `BTreeMap` it replaced, so the
 // positional shadow sentinels in `local_env` are unchanged.
-type Locals = im::OrdMap<String, Option<Type>>;
+type Locals = imbl::OrdMap<String, Option<Type>>;
 
 // A local `let` whose value the checker generalized over at least one type.
 // Core's `Bind` binds one monotype, so no bind is emitted for such a binding:
@@ -95,7 +95,7 @@ struct Expansion {
 
 // Persistent and reference-counted for the reason `Locals` is persistent: every
 // binder scopes its shadowing by cloning the map.
-type ExpansionMap = im::OrdMap<String, Rc<Expansion>>;
+type ExpansionMap = imbl::OrdMap<String, Rc<Expansion>>;
 
 // Red zone / segment size for the elaboration recursion, matching the typed-Core
 // builder's constants (`core/typed/build.rs`).

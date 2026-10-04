@@ -8,37 +8,85 @@
 
 use std::path::Path;
 
+use indoc::indoc;
 use prism::{check_on, default_roots, report, report_on, with_prelude, Config};
 
 /// An ordinary class, a declaration that mentions its own type variable under a
 /// constraint, and an operation polymorphic in a variable it names in a parameter.
-const SHARING_A_NAME: &str = "class C(a)\n  c : (a) -> Int\n\n\
-effect Ask\n  ask(a) : Int\n\n\
-fn needs(x : a) : Int given C(a) = c(x)\n\n\
-fn main() = 1\n";
+const SHARING_A_NAME: &str = indoc! {"
+    class C(a)
+      c : (a) -> Int
+
+    effect Ask
+      ask(a) : Int
+
+    fn needs(x : a) : Int given C(a) = c(x)
+
+    fn main() = 1
+"};
 
 /// The same program with the operation's variable spelled differently, so nothing
 /// shares a name — the control for what the fault is.
-const NOT_SHARING: &str = "class C(a)\n  c : (a) -> Int\n\n\
-effect Ask\n  ask(zz) : Int\n\n\
-fn needs(x : a) : Int given C(a) = c(x)\n\n\
-fn main() = 1\n";
+const NOT_SHARING: &str = indoc! {"
+    class C(a)
+      c : (a) -> Int
+
+    effect Ask
+      ask(zz) : Int
+
+    fn needs(x : a) : Int given C(a) = c(x)
+
+    fn main() = 1
+"};
 
 /// The operation alone: no other declaration mentions `a` under a constraint.
-const OPERATION_ALONE: &str = "effect Ask\n  ask(a) : Int\n\nfn main() = 1\n";
+const OPERATION_ALONE: &str = indoc! {"
+    effect Ask
+      ask(a) : Int
+
+    fn main() = 1
+"};
 
 /// The declaration alone: no operation mentions `a`.
-const DECLARATION_ALONE: &str = "class C(a)\n  c : (a) -> Int\n\n\
-fn needs(x : a) : Int given C(a) = c(x)\n\n\
-fn main() = 1\n";
+const DECLARATION_ALONE: &str = indoc! {"
+    class C(a)
+      c : (a) -> Int
+
+    fn needs(x : a) : Int given C(a) = c(x)
+
+    fn main() = 1
+"};
 
 /// What the operation is for: one polymorphic op, performed at two types.
-const PERFORMED_AT_TWO_TYPES: &str = "effect Ask\n  ask(a) : Int\n\n\
-fn one() : Int = ask(1)\n\
-fn two() : Int = ask(\"x\")\n";
+const PERFORMED_AT_TWO_TYPES: &str = indoc! {r#"
+    effect Ask
+      ask(a) : Int
+
+    fn one() : Int = ask(1)
+    fn two() : Int = ask("x")
+"#};
+
+/// The same, but the operation's variable is its *result* as well as its parameter,
+/// performed at two different result types inside one row. This is what a capability
+/// needs (one unparameterised effect answering whatever each call site asked for)
+/// and what an effect *parameter* cannot express, being fixed once per row.
+const TWO_RESULT_TYPES_IN_ONE_ROW: &str = indoc! {r#"
+    type Key(a) = Key { id : String }
+
+    effect Read
+      read(Key(a)) : a
+
+    fn both() : (Int, String) ! {Read} =
+      ( read(Key { id = "clock" }), read(Key { id = "url" }) )
+"#};
 
 /// A monomorphic operation, unaffected by any of this.
-const MONOMORPHIC: &str = "effect Ask\n  ask(Int) : Int\n\nfn one() : Int = ask(1)\n";
+const MONOMORPHIC: &str = indoc! {"
+    effect Ask
+      ask(Int) : Int
+
+    fn one() : Int = ask(1)
+"};
 
 /// One operation performed at a single type, handled by a clause that passes an
 /// *enclosing function's* type variable through the continuation.
@@ -52,10 +100,21 @@ const MONOMORPHIC: &str = "effect Ask\n  ask(Int) : Int\n\nfn one() : Int = ask(
 ///
 /// Unlike the cases above, this one needs the prelude (`str_len`, `println`), so it is
 /// checked with roots rather than with nothing resolved for it.
-const CAPTURING_HANDLER: &str = "effect Id\n  id(a) : a\n\n\
-fn go() : Int ! {Id} =\n  let s = id(\"hello\")\n  str_len(s) + 0\n\n\
-fn run(y : a) : Unit =\n  handle go() with\n    id(x) resume k => k(y)\n    return r => println(\"{r}\")\n\n\
-fn main() = run(42)\n";
+const CAPTURING_HANDLER: &str = indoc! {r#"
+    effect Id
+      id(a) : a
+
+    fn go() : Int ! {Id} =
+      let s = id("hello")
+      str_len(s) + 0
+
+    fn run(y : a) : Unit =
+      handle go() with
+        id(x) resume k => k(y)
+        return r => println("{r}")
+
+    fn main() = run(42)
+"#};
 
 /// Checked with nothing resolved for it: `Int` is built in, and every name these
 /// programs use is declared in the program itself.
@@ -108,6 +167,13 @@ fn the_operation_is_polymorphic_at_each_perform_site() {
 }
 
 #[test]
+fn an_operation_variable_is_instantiated_at_each_result_type() {
+    if let Err(e) = check(TWO_RESULT_TYPES_IN_ONE_ROW) {
+        panic!("one op at two result types in one row: {e}");
+    }
+}
+
+#[test]
 fn a_monomorphic_operation_is_unaffected() {
     if let Err(e) = check(MONOMORPHIC) {
         panic!("monomorphic op: {e}");
@@ -144,15 +210,27 @@ fn a_clause_may_not_pass_an_enclosing_functions_variable_for_the_operations() {
 /// A clause's own existentials outlive it. A nested `??` checks the inner lookup
 /// inside the outer `fail` clause, and that lookup's `Ord` constraint defaults after
 /// the clause closes; scoping the clause by truncation would strand it.
-const NESTED_DEFAULTS: &str = "fn main() =\n  let cfg = map_from_list([(\"host\", 80)])\n  \
-println(cfg.at_map(\"port\") ?? cfg.at_map(\"https\") ?? 443)\n";
+const NESTED_DEFAULTS: &str = indoc! {r#"
+    fn main() =
+      let cfg = map_from_list([("host", 80)])
+      println(cfg.at_map("port") ?? cfg.at_map("https") ?? 443)
+"#};
 
 /// A clause that keeps the operation's value at the operation's own type, through
 /// locals of its own, is generic and accepted.
-const GENERIC_CLAUSE: &str = "effect Id\n  id(a) : a\n\n\
-fn go() : Int ! {Id} = id(41) + 1\n\n\
-fn main() =\n  handle go() with\n    id(x) resume k =>\n      let y = x\n      k(y)\n    \
-return r => println(\"{r}\")\n";
+const GENERIC_CLAUSE: &str = indoc! {r#"
+    effect Id
+      id(a) : a
+
+    fn go() : Int ! {Id} = id(41) + 1
+
+    fn main() =
+      handle go() with
+        id(x) resume k =>
+          let y = x
+          k(y)
+        return r => println("{r}")
+"#};
 
 #[test]
 fn a_clause_leaves_deferred_constraints_resolvable() {
