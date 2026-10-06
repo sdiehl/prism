@@ -26,21 +26,27 @@
 - Stdlib: `check_last`, `check_all`, and `check_pipefail` decide which pipeline failures count.
 - Stdlib: `Shell` adds script helpers over `Proc` and `Path`.
 - Stdlib: `Shell.unsafe_shell` is the one way to hand a string to `/bin/sh`.
-- Typechecker: a handler around an unannotated thunk parameter discharges the labels it handles from that thunk's row, so `fn run(action) = handle action() with ask() ..` infers `(() -> a ! {Ask | e}) -> a ! {e}` instead of leaking `Ask` to every caller. `optional`, `default`, and `Replay`'s `record`, `replay`, and `durable` name the effects their action may perform.
-- Formatter: `prism fmt` moves an `import` written below other declarations to the top of the module.
+- Typechecker: a handler around an unannotated thunk parameter discharges its labels from that row.
+- Stdlib: `optional`, `default`, `record`, `replay`, and `durable` name their action's effects.
+- Formatter: `prism fmt` moves an `import` written below other declarations to the module top.
 - Stdlib: `Teleport.MoveError` gains `Bracketed`, refusing a continuation that owes a cleanup.
 - Stdlib: a handler that carries `finally` and owes nothing teleports like any other.
-- Tooling: `prism dump occurrences` records local bindings: parameters, `let`, `var`, pattern, handler, and loop binders, and each use, keyed by the binder's offset (`prism-occurrences-v2`).
-- Compiler: inferred borrow masks are computed and checked on every build, with `borrow-infer` off too, so a mask that drops a declared borrow, borrows a dictionary or an impure function, or meets a structured argument is an internal error.
-- Native builds: the whole-program emitter checks its closure summary as the sharded backend checks each SCC's, so a duplicate or out-of-range closure tag is an internal error with `scc-backend` off too.
-- Tooling: `prism dump occurrences` carries a `defs` table: every definition, constructor, effect operation, and class method, with the module and range of its name, keyed by the canonical name references target.
-- Diagnostics: an error raised inside an imported module names that module and carries its source, so the caret lands in the module (it used to point into the prelude at the module's offsets), and `Error::origin` tells a tool which file to publish it against.
-- Library: `prism::search_path(file, flags)` resolves a source file's module roots and effective prelude the way `prism check` resolves its project (nearest `prism.toml`, path, hash, and git dependencies, the pinned Std root, `[package] prelude`), and the manifest and package modules sit behind a new `project` feature, so an editor gets them without linking the native backend.
-- Diagnostics: a type span no longer prints a label-free open row that no caller can see, so `show_int(3)` inside `main` hovers as `String` rather than `String ! {| e0}`. A row tied to a parameter (`f()` inside `fn app(f : () -> Int ! {| e})`) still prints.
-- Syntax: constructors, effect operations, and class methods carry the span of their name, and class methods are a `ClassMethod` struct rather than a `(name, type)` pair. The `surface-syntax` dump records each as `span` under a new schema tag, `prism-surface-syntax-v2`; `decode_surface` still reads a `prism-surface-syntax-v1` document by upgrading it, each member reading as the empty span, and the retained 0.14 and 0.15 artifacts are gated on that upgrade. The self-hosted parser in `Std.Syntax` reproduces the spans, and go-to-definition on a member now lands on its declaration even when the same word appears earlier in the declaration.
-- API: `prism::analyze` checks a source the way `check_validated_on_in` does and returns, from that one parse, resolution, and judgment, the checked program, its type spans as `TypeSpans`, and its occurrences, as an `Analysis`. An editor that ran the front end three times per keystroke (check, the `typespans` dump, occurrence extraction) runs it once. A front that collects hover types now keeps its lints and warnings, which the tooltip re-check used to drop.
-- Tooling: `dump tier-explain` prints, under each definition carrying a costing fact, the chain from `main` that reaches it, as `via main -> run => step`. The chain is a shortest path with ties broken by name, so it is the same in every process, and `=>` marks the edge into the first costing definition on it. The entry-closure prune walks the same breadth-first reach that records these predecessors.
-- Testing: the tier equivalence gate counts shared work, so a tier that recomputes a value captured before a multishot resume, a `finally`, or a state-rung fold step fails it; a planted replay proves the check is live.
+- Tooling: `prism dump occurrences` records local binders and their uses, keyed by binder offset.
+- Compiler: inferred borrow masks are checked on every build, even with `borrow-infer` off.
+- Native builds: the whole-program emitter checks its closure summary like the sharded backend.
+- Tooling: `prism dump occurrences` carries a `defs` table locating every definition's name.
+- Diagnostics: an error inside an imported module points into that module, not the prelude.
+- Library: `Error::origin` names the module an error was raised in, with its source.
+- Library: `prism::search_path` resolves a file's module roots and prelude as `prism check` does.
+- Library: manifest and package modules sit behind a `project` feature, without native codegen.
+- Diagnostics: hovers no longer print a label-free open row no caller can see.
+- Syntax: constructors, effect operations, and class methods carry the span of their name.
+- Syntax: the `surface-syntax` dump is `prism-surface-syntax-v2`; v1 documents still decode.
+- Parser: the self-hosted parser reproduces member name spans.
+- API: `prism::analyze` checks a source once and returns its program, type spans, and occurrences.
+- API: a front that collects hover types keeps its lints and warnings.
+- Tooling: `dump tier-explain` prints the shortest chain from `main` to each costing definition.
+- Testing: the tier equivalence gate counts shared work, so a tier that recomputes a value fails.
 - Testing: `Test.fail_with`, `expect`, `expect_equal`, and `expect_text` report structured failures.
 - Testing: a failing `expect_equal` shows expected and actual values, diffing multi-line ones.
 - Testing: `-- test: skip(reason)` and `-- test: tags(a, b)` pragmas, with `prism test --tag`.
@@ -59,7 +65,7 @@
 - Native builds: cached build outputs from another checkout can no longer poison a build.
 - Replay: `write_file` and `write_bytes` events digest the bytes written, not a re-read of the file.
 - Typechecker: an escaped skolem solution is an internal error in release builds, not a silent pass.
-- Store: a malformed content hash in an object, certificate, lock, or package log is refused on read.
+- Store: a malformed content hash in an object, certificate, lock, or package log is refused.
 - Store: protocol format tags are validated types, checked when the crate compiles.
 - Store: readers refuse a malformed tag and tell a foreign format from another of its versions.
 - Packages: a lock row under a foreign hash scheme is refused before its hash is read.
