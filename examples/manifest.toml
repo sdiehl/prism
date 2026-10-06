@@ -876,6 +876,38 @@ platforms = ["interpreter", "native"]
 expected_output = "host-dependent"
 
 [[example]]
+path = "fixtures/net/abandoned.pr"
+title = "Abandoned socket bracket"
+category = "Net"
+role = "fixture"
+platforms = ["interpreter", "native"]
+expected_output = "host-dependent"
+
+[[example]]
+path = "fixtures/proc/outcomes.pr"
+title = "Process outcomes"
+category = "Systems"
+role = "fixture"
+platforms = ["interpreter", "native"]
+expected_output = "host-dependent"
+
+[[example]]
+path = "fixtures/proc/pipelines.pr"
+title = "Process pipeline outcomes"
+category = "Systems"
+role = "fixture"
+platforms = ["interpreter", "native"]
+expected_output = "host-dependent"
+
+[[example]]
+path = "fixtures/proc/shell.pr"
+title = "Shell helpers against the host"
+category = "Systems"
+role = "fixture"
+platforms = ["interpreter", "native"]
+expected_output = "host-dependent"
+
+[[example]]
 path = "fixtures/runtime/incr_resident.pr"
 title = "Incremental wasm resident"
 category = "Runtime"
