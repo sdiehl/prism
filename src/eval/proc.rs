@@ -17,7 +17,7 @@
 // Without a process host (wasm) every request is refused before it is read, so
 // the decoded fields and most outcome tags exist only for the unix host. The
 // codec still compiles there so both targets share one wire layout.
-#![cfg_attr(not(unix), allow(dead_code))]
+#![cfg_attr(not(unix), expect(dead_code))]
 
 // The classification codes, in step with the `#define`s at the top of
 // `runtime/prism_proc.c` and with `proc_error` in `lib/std/Proc.pr`.
