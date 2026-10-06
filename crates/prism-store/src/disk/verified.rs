@@ -24,11 +24,14 @@ use std::fmt::Write as _;
 use std::io;
 use std::path::Path;
 
+use prism_common::format::FormatTag;
+
 use super::index::Lock;
 use super::{shard_path, HashHex, FIELD_SEP, VERIFIED_DIR};
 
-const VERIFIED_HEADER_V1: &str = "prism-store-verified\tv1";
-const VERIFIED_HEADER_V2: &str = "prism-store-verified\tv2";
+// Version 1 records carry no identity column; this build writes version 2
+// and still reads version 1.
+const VERIFIED_HEADER: FormatTag = FormatTag::new("prism-store-verified\tv2");
 
 /// A single verification outcome recorded against a content hash.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,7 +57,7 @@ pub(super) fn put(root: &Path, hash: &HashHex<'_>, record: &VerifiedRecord) -> i
     let _lock = Lock::acquire(root)?;
     let mut records = get(root, None, hash)?;
     records.push(record.clone());
-    let mut body = String::from(VERIFIED_HEADER_V2);
+    let mut body = String::from(VERIFIED_HEADER.as_str());
     body.push('\n');
     for r in &records {
         let status = if r.passed { STATUS_PASS } else { STATUS_FAIL };
@@ -82,24 +85,23 @@ pub(super) fn get(
     let text = String::from_utf8(bytes)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
     let mut lines = text.lines();
-    let header = lines.next();
-    if header != Some(VERIFIED_HEADER_V1) && header != Some(VERIFIED_HEADER_V2) {
+    let Ok(version) = VERIFIED_HEADER.expect_since(1, lines.next().unwrap_or_default()) else {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!("malformed verification record at {}", path.display()),
         ));
-    }
+    };
     let mut out = Vec::new();
     for line in lines {
         let fields: Vec<&str> = line.split(FIELD_SEP).collect();
-        match (header, fields.as_slice()) {
-            (Some(VERIFIED_HEADER_V1), [kind, scheme, status]) => out.push(VerifiedRecord {
+        match (version, fields.as_slice()) {
+            (1, [kind, scheme, status]) => out.push(VerifiedRecord {
                 kind: (*kind).to_string(),
                 scheme: (*scheme).to_string(),
                 identity: String::new(),
                 passed: *status == STATUS_PASS,
             }),
-            (Some(VERIFIED_HEADER_V2), [kind, scheme, identity, status]) => {
+            (2, [kind, scheme, identity, status]) => {
                 out.push(VerifiedRecord {
                     kind: (*kind).to_string(),
                     scheme: (*scheme).to_string(),

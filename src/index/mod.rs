@@ -22,6 +22,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
+use prism_common::format::FormatTag;
+use prism_common::record::RecordError;
 use serde::{Deserialize, Serialize};
 
 mod build;
@@ -35,11 +37,11 @@ mod typed;
 mod tests;
 
 pub use build::{build, IndexInput};
-pub use diff::{diff, IndexDiff, Status, INDEX_DIFF_FORMAT};
+pub use diff::{diff, IndexDiff, SchemeMismatch, Status, INDEX_DIFF_FORMAT};
 pub use occurrences::{Occurrences, OCCURRENCES_FORMAT};
 
 /// Schema tag for the index artifact.
-pub const INDEX_FORMAT: &str = "prism-index-v1";
+pub const INDEX_FORMAT: FormatTag = FormatTag::new("prism-index-v1");
 
 /// Identifies the artifact, its producer, and the indexed program.
 ///
@@ -47,7 +49,7 @@ pub const INDEX_FORMAT: &str = "prism-index-v1";
 /// build or package root whose entry point reaches fewer modules.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Envelope {
-    pub format: String,
+    pub format: FormatTag,
     /// The hash scheme every address below commits to.
     pub scheme: String,
     /// The compiler version that produced the artifact.
@@ -459,14 +461,16 @@ impl Index {
     /// Refuses an empty set, compiler/scheme mismatches, duplicate module or
     /// definition identities, conflicting primitive records, and malformed
     /// packed span data.
-    pub fn merge(title: String, indexes: Vec<Self>) -> Result<Self, String> {
+    pub fn merge(title: String, indexes: Vec<Self>) -> Result<Self, RecordError> {
         let Some(first) = indexes.first() else {
-            return Err("cannot merge an empty set of indexes".into());
+            return Err(RecordError::Invalid(
+                "cannot merge an empty set of indexes".into(),
+            ));
         };
         let scheme = first.envelope.scheme.clone();
         let compiler = first.envelope.compiler.clone();
         let mut hasher = blake3::Hasher::new();
-        merge_hash_field(&mut hasher, INDEX_FORMAT.as_bytes());
+        merge_hash_field(&mut hasher, INDEX_FORMAT.as_str().as_bytes());
         merge_hash_field(&mut hasher, title.as_bytes());
 
         let mut modules = Vec::new();
@@ -482,16 +486,16 @@ impl Index {
 
         for mut index in indexes {
             if index.envelope.scheme != scheme {
-                return Err(format!(
+                return Err(RecordError::Invalid(format!(
                     "cannot merge `{}`: hash scheme `{}` differs from `{scheme}`",
                     index.envelope.title, index.envelope.scheme
-                ));
+                )));
             }
             if index.envelope.compiler != compiler {
-                return Err(format!(
+                return Err(RecordError::Invalid(format!(
                     "cannot merge `{}`: compiler `{}` differs from `{compiler}`",
                     index.envelope.title, index.envelope.compiler
-                ));
+                )));
             }
             merge_hash_field(&mut hasher, index.envelope.title.as_bytes());
             merge_hash_field(&mut hasher, index.envelope.contract.as_bytes());
@@ -505,20 +509,20 @@ impl Index {
 
             for module in index.modules {
                 if !module_names.insert(module.dotted.clone()) {
-                    return Err(format!(
+                    return Err(RecordError::Invalid(format!(
                         "module `{}` occurs in more than one merged index",
                         module.dotted
-                    ));
+                    )));
                 }
                 modules.push(module);
             }
             for def in &mut index.defs {
                 if !def_ids.insert(def.id.clone()) {
-                    return Err(format!(
+                    return Err(RecordError::Invalid(format!(
                         "definition `{}` occurs in more than one merged index; index projects with \
                          `--as-library` so their entry modules are qualified",
                         def.id
-                    ));
+                    )));
                 }
                 def.tokens = merge_packed(&def.tokens, &index.token_classes, &mut token_classes)?;
                 def.ty_tokens =
@@ -532,10 +536,10 @@ impl Index {
             for builtin in index.builtins {
                 match builtins.get(&builtin.name) {
                     Some(existing) if existing != &builtin => {
-                        return Err(format!(
+                        return Err(RecordError::Invalid(format!(
                             "primitive `{}` has conflicting records in merged indexes",
                             builtin.name
-                        ));
+                        )));
                     }
                     Some(_) => {}
                     None => {
@@ -556,7 +560,7 @@ impl Index {
         };
         let merged = Self {
             envelope: Envelope {
-                format: INDEX_FORMAT.into(),
+                format: INDEX_FORMAT,
                 scheme,
                 compiler,
                 contract: hasher.finalize().to_hex().to_string(),
@@ -571,7 +575,7 @@ impl Index {
             type_table,
         };
         // Keep the same validation boundary as an artifact read from disk.
-        Self::from_json(&merged.to_json().map_err(|e| e.to_string())?)
+        Self::from_json(&merged.to_json()?)
     }
 
     /// Serialize with stable indentation and field order.
@@ -592,20 +596,15 @@ impl Index {
     /// # Errors
     /// Refuses an unknown format tag or an edge whose `from` names no indexed
     /// definition (an edge may point *out* of the index, never in from nowhere).
-    pub fn from_json(text: &str) -> Result<Self, String> {
-        let doc: Self = serde_json::from_str(text).map_err(|e| e.to_string())?;
-        if doc.envelope.format != INDEX_FORMAT {
-            return Err(format!(
-                "unsupported index format `{}` (expected `{INDEX_FORMAT}`)",
-                doc.envelope.format
-            ));
-        }
+    pub fn from_json(text: &str) -> Result<Self, RecordError> {
+        let doc: Self = RecordError::decode(text)?;
+        RecordError::expect_format("index", &INDEX_FORMAT, &doc.envelope.format)?;
         let ids: BTreeSet<&str> = doc.defs.iter().map(|d| d.id.as_str()).collect();
         if let Some(edge) = doc.edges.iter().find(|e| !ids.contains(e.from.as_str())) {
-            return Err(format!(
+            return Err(RecordError::Invalid(format!(
                 "edge `{:?}` starts at `{}`, which is not an indexed definition",
                 edge.kind, edge.from
-            ));
+            )));
         }
         Ok(doc)
     }
@@ -628,31 +627,38 @@ fn merge_hash_field(hasher: &mut blake3::Hasher, bytes: &[u8]) {
 
 // Rebase packed `gap length index` triples from one intern table onto another.
 // Gaps and lengths are byte offsets and therefore survive unchanged.
-fn merge_packed(packed: &str, from: &[String], to: &mut Vec<String>) -> Result<String, String> {
+fn merge_packed(
+    packed: &str,
+    from: &[String],
+    to: &mut Vec<String>,
+) -> Result<String, RecordError> {
     if packed.is_empty() {
         return Ok(String::new());
     }
     let fields: Vec<&str> = packed.split_whitespace().collect();
     if !fields.len().is_multiple_of(3) {
-        return Err(format!(
+        return Err(RecordError::Invalid(format!(
             "malformed packed spans: expected triples, found {} fields",
             fields.len()
-        ));
+        )));
     }
     let mut out = String::new();
     for triple in fields.chunks_exact(3) {
         let gap = triple[0]
             .parse::<usize>()
-            .map_err(|_| format!("malformed span gap `{}`", triple[0]))?;
+            .map_err(|_| RecordError::invalid(format!("malformed span gap `{}`", triple[0])))?;
         let len = triple[1]
             .parse::<usize>()
-            .map_err(|_| format!("malformed span length `{}`", triple[1]))?;
-        let old = triple[2]
-            .parse::<usize>()
-            .map_err(|_| format!("malformed span table index `{}`", triple[2]))?;
-        let value = from
-            .get(old)
-            .ok_or_else(|| format!("span table index {old} is out of bounds ({})", from.len()))?;
+            .map_err(|_| RecordError::invalid(format!("malformed span length `{}`", triple[1])))?;
+        let old = triple[2].parse::<usize>().map_err(|_| {
+            RecordError::invalid(format!("malformed span table index `{}`", triple[2]))
+        })?;
+        let value = from.get(old).ok_or_else(|| {
+            RecordError::invalid(format!(
+                "span table index {old} is out of bounds ({})",
+                from.len()
+            ))
+        })?;
         let new = to.iter().position(|v| v == value).unwrap_or_else(|| {
             to.push(value.clone());
             to.len() - 1

@@ -218,8 +218,8 @@ fn sender(address : String, chunk : Int) : Unit ! {IO} =
 
 fn chunk_of(rest : List(String)) : Int =
   match rest of
-    Nil => whole_chunk
-    Cons(flag, _) =>
+    [] => whole_chunk
+    flag :: _ =>
       if flag == "slow" then
         byte_at_a_time
       else
@@ -230,16 +230,16 @@ fn usage() : Unit ! {IO} =
 
 fn dispatch(argv : List(String)) : Unit ! {IO} =
   match argv of
-    Nil => usage()
-    Cons(role, rest) =>
+    [] => usage()
+    role :: rest =>
       if role == "whole" then
         whole()
       elif role == "receive" then
         receiver(chunk_of(rest))
       elif role == "send" then
         match rest of
-          Nil => usage()
-          Cons(address, more) => sender(address, chunk_of(more))
+          [] => usage()
+          address :: more => sender(address, chunk_of(more))
       else
         usage()
 

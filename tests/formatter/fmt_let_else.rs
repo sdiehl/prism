@@ -11,6 +11,7 @@
 
 use prism::parse::parse;
 use prism::syntax::ast::{Expr, Pattern};
+use prism::DumpPhase;
 
 use super::assert_format_semantics;
 
@@ -61,7 +62,7 @@ fn a_comment_in_the_fallback_keeps_it_offside() {
 // from the `?` expansion, whose second arm is an `Err` constructor.
 #[test]
 fn the_wildcard_arm_is_what_distinguishes_the_form() {
-    let ast = prism::dump("ast", INLINE).expect("must parse");
+    let ast = prism::dump(DumpPhase::Ast, INLINE).expect("must parse");
     assert!(ast.contains("synth: true"), "{ast}");
     let program = parse(INLINE).expect("must parse").program;
     let body = &program.fns[0].body;

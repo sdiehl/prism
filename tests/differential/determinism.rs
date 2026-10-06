@@ -1,3 +1,4 @@
+use prism::DumpPhase;
 // Determinism harness.
 //
 // `Sym` interns into a process-global table with a process-global fresh-id
@@ -30,7 +31,7 @@ fn main() : Int = sz(Node(Leaf, 7, Node(Leaf, 8, Leaf)))
 ";
 
 fn core_hash(src: &str) -> String {
-    prism::dump("core-hash", src).expect("program compiles")
+    prism::dump(DumpPhase::CoreHash, src).expect("program compiles")
 }
 
 // Compiling an unrelated program in between (which advances the global fresh-id

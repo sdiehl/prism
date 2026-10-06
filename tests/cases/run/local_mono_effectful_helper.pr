@@ -8,8 +8,8 @@ effect Gauge
 
 fn run_thunks(fs, acc) =
   match fs of
-    Nil => acc
-    Cons(f, rest) => run_thunks(rest, acc + f())
+    [] => acc
+    f :: rest => run_thunks(rest, acc + f())
 
 fn sample(x) = measure(x, x + 1)
 

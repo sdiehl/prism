@@ -15,6 +15,8 @@ use std::fs;
 use std::io::ErrorKind;
 use std::sync::OnceLock;
 
+use prism_common::format::FormatTag;
+use prism_common::record::RecordError;
 #[cfg(feature = "native")]
 use prism_native::{native_kont_table, NativeKontIdentityRow};
 use serde::{Deserialize, Serialize};
@@ -26,6 +28,8 @@ use crate::core::{
     class_digests, fip_annots, hash_program, instance_digest, konst_fns, shape_digests, Digest,
     ElaboratedCore, Hashes, HASH_SCHEME,
 };
+#[cfg(feature = "native")]
+use crate::driver::ArtifactBackend;
 use crate::error::Error;
 use crate::names::instance_method_prefix;
 use crate::parse::parse;
@@ -512,7 +516,7 @@ pub(super) enum NativeKontIdentityRows {
 #[cfg(feature = "native")]
 fn native_kont_identity(
     cfg: &Config,
-    source_root: &str,
+    source_root: &Digest,
     roots: &[Root],
     identity_rows: NativeKontIdentityRows,
 ) -> Result<Vec<NativeKontIdentityRow<'static>>, Error> {
@@ -522,9 +526,9 @@ fn native_kont_identity(
     let source = NamespaceIdentity {
         scheme: HASH_SCHEME,
         kind: NAMESPACE_ARTIFACT_KIND,
-        root: source_root.to_string().into(),
+        root: source_root.clone(),
     };
-    let identity = BuildIdentity::from_source_identity(source, roots, cfg, BACKEND_LLVM)?;
+    let identity = BuildIdentity::from_source_identity(source, roots, cfg, ArtifactBackend::Llvm)?;
     let rows = match identity_rows {
         NativeKontIdentityRows::Full => identity.artifact.rows(),
         NativeKontIdentityRows::Portable => identity.artifact.portable_rows(),
@@ -546,11 +550,6 @@ fn native_kont_identity(
         })
         .collect())
 }
-
-/// The backend label the native continuation table's artifact identity is taken
-/// under: always the LLVM backend, the one that emits the table.
-#[cfg(feature = "native")]
-const BACKEND_LLVM: &str = "llvm";
 
 /// Artifact-kind label for the in-binary standard library, used when the module
 /// search path carries no Std source bundle. Named once so the lineage sidecar and
@@ -622,7 +621,7 @@ pub(crate) fn walk_roots(
                             stdlib = Some(BuildRoot {
                                 artifact_kind: identity.artifact_kind.to_string(),
                                 scheme: identity.scheme.clone(),
-                                root: Digest::from(identity.root.clone()),
+                                root: identity.root.clone(),
                                 package: None,
                             });
                         }
@@ -630,7 +629,7 @@ pub(crate) fn walk_roots(
                             packages.push(BuildRoot {
                                 artifact_kind: identity.artifact_kind.to_string(),
                                 scheme: identity.scheme.clone(),
-                                root: Digest::from(identity.root.clone()),
+                                root: identity.root.clone(),
                                 package: Some(PackageOrigin {
                                     name: name.clone(),
                                     origin: origin.as_str().to_string(),
@@ -681,7 +680,7 @@ impl BuildIdentity {
         source: NamespaceIdentity,
         roots: &[Root],
         cfg: &Config,
-        backend: &str,
+        backend: ArtifactBackend,
     ) -> Result<Self, Error> {
         let (stdlib, packages) = walk_roots(roots, cfg)?;
         let mut artifact = cfg
@@ -709,7 +708,7 @@ impl BuildIdentity {
         src: &str,
         roots: &[Root],
         cfg: &Config,
-        backend: &str,
+        backend: ArtifactBackend,
     ) -> Result<Self, Error> {
         Self::from_source_identity(namespace_identity(src, roots)?, roots, cfg, backend)
     }
@@ -752,7 +751,7 @@ pub struct PublicDef {
 /// renumbered casually (a change reseats every interface digest). `v4` is simply
 /// the current format; there is no legacy reader, a non-`v4` document is rejected
 /// outright in `validate`.
-pub const MODULE_INTERFACE_FORMAT: &str = "prism-module-interface-v4";
+pub const MODULE_INTERFACE_FORMAT: FormatTag = FormatTag::new("prism-module-interface-v4");
 
 /// One deterministic semantic row exported to an importing checker.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -773,7 +772,7 @@ pub struct ModuleInterfaceEntry {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModuleInterface {
     /// Versioned serialization/semantics tag.
-    pub format: String,
+    pub format: FormatTag,
     /// Name-sorted checked interface rows.
     pub entries: Vec<ModuleInterfaceEntry>,
     /// Digest over the complete ordered interface.
@@ -794,8 +793,8 @@ impl ModuleInterface {
     ///
     /// # Errors
     /// Fails on malformed JSON, a foreign format, or a digest mismatch.
-    pub fn from_json(text: &str) -> Result<Self, String> {
-        let interface: Self = serde_json::from_str(text).map_err(|e| e.to_string())?;
+    pub fn from_json(text: &str) -> Result<Self, RecordError> {
+        let interface: Self = RecordError::decode(text)?;
         interface.validate()?;
         Ok(interface)
     }
@@ -805,12 +804,12 @@ impl ModuleInterface {
     ///
     /// # Errors
     /// Fails if an exported signature is not valid under this interface format.
-    pub fn exported_value_env(&self) -> Result<Env, String> {
+    pub fn exported_value_env(&self) -> Result<Env, RecordError> {
         self.validate()?;
         let mut env = Env::new();
         for entry in self.entries.iter().filter(|entry| entry.kind == "value") {
             let ty = parse_checked_signature(&entry.name, &entry.signature)
-                .map_err(|e| e.to_string())?;
+                .map_err(|e| RecordError::invalid(e.to_string()))?;
             env.insert(Sym::from(entry.name.as_str()), ty);
         }
         Ok(env)
@@ -820,47 +819,44 @@ impl ModuleInterface {
     ///
     /// # Errors
     /// Fails if any metadata payload or canonical type signature is malformed.
-    pub fn rehydrate(&self) -> Result<super::interface::RehydratedModuleInterface, String> {
+    pub fn rehydrate(&self) -> Result<super::interface::RehydratedModuleInterface, RecordError> {
         super::interface::rehydrate(self)
     }
 
-    fn validate(&self) -> Result<(), String> {
-        if self.format != MODULE_INTERFACE_FORMAT {
-            return Err(format!(
-                "unsupported module interface format {:?}",
-                self.format
-            ));
-        }
+    fn validate(&self) -> Result<(), RecordError> {
+        RecordError::expect_format("module interface", &MODULE_INTERFACE_FORMAT, &self.format)?;
         if !self
             .entries
             .windows(2)
             .all(|pair| (&pair[0].kind, &pair[0].name) < (&pair[1].kind, &pair[1].name))
         {
-            return Err("module interface entries are not in canonical order".to_string());
+            return Err(RecordError::Invalid(
+                "module interface entries are not in canonical order".to_string(),
+            ));
         }
         for entry in &self.entries {
             let derived = interface_entry(&entry.kind, &entry.name, &entry.signature).digest;
             if entry.digest != derived {
-                return Err(format!(
+                return Err(RecordError::Invalid(format!(
                     "module interface row {}:{} has digest {}, derived {derived}",
                     entry.kind, entry.name, entry.digest
-                ));
+                )));
             }
         }
         let digest = interface_digest(&self.entries);
-        if digest != self.digest.as_str() {
-            return Err(format!(
+        if digest != self.digest {
+            return Err(RecordError::Invalid(format!(
                 "module interface digest mismatch: stored {}, derived {digest}",
                 self.digest
-            ));
+            )));
         }
         Ok(())
     }
 }
 
-fn interface_digest(entries: &[ModuleInterfaceEntry]) -> String {
+fn interface_digest(entries: &[ModuleInterfaceEntry]) -> Digest {
     let mut h = blake3::Hasher::new();
-    h.update(MODULE_INTERFACE_FORMAT.as_bytes());
+    h.update(MODULE_INTERFACE_FORMAT.as_str().as_bytes());
     for entry in entries {
         for field in [
             entry.kind.as_str(),
@@ -872,7 +868,7 @@ fn interface_digest(entries: &[ModuleInterfaceEntry]) -> String {
             h.update(field.as_bytes());
         }
     }
-    h.finalize().to_hex().to_string()
+    Digest::of_bytes(h.finalize().as_bytes())
 }
 
 /// The public API surface of a program, name-sorted.
@@ -1049,9 +1045,9 @@ pub(crate) fn module_interface_from_checked(
     entries.sort_by(|a, b| (&a.kind, &a.name).cmp(&(&b.kind, &b.name)));
     let digest = interface_digest(&entries);
     Ok(ModuleInterface {
-        format: MODULE_INTERFACE_FORMAT.to_string(),
+        format: MODULE_INTERFACE_FORMAT,
         entries,
-        digest: Digest::from(digest),
+        digest,
     })
 }
 
@@ -1070,7 +1066,7 @@ pub(super) fn interface_entry(
         kind: kind.to_string(),
         name: name.to_string(),
         signature,
-        digest: Digest::from(h.finalize().to_hex().to_string()),
+        digest: Digest::of_bytes(h.finalize().as_bytes()),
     }
 }
 
@@ -1318,7 +1314,7 @@ fn decode_layers(bytes: &[u8]) -> Option<StdlibHash> {
         return None;
     }
     let mut layers = StdlibHash {
-        root: Digest::from(root),
+        root: Digest::parse(root).ok()?,
         scheme: HASH_SCHEME,
         version: env!("CARGO_PKG_VERSION"),
         defs: Hashes::new(),
@@ -1334,7 +1330,9 @@ fn decode_layers(bytes: &[u8]) -> Option<StdlibHash> {
         }
         let table = match tag {
             LAYER_DEF => {
-                layers.defs.insert(Sym::new(name), Digest::from(digest));
+                layers
+                    .defs
+                    .insert(Sym::new(name), Digest::parse(digest).ok()?);
                 continue;
             }
             LAYER_SHAPE => &mut layers.shapes,
@@ -1342,7 +1340,7 @@ fn decode_layers(bytes: &[u8]) -> Option<StdlibHash> {
             LAYER_INSTANCE => &mut layers.instances,
             _ => return None,
         };
-        table.insert(name.to_string(), Digest::from(digest));
+        table.insert(name.to_string(), Digest::parse(digest).ok()?);
     }
     Some(layers)
 }
@@ -1352,21 +1350,21 @@ mod stdlib_layer_codec_tests {
     use std::collections::BTreeMap;
 
     use super::{decode_layers, encode_layers, StdlibHash};
-    use crate::core::{Digest, Hashes, HASH_SCHEME};
+    use crate::core::{Hashes, HASH_SCHEME};
     use crate::sym::Sym;
 
     fn sample() -> StdlibHash {
         StdlibHash {
-            root: Digest::from("r00t"),
+            root: crate::core::hash_str("r00t"),
             scheme: HASH_SCHEME,
             version: env!("CARGO_PKG_VERSION"),
             defs: Hashes::from([
-                (Sym::new("Data.Map@helper"), Digest::from("d1")),
-                (Sym::new("map"), Digest::from("d2")),
+                (Sym::new("Data.Map@helper"), crate::core::hash_str("d1")),
+                (Sym::new("map"), crate::core::hash_str("d2")),
             ]),
-            shapes: BTreeMap::from([("Option".to_string(), Digest::from("s1"))]),
-            classes: BTreeMap::from([("Show".to_string(), Digest::from("c1"))]),
-            instances: BTreeMap::from([("Show@Int".to_string(), Digest::from("i1"))]),
+            shapes: BTreeMap::from([("Option".to_string(), crate::core::hash_str("s1"))]),
+            classes: BTreeMap::from([("Show".to_string(), crate::core::hash_str("c1"))]),
+            instances: BTreeMap::from([("Show@Int".to_string(), crate::core::hash_str("i1"))]),
         }
     }
 
@@ -1391,7 +1389,10 @@ mod stdlib_layer_codec_tests {
         let earlier = Sym::new("aa_layer_probe");
         assert!(later < earlier, "the probe relies on interning order");
         let mut layers = sample();
-        layers.defs = Hashes::from([(later, Digest::from("d3")), (earlier, Digest::from("d4"))]);
+        layers.defs = Hashes::from([
+            (later, crate::core::hash_str("d3")),
+            (earlier, crate::core::hash_str("d4")),
+        ]);
         let text = String::from_utf8(encode_layers(&layers)).expect("utf8");
         let earlier_at = text.find("def\taa_layer_probe\t").expect("earlier line");
         let later_at = text.find("def\tzz_layer_probe\t").expect("later line");

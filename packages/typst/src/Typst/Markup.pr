@@ -23,6 +23,7 @@
 
 import Data.List (map)
 import Typst (..)
+import Test (expect_equal)
 
 fn content_text(value : String) : Doc = text_line(value)
 
@@ -78,19 +79,10 @@ pub fn label_mark(name : String) : Doc = atom("<{name}>")
 pub fn ref_mark(name : String) : Doc = atom("@{name}")
 
 test fn headings_carry_their_level() =
-  if render(96, heading(2, "Two")) == "#heading(level: 2)[Two]" then
-    ()
-  else
-    fail()
+  expect_equal("#heading(level: 2)[Two]", render(96, heading(2, "Two")))
 
 test fn list_items_are_escaped_content() =
-  if render(96, bullet_list(["a *b*"])) == "#list([a \\*b\\*])" then
-    ()
-  else
-    fail()
+  expect_equal("#list([a \\*b\\*])", render(96, bullet_list(["a *b*"])))
 
 test fn tables_lead_with_columns() =
-  if (render(96, table(2, ["a", "b"])) == "#table(columns: 2, [a], [b])") then
-    ()
-  else
-    fail()
+  expect_equal("#table(columns: 2, [a], [b])", render(96, table(2, ["a", "b"])))

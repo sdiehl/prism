@@ -61,8 +61,8 @@ fn tally_bytes(bs : Bytes, i : Int, n : Int, thr : Int, acc : Tally) : Tally =
 
 fn obj_get(pairs : List((String, Json)), key : String) : Option(Json) =
   match pairs of
-    Nil => None
-    Cons((k, v), rest) =>
+    [] => None
+    (k, v) :: rest =>
       if k == key then
         Some(v)
       else
@@ -78,9 +78,9 @@ fn cfg_threshold(j : Json) : Int =
 
 fn json_strings(xs : List(Json)) : List(String) =
   match xs of
-    Nil => Nil
-    Cons(JStr(s), rest) => Cons(s, json_strings(rest))
-    Cons(_, rest) => json_strings(rest)
+    [] => Nil
+    JStr(s) :: rest => Cons(s, json_strings(rest))
+    _ :: rest => json_strings(rest)
 
 fn cfg_tiles(j : Json) : List(String) =
   match j of
@@ -92,8 +92,8 @@ fn cfg_tiles(j : Json) : List(String) =
 
 fn tile_count(xs : List(String)) : Int =
   match xs of
-    Nil => 0
-    Cons(_, rest) => 1 + tile_count(rest)
+    [] => 0
+    _ :: rest => 1 + tile_count(rest)
 
 -- Join a base directory and a relative path, keeping the path bare when the base
 -- is the current directory so the lineage graph names `summary.json`, not
@@ -124,8 +124,8 @@ fn process_tiles(
   names : List(String)
 ) : (List(Json), Int, Int, Int) ! {FileSystem} =
   match names of
-    Nil => (Nil, 0, 0, 0)
-    Cons(name, rest) =>
+    [] => (Nil, 0, 0, 0)
+    name :: rest =>
       let bs = read_bytes(tile_path(base, name))
       let n = bytes_length(bs)
       let t = tally_bytes(bs, 0, n, thr, empty_tally())

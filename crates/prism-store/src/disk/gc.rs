@@ -211,7 +211,7 @@ fn retire_tree(root: &Path, src: &Path, origin: &str) -> io::Result<()> {
 fn read_manifest(tree: &Path) -> Option<String> {
     let text = fs::read_to_string(tree.join(RETIRED_MANIFEST)).ok()?;
     let mut lines = text.lines();
-    if lines.next() != Some(RETIRED_FORMAT) {
+    if RETIRED_FORMAT.expect(lines.next()?).is_err() {
         return None;
     }
     let origin = lines.next()?.trim();

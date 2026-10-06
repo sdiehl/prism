@@ -1,0 +1,9 @@
+effect Ask
+  ask() : Int
+
+fn go() =
+  handle ask() with
+    ask() resume k => k(1) + k(2)
+    finally => println("cleanup")
+
+fn main() = println(go())

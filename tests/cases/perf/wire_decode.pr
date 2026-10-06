@@ -17,8 +17,8 @@ fn dec(bs : Bytes) : (List(Rec), Bytes) = decode(bs)
 
 fn count(xs : List(Rec)) : Int =
   match xs of
-    Nil => 0
-    Cons(_, r) => 1 + count(r)
+    [] => 0
+    _ :: r => 1 + count(r)
 
 -- The row is inferred (decode performs `Fail`); `caught` discharges it to a
 -- default so `main` stays pure, exactly as `wire_laws.pr` does.

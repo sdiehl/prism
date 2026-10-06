@@ -16,16 +16,12 @@ mod entry_adapter;
 // an integration-test module.
 const _: fn() = entry_adapter::main;
 
-const ORACLE: &str = "46886c1fa7064e4809020c1b788b3ee3531d6a63";
-
 fn check(section: &str) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let output = Command::new("python3")
         .current_dir(root)
         .arg("scripts/parser-compaction-corpus.py")
         .arg("check")
-        .arg("--oracle")
-        .arg(ORACLE)
         .arg("--section")
         .arg(section)
         .output()
@@ -44,8 +40,6 @@ fn tranche3_plan() -> serde_json::Value {
         .current_dir(root)
         .arg("scripts/parser-compaction-corpus.py")
         .arg("tranche3-plan")
-        .arg("--oracle")
-        .arg(ORACLE)
         .output()
         .unwrap_or_else(|error| panic!("run parser-compaction tranche-3 plan: {error}"));
     assert!(

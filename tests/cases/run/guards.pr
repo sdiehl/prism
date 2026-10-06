@@ -1,9 +1,9 @@
 fn classify(xs) =
   match xs of
-    Cons(h, t) if h > 10 => "big"
-    Cons(h, t) if h > 0 => "small"
-    Cons(h, t) => "other"
-    Nil => "empty"
+    h :: t if h > 10 => "big"
+    h :: t if h > 0 => "small"
+    h :: t => "other"
+    [] => "empty"
 
 fn size(n) =
   match n of
@@ -27,9 +27,9 @@ fn lit(n, b) =
 
 fn above(xs, floor) =
   match xs of
-    Cons(h, t) if h > floor => h + above(t, floor)
-    Cons(h, t) => above(t, floor)
-    Nil => 0
+    h :: t if h > floor => h + above(t, floor)
+    h :: t => above(t, floor)
+    [] => 0
 
 fn main() =
   println(classify([42]))

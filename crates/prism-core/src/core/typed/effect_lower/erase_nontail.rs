@@ -177,6 +177,7 @@ impl Threader {
             body,
             return_binder,
             return_body,
+            finally_body: None,
             ops,
         } = c.kind()
         else {
@@ -219,6 +220,7 @@ impl Threader {
                 body: body.clone(),
                 return_binder: Some(binder),
                 return_body: Some(Box::new(returns)),
+                finally_body: None,
                 ops: handler,
             },
         );

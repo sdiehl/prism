@@ -69,9 +69,9 @@ fn inline_doc(x : Inline, theme : Theme) : T.Expr =
 
 fn inline_docs(xs : List(Inline), theme : Theme) : T.Expr =
   match xs of
-    Nil => T.sym("")
-    Cons(x, Nil) => inline_doc(x, theme)
-    Cons(x, rest) =>
+    [] => T.sym("")
+    [x] => inline_doc(x, theme)
+    x :: rest =>
       T.concat_exprs([
           inline_doc(x, theme),
           T.sym(" + "),
@@ -86,8 +86,8 @@ fn max2(a : Int, b : Int) : Int =
 
 fn max_stage_list(xs : List(Pict)) : Int =
   match xs of
-    Nil => 0
-    Cons(p, rest) => max2(max_stage(p), max_stage_list(rest))
+    [] => 0
+    p :: rest => max2(max_stage(p), max_stage_list(rest))
 
 -- | Highest reveal stage mentioned by a pict tree.
 pub fn max_stage(p : Pict) : Int =
@@ -107,8 +107,8 @@ pub fn max_stage(p : Pict) : Int =
 
 fn assets_list(xs : List(Pict)) : List(String) =
   match xs of
-    Nil => Nil
-    Cons(p, rest) => append(pict_assets(p), assets_list(rest))
+    [] => Nil
+    p :: rest => append(pict_assets(p), assets_list(rest))
 
 -- | Logical, project-relative asset names reached by a pict tree.
 pub fn pict_assets(p : Pict) : List(String) =
@@ -128,9 +128,8 @@ pub fn pict_assets(p : Pict) : List(String) =
 
 fn pict_docs(xs : List(Pict), stage : Int, theme : Theme) : List(T.Expr) =
   match xs of
-    Nil => Nil
-    Cons(p, rest) =>
-      Cons(pict_doc(p, stage, theme), pict_docs(rest, stage, theme))
+    [] => Nil
+    p :: rest => Cons(pict_doc(p, stage, theme), pict_docs(rest, stage, theme))
 
 fn pict_doc(p : Pict, stage : Int, theme : Theme) : T.Expr =
   match p of

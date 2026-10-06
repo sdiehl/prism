@@ -10,6 +10,7 @@
 
 use std::fmt;
 
+use prism_common::format::FormatTag;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
@@ -19,9 +20,9 @@ use crate::kw;
 use crate::syntax::ast::Program;
 
 /// The semantic-patch artifact format.
-pub const PATCH_FORMAT: &str = "prism-patch-v1";
+pub const PATCH_FORMAT: FormatTag = FormatTag::new("prism-patch-v1");
 /// The structured single-definition surface encoding carried by a patch.
-pub const TERM_FORMAT: &str = "prism-surface-term-v1";
+pub const TERM_FORMAT: FormatTag = FormatTag::new("prism-surface-term-v1");
 
 const TERM_ADDRESS_DOMAIN: &[u8] = b"prism-surface-term-address-v1";
 const PATCH_ADDRESS_DOMAIN: &[u8] = b"prism-patch-address-v1";
@@ -69,7 +70,7 @@ pub struct SurfaceToken {
 
 #[derive(Serialize)]
 struct TermPayload<'a> {
-    format: &'a str,
+    format: &'a FormatTag,
     kind: TermKind,
     name: &'a str,
     tokens: &'a [SurfaceToken],
@@ -79,7 +80,7 @@ struct TermPayload<'a> {
 /// A canonical, content-addressed encoding of one surface declaration.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SurfaceTerm {
-    pub format: String,
+    pub format: FormatTag,
     pub digest: String,
     pub kind: TermKind,
     pub name: String,
@@ -115,9 +116,9 @@ impl SurfaceTerm {
             end = next;
         }
         let trailing = canonical[end..].to_string();
-        let digest = term_digest(TERM_FORMAT, site.kind, &site.name, &nodes, &trailing)?;
+        let digest = term_digest(&TERM_FORMAT, site.kind, &site.name, &nodes, &trailing)?;
         Ok(Self {
-            format: TERM_FORMAT.to_string(),
+            format: TERM_FORMAT,
             digest,
             kind: site.kind,
             name: site.name,
@@ -133,7 +134,9 @@ impl SurfaceTerm {
     /// and payloads whose parsed identity differs from their declared identity.
     pub fn render(&self) -> Result<String, PatchArtifactError> {
         if self.format != TERM_FORMAT {
-            return Err(PatchArtifactError::ForeignTermFormat(self.format.clone()));
+            return Err(PatchArtifactError::ForeignTermFormat(
+                self.format.to_string(),
+            ));
         }
         validate_digest(&self.digest, "term")?;
         let expected = term_digest(
@@ -199,7 +202,7 @@ impl PatchTarget {
 
 #[derive(Serialize)]
 struct PatchPayload<'a> {
-    format: &'a str,
+    format: &'a FormatTag,
     base_namespace: &'a PatchTarget,
     target: &'a PatchTarget,
     replacement: &'a SurfaceTerm,
@@ -209,7 +212,7 @@ struct PatchPayload<'a> {
 /// A digest-pinned, versioned semantic patch.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PatchArtifact {
-    pub format: String,
+    pub format: FormatTag,
     pub digest: String,
     /// Whole semantic namespace the proposal was authored against. The target
     /// digest catches a changed definition; this catches every other world move.
@@ -235,14 +238,14 @@ impl PatchArtifact {
         target.validate()?;
         replacement.render()?;
         let digest = patch_digest(
-            PATCH_FORMAT,
+            &PATCH_FORMAT,
             &base_namespace,
             &target,
             &replacement,
             claimed_delta.as_ref(),
         )?;
         Ok(Self {
-            format: PATCH_FORMAT.to_string(),
+            format: PATCH_FORMAT,
             digest,
             base_namespace,
             target,
@@ -257,7 +260,9 @@ impl PatchArtifact {
     /// Refuses foreign formats, malformed digests, and changed payloads.
     pub fn validate(&self) -> Result<(), PatchArtifactError> {
         if self.format != PATCH_FORMAT {
-            return Err(PatchArtifactError::ForeignPatchFormat(self.format.clone()));
+            return Err(PatchArtifactError::ForeignPatchFormat(
+                self.format.to_string(),
+            ));
         }
         validate_digest(&self.digest, "patch")?;
         self.base_namespace.validate()?;
@@ -411,7 +416,7 @@ pub fn replace_term(
 }
 
 fn term_digest(
-    format: &str,
+    format: &FormatTag,
     kind: TermKind,
     name: &str,
     tokens: &[SurfaceToken],
@@ -429,7 +434,7 @@ fn term_digest(
 }
 
 fn patch_digest(
-    format: &str,
+    format: &FormatTag,
     base_namespace: &PatchTarget,
     target: &PatchTarget,
     replacement: &SurfaceTerm,
@@ -599,7 +604,15 @@ fn declaration_range(
         .copied()
         .find(|boundary| *boundary > site.start)
         .map_or(source.len(), |boundary| item_start(source, boundary));
-    debug_assert!(site.end <= end);
+    // Sites from one parse never overlap, so the next start bounds this one. If
+    // that ever failed, the splice would leave the old definition's tail behind
+    // in the patched source; that corruption is worse than a crash, so the
+    // check holds in release too.
+    assert!(
+        site.end <= end,
+        "definition `{}` ends past the next declaration",
+        site.name
+    );
     (start, end)
 }
 

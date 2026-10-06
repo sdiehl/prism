@@ -191,6 +191,8 @@ fn collect_refs<'a>(
                         bound.push(k.as_str());
                         e2
                     }
+                    // The cleanup clause binds nothing.
+                    HandlerArm::Finally(e2) => e2,
                     #[expect(
                         clippy::uninhabited_references,
                         reason = "Never is uninhabited in Core"

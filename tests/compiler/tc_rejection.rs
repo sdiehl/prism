@@ -14,17 +14,18 @@
 // 4. A program that fails before a resolved tree exists (a parse error) is
 //    refused outright rather than reported as a rejection with no tree.
 
+use prism::DumpPhase;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
 const FIXTURE_DIR: &str = "tests/fixtures/frontend";
-const PHASE: &str = "tc-rejection";
+const PHASE: DumpPhase = DumpPhase::TcRejection;
 // Re-typed independently of the emitter so a schema drift cannot re-pin the
 // value it is checked against.
 const SCHEMA: &str = "prism-tc-rejection-v1";
-const RESOLVED_PHASE: &str = "resolved-syntax";
+const RESOLVED_PHASE: DumpPhase = DumpPhase::ResolvedSyntax;
 const ACCEPTED_STEM: &str = "program";
 const REJECTED_STEM: &str = "malformed_type";
 const UNRESOLVABLE_STEM: &str = "malformed_parse";

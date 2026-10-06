@@ -425,12 +425,16 @@ fn direct_calls(c: &Comp, own: &BTreeSet<Sym>, acc: &mut BTreeSet<Sym>) {
         Comp::Handle {
             body,
             return_body,
+            finally_body,
             ops,
             ..
         } => {
             direct_calls(body, own, acc);
             if let Some(rb) = return_body {
                 direct_calls(rb, own, acc);
+            }
+            if let Some(fb) = finally_body {
+                direct_calls(fb, own, acc);
             }
             for o in ops {
                 direct_calls(&o.body, own, acc);
@@ -467,6 +471,7 @@ fn collect_ops(c: &Comp, handled: &mut Vec<Sym>, acc: &mut BTreeSet<Sym>) {
         Comp::Handle {
             body,
             return_body,
+            finally_body,
             ops,
             ..
         } => {
@@ -478,10 +483,14 @@ fn collect_ops(c: &Comp, handled: &mut Vec<Sym>, acc: &mut BTreeSet<Sym>) {
                 collect_ops(rb, handled, acc);
             }
             handled.truncate(depth);
-            // An op-clause body runs against the outer handlers, not this one, so
-            // its own performed ops are not discharged by these arms.
+            // An op-clause body and the cleanup clause run against the outer
+            // handlers, not this one, so their own performed ops are not
+            // discharged by these arms.
             for o in ops {
                 collect_ops(&o.body, handled, acc);
+            }
+            if let Some(fb) = finally_body {
+                collect_ops(fb, handled, acc);
             }
         }
         _ => descend_ops(c, handled, acc),

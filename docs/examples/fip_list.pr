@@ -11,8 +11,8 @@
 -- Reverse onto an accumulator, reusing uniquely owned input cells.
 fn rev_onto(xs, acc) =
   match xs of
-    Nil => acc
-    Cons(h, t) => rev_onto(t, Cons(h, acc))
+    [] => acc
+    h :: t => rev_onto(t, Cons(h, acc))
 
 -- Seed the accumulator with an empty list.
 fn reverse_ip(xs) = rev_onto(xs, Nil)
@@ -20,14 +20,14 @@ fn reverse_ip(xs) = rev_onto(xs, Nil)
 -- Spine-rebuilding map: drop each `Cons`, rebuild it around the bumped head.
 fn bump(xs) =
   match xs of
-    Nil => Nil
-    Cons(h, t) => Cons(h + 1, bump(t))
+    [] => Nil
+    h :: t => Cons(h + 1, bump(t))
 
 -- Cap each head while rebuilding the spine through the same reuse path.
 fn cap_at(xs) =
   match xs of
-    Nil => Nil
-    Cons(h, t) =>
+    [] => Nil
+    h :: t =>
       if h > 9 then
         Cons(9, cap_at(t))
       else

@@ -16,8 +16,8 @@ fn weight(x) = x * 3
 
 fn run_all(fs, acc) =
   match fs of
-    Nil => acc
-    Cons(f, rest) => run_all(rest, acc + f())
+    [] => acc
+    f :: rest => run_all(rest, acc + f())
 
 fn logged() =
   let fs =

@@ -96,8 +96,8 @@ pub fn rw_apply(s : Rewrite(a, e), x : a) : a ! { | e} =
 -- Map a rewrite over a list, declining as a whole if any element declines.
 fn rw_traverse(s : Rewrite(a, e), xs : List(a)) : Option(List(a)) ! { | e} =
   match xs of
-    Nil => Some(Nil)
-    Cons(x, rest) =>
+    [] => Some(Nil)
+    x :: rest =>
       match s(x) of
         None => None
         Some(y) =>
@@ -126,8 +126,8 @@ fn rw_first(
   xs : List(a)
 ) : Option(List(a)) ! { | e} =
   match xs of
-    Nil => None
-    Cons(x, rest) =>
+    [] => None
+    x :: rest =>
       match s(x) of
         Some(y) => Some(append(reverse(seen), Cons(y, rest)))
         None => rw_first(s, Cons(x, seen), rest)
@@ -290,8 +290,8 @@ pub fn rw_choose(rules : List(Rewrite(a, e))) : Rewrite(a, e) =
 
 fn rw_choose_go(rules : List(Rewrite(a, e)), x : a) : Option(a) ! { | e} =
   match rules of
-    Nil => None
-    Cons(r, rest) =>
+    [] => None
+    r :: rest =>
       match r(x) of
         Some(y) => Some(y)
         None => rw_choose_go(rest, x)
@@ -306,8 +306,8 @@ pub fn rw_pipeline(rules : List(Rewrite(a, e))) : Rewrite(a, e) =
 
 fn rw_pipeline_go(rules : List(Rewrite(a, e)), x : a) : a ! { | e} =
   match rules of
-    Nil => x
-    Cons(r, rest) => rw_pipeline_go(rest, rw_apply(r, x))
+    [] => x
+    r :: rest => rw_pipeline_go(rest, rw_apply(r, x))
 
 -- | Lift a total node function into a rewrite that always accepts. The bridge
 -- for an existing `(a) -> a` helper. Never declines, which makes it unsuitable
@@ -367,8 +367,8 @@ fn rw_steps_kids(
   cs : List(a)
 ) : List(a) ! { | e} =
   match cs of
-    Nil => Nil
-    Cons(c, rest) =>
+    [] => Nil
+    c :: rest =>
       let rebuilt = map(
           \(c2) -> lay_rebuild(p, x, append(reverse(seen), Cons(c2, rest))),
           rw_steps_at(p, s, c),

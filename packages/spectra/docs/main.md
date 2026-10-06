@@ -7,5 +7,5 @@ The standalone Spectra executable: parse the command line (`SpectraCli`), dispat
 ```text
 prism build packages/spectra --out ./spectra
 ./spectra check examples/spectra-deck
-./spectra build examples/spectra-deck --output deck.pdf --open
+./spectra build examples/spectra-deck --output deck.pdf --open --prism target/release/prism
 ```

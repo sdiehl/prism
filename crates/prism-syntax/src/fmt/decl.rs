@@ -88,7 +88,7 @@ pub fn fmt_class(c: &ClassDecl) -> String {
     let sigs: Vec<String> = c
         .methods
         .iter()
-        .map(|(n, t)| format!("{INDENT}{n} : {}", fmt_ty(t)))
+        .map(|m| format!("{INDENT}{} : {}", m.name, fmt_ty(&m.ty)))
         .collect();
     let sup = if c.supers.is_empty() {
         String::new()

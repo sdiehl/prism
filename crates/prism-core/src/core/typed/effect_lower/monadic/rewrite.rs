@@ -38,6 +38,7 @@ impl<'a> Monadic<'a> {
             latent: None,
             flow: None,
             native_enabled: false,
+            cleanups: false,
         }
     }
 
@@ -715,10 +716,15 @@ impl<'a> Monadic<'a> {
                 args,
             } => {
                 let id = self.ops.id(*operation)?;
+                let mut argument = self.packed_word(args)?;
+                if self.cleanups {
+                    let none = abi::pack_queue_word(abi::empty_queue(self.row.clone()))?;
+                    argument = abi::pend(argument, none);
+                }
                 abi::eop(
                     TypedValue::new(CoreType::Source(Type::Int), TypedValueKind::Int(id)),
                     TypedValue::new(CoreType::Source(Type::Int), TypedValueKind::Int(0)),
-                    self.packed_word(args)?,
+                    argument,
                     abi::empty_queue(self.row.clone()),
                     self.row.clone(),
                 )
@@ -920,6 +926,15 @@ impl<'a> Monadic<'a> {
                     call.sig().clone(),
                     TypedCompKind::Bind(Box::new(body), result, Box::new(call)),
                 )
+            }
+            TypedCompKind::Handle {
+                finally_body: Some(_),
+                ..
+            } => {
+                if !self.whole_style() {
+                    return self.refuse(Refusal::Cleanup, Site::Function);
+                }
+                self.bracket(comp)?
             }
             TypedCompKind::Handle { .. } if self.native_eligible(comp) => {
                 let result = TypedBinder::new(self.mint("h"), comp.sig().result().clone());
@@ -1579,6 +1594,10 @@ impl<'a> Monadic<'a> {
                 )
             }
             TypedCompKind::Mask(_, body) => self.direct(body)?,
+            TypedCompKind::Handle {
+                finally_body: Some(_),
+                ..
+            } => return self.refuse(Refusal::Cleanup, Site::Function),
             TypedCompKind::Handle { .. } if self.native_eligible(comp) => {
                 self.handle_native(comp)?
             }

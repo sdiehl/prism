@@ -8,8 +8,9 @@
 //! split is invisible to callers.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
-use std::fmt::Write as _;
+use std::fmt::{self, Write as _};
 use std::path::Path;
+use std::str::FromStr;
 
 use crate::core::cbpv::calls_in;
 use crate::core::fbip::borrow_sigs;
@@ -37,6 +38,7 @@ use crate::syntax::ast::{Core as CorePhase, Decl, Expr, Program, Span, S};
 use crate::syntax::reflect::parse_unit;
 use crate::types::{show_effects, Checked, Dict, Type};
 use crate::verify::{check_program, ranking, totality, vc};
+use prism_common::format::FormatTag;
 use serde::Serialize;
 
 #[cfg(feature = "mlir")]
@@ -64,7 +66,7 @@ use super::{
 /// `usage-summary-md`, `usage-summary-json`). It heads each rendering and versions
 /// the columns, so a package can commit any projection the way the tier manifest is
 /// committed and a reader can tell which layout it is parsing.
-const USAGE_SUMMARY_FORMAT: &str = "prism-usage-summary-v1";
+const USAGE_SUMMARY_FORMAT: FormatTag = FormatTag::new("prism-usage-summary-v1");
 // The canonical cell tokens the usage summary reports for a definition, shared by
 // every projection so the three can never disagree. `noalloc`/`discipline` come
 // from these fixed sets; the TSV bytes are guarded by tests, so the values are
@@ -76,6 +78,177 @@ const USAGE_DISCIPLINE_NONE: &str = "-";
 // JSON fields.
 const USAGE_SUMMARY_COLUMNS: [&str; 5] = ["name", "noalloc", "discipline", "borrow", "row"];
 
+/// One pipeline phase `prism dump` can print. The spelling is the CLI name and
+/// round-trips through [`DumpPhase::as_str`] and [`str::parse`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum DumpPhase {
+    Tokens,
+    Ast,
+    SyntaxTokens,
+    SurfaceSyntax,
+    SyntaxDiagnostics,
+    Types,
+    Typespans,
+    Occurrences,
+    Interface,
+    ModuleGraph,
+    Hir,
+    TcInput,
+    ResolvedSyntax,
+    TcRejection,
+    TcFacts,
+    ElabInput,
+    Verify,
+    Smt,
+    Totality,
+    Core,
+    CoreJson,
+    CoreIdentity,
+    CoreHash,
+    NativeKontTable,
+    NativeKontStateMap,
+    Shape,
+    Dupes,
+    Namespace,
+    StdlibHash,
+    Fbip,
+    Lowered,
+    Tier,
+    EffectPlan,
+    TierExplain,
+    Captures,
+    OptimizerFacts,
+    UsageSummary,
+    UsageSummaryMd,
+    UsageSummaryJson,
+    #[cfg(feature = "native")]
+    Llvm,
+    #[cfg(feature = "mlir")]
+    Mlir,
+}
+
+impl DumpPhase {
+    /// Every phase this build can dump, in `prism dump` help order.
+    pub const ALL: &[Self] = &[
+        Self::Tokens,
+        Self::Ast,
+        Self::SyntaxTokens,
+        Self::SurfaceSyntax,
+        Self::SyntaxDiagnostics,
+        Self::Types,
+        Self::Typespans,
+        Self::Occurrences,
+        Self::Interface,
+        Self::ModuleGraph,
+        Self::Hir,
+        Self::TcInput,
+        Self::ResolvedSyntax,
+        Self::TcRejection,
+        Self::TcFacts,
+        Self::ElabInput,
+        Self::Verify,
+        Self::Smt,
+        Self::Totality,
+        Self::Core,
+        Self::CoreJson,
+        Self::CoreIdentity,
+        Self::CoreHash,
+        Self::NativeKontTable,
+        Self::NativeKontStateMap,
+        Self::Shape,
+        Self::Dupes,
+        Self::Namespace,
+        Self::StdlibHash,
+        Self::Fbip,
+        Self::Lowered,
+        Self::Tier,
+        Self::EffectPlan,
+        Self::TierExplain,
+        Self::Captures,
+        Self::OptimizerFacts,
+        Self::UsageSummary,
+        Self::UsageSummaryMd,
+        Self::UsageSummaryJson,
+        #[cfg(feature = "native")]
+        Self::Llvm,
+        #[cfg(feature = "mlir")]
+        Self::Mlir,
+    ];
+
+    /// The CLI spelling.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Tokens => "tokens",
+            Self::Ast => "ast",
+            Self::SyntaxTokens => "syntax-tokens",
+            Self::SurfaceSyntax => "surface-syntax",
+            Self::SyntaxDiagnostics => "syntax-diagnostics",
+            Self::Types => "types",
+            Self::Typespans => "typespans",
+            Self::Occurrences => "occurrences",
+            Self::Interface => "interface",
+            Self::ModuleGraph => "module-graph",
+            Self::Hir => "hir",
+            Self::TcInput => "tc-input",
+            Self::ResolvedSyntax => "resolved-syntax",
+            Self::TcRejection => "tc-rejection",
+            Self::TcFacts => "tc-facts",
+            Self::ElabInput => "elab-input",
+            Self::Verify => "verify",
+            Self::Smt => "smt",
+            Self::Totality => "totality",
+            Self::Core => "core",
+            Self::CoreJson => "core-json",
+            Self::CoreIdentity => "core-identity",
+            Self::CoreHash => "core-hash",
+            Self::NativeKontTable => "native-kont-table",
+            Self::NativeKontStateMap => "native-kont-state-map",
+            Self::Shape => "shape",
+            Self::Dupes => "dupes",
+            Self::Namespace => "namespace",
+            Self::StdlibHash => "stdlib-hash",
+            Self::Fbip => "fbip",
+            Self::Lowered => "lowered",
+            Self::Tier => "tier",
+            Self::EffectPlan => "effect-plan",
+            Self::TierExplain => "tier-explain",
+            Self::Captures => "captures",
+            Self::OptimizerFacts => "optimizer-facts",
+            Self::UsageSummary => "usage-summary",
+            Self::UsageSummaryMd => "usage-summary-md",
+            Self::UsageSummaryJson => "usage-summary-json",
+            #[cfg(feature = "native")]
+            Self::Llvm => "llvm",
+            #[cfg(feature = "mlir")]
+            Self::Mlir => "mlir",
+        }
+    }
+}
+
+impl fmt::Display for DumpPhase {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// A phase name this build cannot dump.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("unknown phase {0}")]
+pub struct UnknownPhase(pub String);
+
+impl FromStr for DumpPhase {
+    type Err = UnknownPhase;
+
+    fn from_str(name: &str) -> Result<Self, UnknownPhase> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|phase| phase.as_str() == name)
+            .ok_or_else(|| UnknownPhase(name.to_string()))
+    }
+}
+
 // Serialize a seam document to pretty JSON, propagating a serialization failure
 // as a dump error. These envelopes are versioned artifacts consumers parse; an
 // empty string on failure would read as a valid (empty) dump.
@@ -85,7 +258,7 @@ fn pretty_json<T: Serialize>(doc: &T) -> Result<String, Error> {
 
 /// # Errors
 /// Fails on front-end errors or an unknown phase name.
-pub fn dump(phase: &str, src: &str) -> Result<String, Error> {
+pub fn dump(phase: DumpPhase, src: &str) -> Result<String, Error> {
     dump_at(phase, src, Path::new("."))
 }
 
@@ -93,7 +266,7 @@ pub fn dump(phase: &str, src: &str) -> Result<String, Error> {
 ///
 /// # Errors
 /// Fails on front-end errors or an unknown phase name.
-pub fn dump_at(phase: &str, src: &str, base: &Path) -> Result<String, Error> {
+pub fn dump_at(phase: DumpPhase, src: &str, base: &Path) -> Result<String, Error> {
     dump_on(phase, src, &default_roots(base), &Config::from_env())
 }
 
@@ -104,28 +277,28 @@ pub fn dump_at(phase: &str, src: &str, base: &Path) -> Result<String, Error> {
 // One coherent dispatch match over every dump phase; splitting it into
 // single-use helpers would only scatter the phase table.
 #[allow(clippy::too_many_lines)]
-pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<String, Error> {
+pub fn dump_on(phase: DumpPhase, src: &str, roots: &[Root], cfg: &Config) -> Result<String, Error> {
     match phase {
-        "tokens" => {
+        DumpPhase::Tokens => {
             let (t, _) = lex(src)?;
             Ok(t.iter()
                 .map(|(_, t, _)| format!("{t:?}"))
                 .collect::<Vec<_>>()
                 .join(" "))
         }
-        "ast" => Ok(format!("{:#?}", parse(src)?.program)),
+        DumpPhase::Ast => Ok(format!("{:#?}", parse(src)?.program)),
         // The two versioned syntax seams (see `dump_syntax`): the token-stream
         // export a Prism-written lexer/layout pass is diffed against, and the
         // ordered semantic surface-AST export a Prism-written parser is diffed
         // against. Deterministic, self-contained JSON, refusing malformed input.
-        "syntax-tokens" => super::dump_syntax::syntax_tokens(src),
-        "surface-syntax" => super::dump_syntax::surface_syntax(src),
+        DumpPhase::SyntaxTokens => super::dump_syntax::syntax_tokens(src),
+        DumpPhase::SurfaceSyntax => super::dump_syntax::surface_syntax(src),
         // The syntax-boundary diagnostics export: every lex/parse refusal (or
         // the empty list on acceptance) as a versioned artifact a Prism-written
         // front end is diffed against. Never fails: refusal IS the payload.
-        "syntax-diagnostics" => Ok(super::dump_syntax::dump_syntax_diagnostics(src)),
-        "types" => Ok(types_section(&check_on(src, roots)?)),
-        "typespans" => {
+        DumpPhase::SyntaxDiagnostics => Ok(super::dump_syntax::dump_syntax_diagnostics(src)),
+        DumpPhase::Types => Ok(types_section(&check_on(src, roots)?)),
+        DumpPhase::Typespans => {
             let (program, checked) = tooltip_checked_on(src, roots, cfg)?;
             extract_typespans(src, &program, &checked)?
                 .to_json()
@@ -133,16 +306,16 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
         }
         // Every resolved reference, taken from the renamer rather than a second
         // walk: the goto-definition relation, and reversed, find-references.
-        "occurrences" => extract_occurrences(src, roots)?
+        DumpPhase::Occurrences => extract_occurrences(src, roots)?
             .to_json()
             .map_err(|error| Error::CodegenDump(error.to_string())),
-        "interface" => {
+        DumpPhase::Interface => {
             let entry = SourceMap::new(src).user();
             module_interface(entry, src, roots)?
                 .to_json()
                 .map_err(|e| Error::CodegenDump(e.to_string()))
         }
-        "module-graph" => module_graph(src, roots)?
+        DumpPhase::ModuleGraph => module_graph(src, roots)?
             .to_json()
             .map_err(|e| Error::CodegenDump(e.to_string())),
         // The checked-HIR fixture: the stable boundary a Prism-written
@@ -150,7 +323,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
         // and effect rows plus, for every node the checker recorded a fact for,
         // its resolution, dictionary evidence, numeric lane, and zonked type, as
         // versioned deterministic JSON.
-        "hir" => hir_fixture(&check_on(src, roots)?),
+        DumpPhase::Hir => hir_fixture(&check_on(src, roots)?),
         // The resolved-program boundary a Prism-written front end starts from.
         // The declaration interface the checker reads (datatypes and
         // their constructor layouts, effects and operation grades, classes,
@@ -159,7 +332,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
         // resolved surface program; declared types come from the checked tables
         // (rendered with the same deterministic `Type::show` the HIR fixture uses).
         // Companion to `tc-facts`; together they form `elab-input`.
-        "tc-input" => {
+        DumpPhase::TcInput => {
             let (program, checked) = tooltip_checked_on(src, roots, cfg)?;
             let doc = TcInput {
                 schema: TC_INPUT_SCHEMA,
@@ -174,7 +347,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
         // type/resolution facts from there. Complements the declaration index
         // (`tc-input`) and the node facts (`tc-facts`) without folding the tree
         // into either.
-        "resolved-syntax" => {
+        DumpPhase::ResolvedSyntax => {
             let (program, _checked) = tooltip_checked_on(src, roots, cfg)?;
             let user = SourceMap::new(src).user();
             let doc = ResolvedSyntax {
@@ -195,7 +368,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
         // resolved tree desugar built before typechecking, plus the refusal's
         // stable code, owning phase, and primary span, which is the negative
         // half of that comparison.
-        "tc-rejection" => {
+        DumpPhase::TcRejection => {
             let (program, verdict) = front_verdict_on(src, roots, cfg)?;
             let map = SourceMap::new(src);
             let (user, base) = (map.user(), map.prelude_len());
@@ -222,7 +395,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
         // zonked type, handler residual). Shares the HIR fixture's node/decl
         // rendering so the two can never disagree; the envelope is the stable
         // front-end boundary a Prism typechecker is diffed against.
-        "tc-facts" => {
+        DumpPhase::TcFacts => {
             let (_program, checked) = tooltip_checked_on(src, roots, cfg)?;
             let doc = TcFacts {
                 schema: TC_FACTS_SCHEMA,
@@ -235,7 +408,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
         // declarations (`tc-input`) with the checker facts (`tc-facts`) a Prism
         // elaborator consumes to emit Core. One envelope so a front end reads both
         // halves from a single deterministic export.
-        "elab-input" => {
+        DumpPhase::ElabInput => {
             let (program, checked) = tooltip_checked_on(src, roots, cfg)?;
             let doc = ElabInput {
                 schema: ELAB_INPUT_SCHEMA,
@@ -248,7 +421,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
         // The module's verification interface (logical declarations and
         // contract summaries with digests). Runs the solver-free logical checker
         // on the resolved surface program; a malformed contract is a source error.
-        "verify" => {
+        DumpPhase::Verify => {
             let program = resolve_modules_in(parse_unit(src)?, roots)?;
             Ok(check_program(&program)?.render())
         }
@@ -256,24 +429,24 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
         // postcondition, then the termination ranking obligations of every
         // `total fn` with a `decreases` measure, under distinct banners so the two
         // certificate families stay separate. Solver-free.
-        "smt" => {
+        DumpPhase::Smt => {
             let program = resolve_modules_in(parse_unit(src)?, roots)?;
             Ok(vc::render(&program)? + &ranking::render_smt(&program))
         }
         // Per-function totality status (checked-trivial, checked-structural,
         // trusted assumption, or pending with a precise reason). Solver-free.
-        "totality" => {
+        DumpPhase::Totality => {
             let program = resolve_modules_in(parse_unit(src)?, roots)?;
             Ok(totality::render(&program))
         }
-        "core" => {
+        DumpPhase::Core => {
             let (_, _, core) = frontend(src, roots, cfg)?;
             Ok(pp_core_pretty(&strip_prelude(
                 core.into_core(),
                 &prelude_fn_names()?,
             )))
         }
-        "core-json" => {
+        DumpPhase::CoreJson => {
             let (_, _, core) = frontend(src, roots, cfg)?;
             Ok(core_to_json(&core))
         }
@@ -285,13 +458,13 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
         // neither the dictionary arity nor the metadata, so a reader of it cannot
         // reproduce a hash. This artifact is exactly what `hash_group` consumes,
         // so a program that reads it can recompute the same digests.
-        "core-identity" => {
+        DumpPhase::CoreIdentity => {
             let (program, checked, core) = elaborated(src, roots)?;
             let metas = hash_meta(&checked, &borrow_sigs(&program), &fip_annots(&program));
             let hashes = hash_program(&core, &metas);
             Ok(core_identity(&core, &metas, &hashes, &prelude_fn_names()?))
         }
-        "core-hash" => {
+        DumpPhase::CoreHash => {
             let (program, checked, core) = elaborated(src, roots)?;
             let hashes = hash_program(
                 &core,
@@ -314,7 +487,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
         // The native kont reverse-table precursor: the deterministic map a
         // native suspendable build must emit so a saved native frame can name its
         // code by definition hash rather than by a raw function pointer.
-        "native-kont-table" => {
+        DumpPhase::NativeKontTable => {
             #[cfg(feature = "native")]
             {
                 let (program, checked, core) = elaborated(src, roots)?;
@@ -331,7 +504,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
                 ))
             }
         }
-        "native-kont-state-map" => {
+        DumpPhase::NativeKontStateMap => {
             #[cfg(feature = "native")]
             {
                 let (program, checked, core) = elaborated(src, roots)?;
@@ -341,7 +514,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
                 );
                 let table =
                     native_kont_table_of(&hashes, roots, cfg, NativeKontIdentityRows::Portable)?;
-                Ok(native_kont_state_map(&core, &table))
+                native_kont_state_map(&core, &table).map_err(Error::CodegenDump)
             }
             #[cfg(not(feature = "native"))]
             {
@@ -352,7 +525,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
         }
         // Structural shape digests of the file's datatypes and effects (prelude
         // included, like `core-hash` shows prelude fns). One line per declaration.
-        "shape" => {
+        DumpPhase::Shape => {
             let (program, _, _) = frontend(src, roots, cfg)?;
             let shapes = shape_digests(&program.types, &program.effects);
             let mut out = String::new();
@@ -364,7 +537,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
         // Structural duplicates: definitions that hash identically are the same
         // behavior under different names (a user `fact` and the prelude
         // `factorial`, say). One line per group of clones, `<hash>  a, b, c`.
-        "dupes" => {
+        DumpPhase::Dupes => {
             let (program, checked, core) = elaborated(src, roots)?;
             let hashes = hash_program(
                 &core,
@@ -399,7 +572,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
         // to), and the metadata layer (the human name and inferred type). Docs and
         // spans belong to the metadata layer too and join it when the on-disk
         // store lands.
-        "namespace" => {
+        DumpPhase::Namespace => {
             let (program, checked, core) = elaborated(src, roots)?;
             let hashes = hash_program(
                 &core,
@@ -451,7 +624,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
         }
         // The whole standard library's fingerprint. Ignores `src`/`roots`: the
         // stdlib is embedded, so the file argument is only a CLI placeholder.
-        "stdlib-hash" => {
+        DumpPhase::StdlibHash => {
             let h = stdlib_hash()?;
             let mut out = String::new();
             writeln!(out, "scheme    {}", h.scheme).unwrap();
@@ -479,12 +652,12 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
             }
             Ok(out)
         }
-        "fbip" => {
+        DumpPhase::Fbip => {
             let (program, checked, core) = frontend(src, roots, cfg)?;
-            let sigs = rc_borrow_sigs(&program, &checked, &core, cfg);
+            let sigs = rc_borrow_sigs(&program, &checked, &core, cfg)?;
             Ok(pp_core_pretty(&reuse(&insert_rc(&core, &sigs))))
         }
-        "lowered" => {
+        DumpPhase::Lowered => {
             let (_, lowered, _, _) = lowered_core(src, roots, cfg)?;
             Ok(pp_core_pretty(&lowered))
         }
@@ -493,7 +666,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
         // `whole-program-free-monad`). A pure cost classification, never
         // observable in output; `tests/perf_gate.rs` pins it per corpus program
         // so a silent fusion-to-free-monad collapse surfaces as a reviewable diff.
-        "tier" => {
+        DumpPhase::Tier => {
             let (strategy, _) = typed_effect_facts(src, roots, cfg)?;
             Ok(format!("{strategy}\n"))
         }
@@ -504,17 +677,17 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
         // which capture one in a first-class closure. One artifact per
         // program, so a rung is read off the analysis the cascade consulted
         // rather than inferred from which passes fired.
-        "effect-plan" => typed_effect_plan(src, roots, cfg),
+        DumpPhase::EffectPlan => typed_effect_plan(src, roots, cfg),
         // The same facts as prose: one sentence per region naming the rung it
         // lowered to and the recorded fact that put it there, so a tier nobody
         // expected is read back to its cause without decoding the plan's rows.
         // A rendering of the plan above, deciding nothing of its own.
-        "tier-explain" => typed_tier_explain(src, roots, cfg),
+        DumpPhase::TierExplain => typed_tier_explain(src, roots, cfg),
         // Closure-capture facts: for each of the program's own lambdas and
         // thunks, the bindings it closes over and the scoped operations it
         // performs, each classified portable / nonportable / unknown for a move
         // across a suspend boundary. Diagnostic only; changes no output.
-        "captures" => {
+        DumpPhase::Captures => {
             let (_, checked, core) = elaborated(src, roots)?;
             let prelude = prelude_fn_names()?;
             let user_fns: Vec<&CoreFn> = core
@@ -550,7 +723,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
         // Core: result shape, checked effect row, allocation bound, closure
         // capture state, invoked-callable parameter slots, and collection
         // cardinality. Diagnostic only; changes no output.
-        "optimizer-facts" => {
+        DumpPhase::OptimizerFacts => {
             let (_, _, core, typed, _) =
                 run_front(src, roots, cfg, FrontRequest::Full)?.into_typed_pre();
             let (summaries, stats) = summarize_counted(typed.functions());
@@ -583,20 +756,20 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
         // computation so they can never disagree: the TSV machine format (pinned by
         // tests), a human-readable markdown table, and a JSON document. A package
         // can commit any of them the way the tier manifest is committed.
-        "usage-summary" => {
+        DumpPhase::UsageSummary => {
             let (rows, tier) = usage_summary_data(src, roots, cfg)?;
             Ok(usage_summary_tsv(&rows, &tier))
         }
-        "usage-summary-md" => {
+        DumpPhase::UsageSummaryMd => {
             let (rows, tier) = usage_summary_data(src, roots, cfg)?;
             Ok(usage_summary_md(&rows, &tier))
         }
-        "usage-summary-json" => {
+        DumpPhase::UsageSummaryJson => {
             let (rows, tier) = usage_summary_data(src, roots, cfg)?;
             usage_summary_json(&rows, &tier)
         }
         #[cfg(feature = "native")]
-        "llvm" => {
+        DumpPhase::Llvm => {
             let (_, core, ctors, hashes) = compiled(src, roots, cfg)?;
             let native_kont_table =
                 native_kont_table_of(&hashes, roots, cfg, NativeKontIdentityRows::Portable)?;
@@ -609,11 +782,10 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
             .map_err(Error::CodegenDump)
         }
         #[cfg(feature = "mlir")]
-        "mlir" => {
+        DumpPhase::Mlir => {
             let (_, core, ctors, _) = compiled(src, roots, cfg)?;
             emit_mlir(&core, &ctors).map_err(Error::CodegenDump)
         }
-        other => Err(Error::CodegenDump(format!("unknown phase {other}"))),
     }
 }
 
@@ -633,7 +805,7 @@ struct UsageRow {
 // the values are identical to the TSV and markdown projections.
 #[derive(Serialize)]
 struct UsageSummaryJson<'a> {
-    format: &'a str,
+    format: &'a FormatTag,
     tier: &'a str,
     definitions: Vec<UsageDefJson<'a>>,
 }
@@ -820,7 +992,7 @@ fn md_cell(s: &str) -> String {
 // document, pretty-printed deterministically.
 fn usage_summary_json(rows: &[UsageRow], tier: &str) -> Result<String, Error> {
     let doc = UsageSummaryJson {
-        format: USAGE_SUMMARY_FORMAT,
+        format: &USAGE_SUMMARY_FORMAT,
         tier,
         definitions: rows
             .iter()
@@ -842,13 +1014,13 @@ fn usage_summary_json(rows: &[UsageRow], tier: &str) -> Result<String, Error> {
 // learns new facts; existing fields never change meaning within a version.
 // v2 added the per-function `summary` block rendered from the interprocedural
 // summary table over verified typed Core.
-const OPTIMIZER_FACTS_SCHEMA: &str = "prism-optimizer-facts-v2";
+const OPTIMIZER_FACTS_SCHEMA: FormatTag = FormatTag::new("prism-optimizer-facts-v2");
 
 // The optimizer fact-sheet envelope behind `dump optimizer-facts`: one row per
 // own (non-prelude, non-synthesized) definition, name-sorted.
 #[derive(Serialize)]
 struct OptimizerFactsDoc {
-    schema: &'static str,
+    schema: FormatTag,
     compiler: &'static str,
     functions: Vec<OptimizerFnFacts>,
 }
@@ -1016,15 +1188,15 @@ fn optimizer_facts(
 // The schema tag heading every checked-HIR fixture. It versions the envelope so
 // a committed fixture is self-describing and a reader can tell which layout it is
 // parsing; bump it on any incompatible shape change.
-const HIR_FIXTURE_SCHEMA: &str = "prism-hir-fixture-v2";
+const HIR_FIXTURE_SCHEMA: FormatTag = FormatTag::new("prism-hir-fixture-v2");
 
 // The versioned schema tags heading the three front-end fixture seams. Each is
 // self-describing and versioned so a committed export tells a
 // reader (and a Prism-written front end) which layout it is parsing; bump on any
 // incompatible shape change. Kept together because they are one family.
-const TC_INPUT_SCHEMA: &str = "prism-tc-input-v1";
-const TC_FACTS_SCHEMA: &str = "prism-tc-facts-v1";
-const ELAB_INPUT_SCHEMA: &str = "prism-elab-input-v1";
+const TC_INPUT_SCHEMA: FormatTag = FormatTag::new("prism-tc-input-v1");
+const TC_FACTS_SCHEMA: FormatTag = FormatTag::new("prism-tc-facts-v1");
+const ELAB_INPUT_SCHEMA: FormatTag = FormatTag::new("prism-elab-input-v1");
 
 // The producing compiler version, stamped into every versioned export envelope so
 // a persisted fixture records which compiler emitted it. One home for the crate
@@ -1093,7 +1265,7 @@ fn core_identity(
 // two runs are byte-identical.
 #[derive(Serialize)]
 struct HirFixture {
-    schema: &'static str,
+    schema: FormatTag,
     decls: Vec<HirDecl>,
     nodes: BTreeMap<u32, HirNode>,
 }
@@ -1427,7 +1599,7 @@ struct TcInputBody {
 // declaration interface.
 #[derive(Serialize)]
 struct TcInput {
-    schema: &'static str,
+    schema: FormatTag,
     compiler: &'static str,
     #[serde(flatten)]
     body: TcInputBody,
@@ -1445,7 +1617,7 @@ struct TcFactsBody {
 // checker facts.
 #[derive(Serialize)]
 struct TcFacts {
-    schema: &'static str,
+    schema: FormatTag,
     compiler: &'static str,
     #[serde(flatten)]
     body: TcFactsBody,
@@ -1455,7 +1627,7 @@ struct TcFacts {
 // and the checker facts a Prism elaborator consumes together.
 #[derive(Serialize)]
 struct ElabInput {
-    schema: &'static str,
+    schema: FormatTag,
     compiler: &'static str,
     input: TcInputBody,
     facts: TcFactsBody,
@@ -1672,7 +1844,7 @@ fn tc_input_body(program: &Program<CorePhase>, checked: &Checked, src: &str) -> 
     }
 }
 
-const RESOLVED_SYNTAX_SCHEMA: &str = "prism-resolved-syntax-v1";
+const RESOLVED_SYNTAX_SCHEMA: FormatTag = FormatTag::new("prism-resolved-syntax-v1");
 
 // The embedded source identity every node span indexes into: the exact
 // user-relative text and its digest. Provenance, not required external state:
@@ -1690,7 +1862,7 @@ struct ResolvedSource {
 // source files or Rust state.
 #[derive(Serialize)]
 struct ResolvedSyntax {
-    schema: &'static str,
+    schema: FormatTag,
     compiler: &'static str,
     source: ResolvedSource,
     functions: Vec<ResolvedFunction>,
@@ -1703,7 +1875,7 @@ struct ResolvedFunction {
     body: ResolvedNode,
 }
 
-const TC_REJECTION_SCHEMA: &str = "prism-tc-rejection-v1";
+const TC_REJECTION_SCHEMA: FormatTag = FormatTag::new("prism-tc-rejection-v1");
 // The two verdicts, spelled the way the artifact spells them.
 const TC_STATUS_ACCEPTED: &str = "accepted";
 const TC_STATUS_REJECTED: &str = "rejected";
@@ -1715,7 +1887,7 @@ const TC_STATUS_REJECTED: &str = "rejected";
 // same accept-or-refuse out, and on a refusal the same code and span.
 #[derive(Serialize)]
 struct TcRejection {
-    schema: &'static str,
+    schema: FormatTag,
     compiler: &'static str,
     status: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]

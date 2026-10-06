@@ -12,13 +12,16 @@ use crate::error::Error;
 // beneath it.
 const IGNORE_FILE: &str = ".prismfmtignore";
 
-// `prism fmt [paths..] [--check]`. With no path, the current directory is
-// walked, as is any directory path. Explicitly named files must parse. Files
-// reached by walking are skipped with a notice if they do not, so one
-// unparseable fixture cannot fail a whole-tree run.
-pub fn fmt_cmd(paths: &[PathBuf], check: bool) -> CmdResult {
+// `prism fmt [paths..] [--check | --stdout]`. With no path, the current
+// directory is walked, as is any directory path. Explicitly named files must
+// parse. Files reached by walking are skipped with a notice if they do not, so
+// one unparseable fixture cannot fail a whole-tree run.
+pub fn fmt_cmd(paths: &[PathBuf], check: bool, stdout: bool) -> CmdResult {
     if paths.len() == 1 && paths[0].as_os_str() == "-" {
         return fmt_stdin();
+    }
+    if stdout {
+        return fmt_stdout(paths);
     }
     let mut targets: Vec<(PathBuf, bool)> = Vec::new();
     if paths.is_empty() {
@@ -110,6 +113,22 @@ fn absolute(path: &Path) -> PathBuf {
         return path.to_path_buf();
     }
     std::env::current_dir().map_or_else(|_| path.to_path_buf(), |cwd| cwd.join(path))
+}
+
+// Print one named file's canonical form without touching it, so the result can
+// be redirected anywhere, the file itself included.
+fn fmt_stdout(paths: &[PathBuf]) -> CmdResult {
+    let [path] = paths else {
+        return Err((
+            Error::ResolveCommand("`--stdout` takes exactly one file".into()),
+            String::new(),
+            String::new(),
+        ));
+    };
+    let src = read(path).map_err(|e| (e, String::new(), file_name(path)))?;
+    let formatted = crate::format(&src).map_err(|e| (e, src.clone(), file_name(path)))?;
+    print!("{formatted}");
+    Ok(())
 }
 
 // Editor format-on-save filter: read source on stdin, write the canonical form

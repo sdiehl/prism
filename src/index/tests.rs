@@ -363,7 +363,7 @@ fn a_local_shadowing_a_global_is_not_an_occurrence() {
     let of = |owner: &str| -> Vec<&str> {
         doc.refs
             .iter()
-            .filter(|r| r.owner == owner)
+            .filter(|r| r.owner == owner && r.local.is_none())
             .map(|r| r.target.as_str())
             .collect()
     };
@@ -387,7 +387,7 @@ fn occurrences_carry_their_owner_and_target() {
     let quad_calls: Vec<&str> = doc
         .refs
         .iter()
-        .filter(|r| r.owner == "quad")
+        .filter(|r| r.owner == "quad" && r.local.is_none())
         .map(|r| r.target.as_str())
         .collect();
     assert_eq!(
@@ -404,6 +404,85 @@ fn occurrences_carry_their_owner_and_target() {
     assert_eq!(users_of_quad, vec!["main"]);
 }
 
+const DEFS: &str = indoc! {"
+    type Shape = Circle(Int) | Square(Int)
+
+    effect Ask
+      ask() : Int
+
+    class Area(a)
+      area : (a) -> Int
+
+    fn side(s : Shape) : Int = match s of
+      Circle(r) => r
+      Square(w) => w
+
+    fn main() : Unit = println(show_int(abs(length(map(side, [Square(2)])))))
+"};
+
+// Each reference's target is found in the definition table by name, at the
+// range where the definition writes it, whether it sits in the user's file, the
+// prelude, or an imported module.
+#[test]
+fn every_reference_finds_its_definition_by_name() {
+    let full = with_prelude(DEFS);
+    let doc = super::occurrences::extract(&full, &default_roots(Path::new(".")))
+        .expect("extract occurrences");
+    let def = |name: &str| {
+        doc.defs
+            .iter()
+            .find(|d| d.name == name)
+            .unwrap_or_else(|| panic!("no definition of `{name}`"))
+    };
+    let user = full.len() - DEFS.len();
+    for name in [
+        "Shape", "Circle", "Square", "Ask", "ask", "Area", "area", "side", "main",
+    ] {
+        let d = def(name);
+        assert!(d.module.is_empty() && d.start >= user, "{d:?}");
+        assert_eq!(&full[d.start..d.end], name);
+    }
+    let map = def("Data.List.map");
+    let text = crate::stdlib::STDLIB
+        .iter()
+        .find_map(|(m, src)| (*m == map.module).then_some(*src))
+        .expect("the module that defines map");
+    assert_eq!(&text[map.start..map.end], "map");
+    let abs = def("abs");
+    assert!(abs.module.is_empty() && abs.end <= user);
+    assert_eq!(&full[abs.start..abs.end], "abs");
+}
+
+const MEMBER_NAMES: &str = indoc! {"
+    effect Cell(s)
+      s() : s
+
+    class Size(size)
+      size : (size) -> Int
+
+    fn main() : Unit = println(\"ok\")
+"};
+
+// A member's definition is the name the parser read, not the first matching
+// word in its declaration: here each member is spelled like a type parameter
+// written before it.
+#[test]
+fn a_member_is_defined_where_its_name_is_written() {
+    let full = with_prelude(MEMBER_NAMES);
+    let doc = super::occurrences::extract(&full, &default_roots(Path::new(".")))
+        .expect("extract occurrences");
+    let user = full.len() - MEMBER_NAMES.len();
+    for (name, line) in [("s", "  s() : s"), ("size", "  size : (size) -> Int")] {
+        let d = doc
+            .defs
+            .iter()
+            .find(|d| d.name == name && d.module.is_empty())
+            .unwrap_or_else(|| panic!("no definition of `{name}`"));
+        let at = user + MEMBER_NAMES.find(line).expect("member line") + 2;
+        assert_eq!((d.start, d.end), (at, at + name.len()), "{name}");
+    }
+}
+
 // The document is an artifact like any other: same source, same bytes.
 #[test]
 fn the_occurrence_document_round_trips_and_is_reproducible() {
@@ -415,7 +494,7 @@ fn the_occurrence_document_round_trips_and_is_reproducible() {
     assert_eq!(json, second.to_json().expect("serialize"));
     assert_eq!(Occurrences::from_json(&json).expect("round trip"), first);
     assert!(Occurrences::from_json(
-        &json.replace(super::OCCURRENCES_FORMAT, "prism-occurrences-v0")
+        &json.replace(super::OCCURRENCES_FORMAT.as_str(), "prism-occurrences-v0")
     )
     .is_err());
 }
@@ -957,7 +1036,7 @@ fn additions_and_removals_carry_only_the_revision_they_have() {
     let json = d.to_json().expect("serialize");
     assert_eq!(super::IndexDiff::from_json(&json).expect("round trip"), d);
     assert!(super::IndexDiff::from_json(
-        &json.replace(super::INDEX_DIFF_FORMAT, "prism-index-diff-v0")
+        &json.replace(super::INDEX_DIFF_FORMAT.as_str(), "prism-index-diff-v0")
     )
     .is_err());
 }
@@ -997,7 +1076,8 @@ fn indexes_committing_to_different_schemes_refuse_to_diff() {
     let mut old = index.clone();
     old.envelope.scheme = "prism-core-hash-v0".into();
     let err = super::diff(&old, &index).expect_err("schemes differ");
-    assert!(err.contains("hash schemes"), "{err}");
+    assert_eq!(err.old, "prism-core-hash-v0");
+    assert!(err.to_string().contains("hash schemes"), "{err}");
 }
 
 // The entry records index their parent's shared tables, so the diff must carry
@@ -1095,14 +1175,24 @@ fn decoding_refuses_a_foreign_format_and_a_dangling_edge_source() {
     assert_eq!(decoded, index);
     assert_eq!(decoded.envelope.format, INDEX_FORMAT);
 
-    let foreign = json.replace(INDEX_FORMAT, "prism-index-v0");
-    assert!(Index::from_json(&foreign)
-        .expect_err("a foreign format is refused")
-        .contains("prism-index-v0"));
+    let foreign = json.replace(INDEX_FORMAT.as_str(), "prism-index-v0");
+    let err = Index::from_json(&foreign).expect_err("a foreign format is refused");
+    assert!(
+        matches!(
+            err,
+            crate::RecordError::Format {
+                record: "index",
+                ..
+            }
+        ),
+        "{err}"
+    );
+    assert!(err.to_string().contains("prism-index-v0"), "{err}");
 
     let dangling = json.replace("\"from\": \"quad\"", "\"from\": \"nowhere\"");
     assert!(Index::from_json(&dangling)
         .expect_err("an edge from an unindexed definition is refused")
+        .to_string()
         .contains("nowhere"));
 }
 
@@ -1401,3 +1491,131 @@ const BINDERS: &str = indoc! {"
     fn sum_from(xs : List(Int)) : Int =
       match xs of { Nil => 0, Cons(y, rest) => y + sum_from(rest) }
 "};
+
+const LOCALS: &str = indoc! {r"
+    effect Ask
+      ask() : Int
+
+    fn shadow(x : Int) : Int =
+      let x = x + 1
+      x * 2
+
+    fn arms(xs : List(Int)) : Int =
+      match xs of
+        [] => 0
+        x :: rest => x + arms(rest)
+
+    fn asking(n : Int) : Int =
+      handle ask() + n with
+        ask() resume k => k(n)
+        return v => v * 2
+
+    fn counting(limit : Int) : Int =
+      var total := 0
+      for i in srange(0, limit) do
+        total += i
+      total
+
+    fn main() =
+      let f = \(y) -> y + shadow(1)
+      println(f(asking(arms([1, 2]) + counting(3))))
+"};
+
+// Each local use names its binder by offset, the binder is a row of its own, and
+// the innermost binding wins: `let x = x + 1` reads the parameter on its right
+// and is what the body's `x` reads.
+#[test]
+fn a_local_use_names_the_binder_in_scope() {
+    let full = with_prelude(LOCALS);
+    let base = full.len() - LOCALS.len();
+    let doc = super::occurrences::extract(&full, &default_roots(Path::new(".")))
+        .expect("extract occurrences");
+    // Every local row of `owner`, as (offset in LOCALS, binder offset in LOCALS).
+    let rows = |owner: &str| -> Vec<(usize, usize)> {
+        doc.refs
+            .iter()
+            .filter(|r| r.module.is_empty() && r.owner == owner)
+            .filter_map(|r| Some((r.start - base, r.local? - base)))
+            .collect()
+    };
+    let at = |needle: &str| LOCALS.find(needle).expect("needle");
+    let param = at("x : Int");
+    let inner = at("x = x");
+    assert_eq!(
+        rows("shadow"),
+        vec![
+            (param, param),
+            (inner, inner),
+            (inner + 4, param),
+            (at("x * 2"), inner)
+        ]
+    );
+    // A handler clause binds its operation's parameters and continuation, and a
+    // `return` clause its value.
+    let k = at("k =>");
+    let v = at("v =>");
+    let asking = rows("asking");
+    assert!(asking.contains(&(at("k(n)"), k)), "{asking:?}");
+    assert!(asking.contains(&(at("v * 2"), v)), "{asking:?}");
+    // An assignment writes the `var` it names.
+    let total = at("total :=");
+    let counting = rows("counting");
+    assert!(counting.contains(&(at("total +="), total)), "{counting:?}");
+    assert!(counting.contains(&(at("total\n\n"), total)), "{counting:?}");
+    let y = at("y)");
+    assert!(rows("main").contains(&(at("y + shadow"), y)));
+    let all = [asking, counting, rows("arms"), rows("main")].concat();
+    for &(_, binder) in &all {
+        assert!(all.contains(&(binder, binder)), "no binder row at {binder}");
+    }
+}
+
+// The binder offsets are found by searching the text a construct spans, so the
+// invariant is pinned over every example: each local row spells its name, and
+// names a binder that is itself a row.
+#[test]
+fn every_row_in_the_examples_spells_its_name() {
+    let mut checked = 0;
+    for entry in std::fs::read_dir("examples").expect("examples") {
+        let path = entry.expect("entry").path();
+        if path.extension().is_none_or(|e| e != "pr") {
+            continue;
+        }
+        let full = with_prelude(&std::fs::read_to_string(&path).expect("read"));
+        let Ok(doc) = super::occurrences::extract(&full, &default_roots(Path::new("examples")))
+        else {
+            continue;
+        };
+        let defined: BTreeSet<&str> = doc.defs.iter().map(|d| d.name.as_str()).collect();
+        for d in doc.defs.iter().filter(|d| d.module.is_empty()) {
+            let written = d.name.rsplit(['.', '@']).next().unwrap_or(&d.name);
+            assert_eq!(&full[d.start..d.end], written, "{}", path.display());
+        }
+        for r in doc.refs.iter().filter(|r| r.local.is_none()) {
+            assert!(
+                !r.target.contains('.') || defined.contains(r.target.as_str()),
+                "{}: no definition of `{}`",
+                path.display(),
+                r.target
+            );
+        }
+        let root = doc.refs.iter().filter(|r| r.module.is_empty());
+        let binders: BTreeSet<usize> = root
+            .clone()
+            .filter(|r| r.local == Some(r.start))
+            .map(|r| r.start)
+            .collect();
+        for r in root {
+            let Some(b) = r.local else { continue };
+            checked += 1;
+            assert_eq!(&full[r.start..r.end], r.target, "{}", path.display());
+            assert_eq!(full.get(b..b + r.target.len()), Some(r.target.as_str()));
+            assert!(
+                binders.contains(&b),
+                "{}: no binder row at {b}",
+                path.display()
+            );
+        }
+    }
+    assert!(checked > 0);
+}

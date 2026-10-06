@@ -16,7 +16,7 @@ fn escape() : List(Int) = build(10, Nil)
 
 fn total(xs : List(Int)) : Int =
   match xs of
-    Nil => 0
-    Cons(h, t) => h + total(t)
+    [] => 0
+    h :: t => h + total(t)
 
 fn main() : Unit ! {IO} = println(total(with_arena(escape)))

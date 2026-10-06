@@ -1794,10 +1794,11 @@ fn driver(
         body: _,
         return_binder,
         return_body,
+        finally_body: None,
         ops,
     } = handle.kind()
     else {
-        return reifier.refuse("a driver for something that is not a handle");
+        return reifier.refuse("a driver for something that is not a handle without cleanup");
     };
     // A nested driver is cells code and runs at the island's row. A top-level
     // one runs at that row joined with what its clauses perform, which is

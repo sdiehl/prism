@@ -562,12 +562,14 @@ impl<P: TypedCorePhase> Checker<'_, P> {
                 body,
                 return_binder,
                 return_body,
+                finally_body,
                 ops,
             } => self.handle(
                 comp,
                 body,
                 return_binder.as_ref(),
                 return_body.as_deref(),
+                finally_body.as_deref(),
                 ops,
             ),
             TypedCompKind::Mask(effects, body) => {
@@ -1277,6 +1279,7 @@ impl<P: TypedCorePhase> Checker<'_, P> {
         body: &TypedComp,
         return_binder: Option<&TypedBinder>,
         return_body: Option<&TypedComp>,
+        finally_body: Option<&TypedComp>,
         handler: &TypedHandler,
     ) {
         self.require_effect_node("handler");
@@ -1332,6 +1335,24 @@ impl<P: TypedCorePhase> Checker<'_, P> {
                 clause_effects = union;
             }
             let _ = index;
+        }
+
+        if let Some(finally_body) = finally_body {
+            // The cleanup clause runs once the handler has been left, outside
+            // every clause binder, and answers unit at the handler's own row.
+            self.at("finally", |this| this.comp(finally_body));
+            self.expect_type(
+                finally_body.sig().result(),
+                &CoreType::Source(Type::Unit),
+                "handler cleanup result",
+            );
+            if let Some(union) = self.union_rows(
+                &clause_effects,
+                finally_body.sig().effects(),
+                "handler cleanup effect union",
+            ) {
+                clause_effects = union;
+            }
         }
 
         let expected_forwarding = self.residual_forwarding(&instantiated_arms);

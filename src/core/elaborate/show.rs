@@ -470,6 +470,7 @@ pub(super) fn polymorphic_print(span: Span) -> Error {
               here, so no printer can render it. Use `show(x)` with a `Show` \
               constraint, or annotate the argument with a concrete type"
             .into(),
+        origin: None,
     })
 }
 
@@ -485,7 +486,11 @@ fn unshowable(ty: Option<&Type>, span: Span) -> Error {
         Some(t) if is_fn(t) => format!("cannot show a function of type {}", t.show()),
         _ => "cannot infer the type to show; annotate the argument, e.g. (e : List(Int))".into(),
     };
-    Error::Type(TypeError::TypeFailure { span, msg })
+    Error::Type(TypeError::TypeFailure {
+        span,
+        msg,
+        origin: None,
+    })
 }
 
 // An injective mangling of a showable type into a `_show_*` function name.

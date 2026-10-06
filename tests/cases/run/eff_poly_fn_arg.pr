@@ -19,8 +19,8 @@ fn tag(x) : (Int, a) ! {Tag} = (fresh(), x)
 
 fn map_eff(f, xs) =
   match xs of
-    Nil => Nil
-    Cons(x, rest) => Cons(f(x), map_eff(f, rest))
+    [] => Nil
+    x :: rest => Cons(f(x), map_eff(f, rest))
 
 fn run_tags(action) =
   let go =

@@ -63,7 +63,7 @@ The rendered message, matching the compiler's `LexError` `Display` strings byte 
 
 ### `lex_raw`
 
-```prism,sig,h-9bf71bf3fab805edd3ecaf4d5f90a149633525ac97c5d555e76a13bd944aab6f
+```prism,sig,h-a5d7178219b69bb66bb4a456342a4f0da95779654f0a64a53a4c734cd8e74e1d
 lex_raw : (String) -> Result(Syntax.Lex.LexRaw, Syntax.Lex.LexError)
 ```
 
@@ -71,7 +71,7 @@ Tokenize `text` into the raw token stream and its interleaved trivia, reproducin
 
 ### `lex_incomplete`
 
-```prism,sig,h-59203fd304a2c6414620cf629c29a3f40daba6142923673476ba7aa2b8546a37
+```prism,sig,h-71277cee56f03477c8636552800dc29b618434696538c6516e629bfc93f55e51
 lex_incomplete : (String) -> Bool
 ```
 

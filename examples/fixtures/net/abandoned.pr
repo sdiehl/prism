@@ -1,0 +1,47 @@
+import Net (Listener, Net, net_close, net_listen, net_local_addr, run_net, listener_address, with_tcp_listener)
+
+effect Abort
+  never abort(String) : String
+
+-- Reports the listener's address by performing an operation that never
+-- resumes, so the bracket around it is abandoned at once.
+fn report(l : Listener) : String ! {Net, Abort} =
+  match listener_address(l) of
+    Ok(a) => abort(a)
+    Err(_) => abort("")
+
+-- Net's own bracket, closing its listener however the body leaves.
+fn bracketed() : String ! {Net, Abort} =
+  match with_tcp_listener("127.0.0.1:0", 1, report) of
+    Ok(_) => ""
+    Err(_) => ""
+
+-- The same bind, closed only when the body returns, so abandoning it holds the
+-- port until the run ends: the control that shows the probe is not vacuous.
+fn unbracketed() : String ! {Net, Abort} =
+  match net_listen("127.0.0.1", 0, 1) of
+    Err(_) => ""
+    Ok(h) =>
+      let a =
+        match net_local_addr(h) of
+          Ok(a) => abort(a)
+          Err(_) => ""
+      let _closed = net_close(h)
+      a
+
+fn abandoned(bind : () -> String ! {Net, Abort}) : String ! {Net} =
+  handle bind() with
+    never abort(a) => a
+    return r => r
+
+-- Binding the same port again succeeds only if the first bind was released.
+fn rebind(label : String, address : String) : Unit ! {Net, IO} =
+  match with_tcp_listener(address, 1, \(_) -> ()) of
+    Ok(_) => println("{label} rebound")
+    Err(e) => println("{label} {show(e)}")
+
+fn exercise() : Unit ! {Net, IO} =
+  rebind("bracket", abandoned(bracketed))
+  rebind("none", abandoned(unbracketed))
+
+fn main() : Unit ! {IO} = run_net(\() -> exercise())

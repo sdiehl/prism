@@ -18,6 +18,7 @@
 // the multi-line arrow, so the boundary is pinned from both sides instead of
 // asserted in a comment.
 
+use prism::DumpPhase;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -27,7 +28,7 @@ use prism::{default_roots, interpret_io_on_with_args, with_prelude, Config, Erro
 
 const FIXTURE_DIR: &str = "tests/fixtures/report";
 const HARNESS: &str = "render_check.pr";
-const PHASE: &str = "syntax-diagnostics";
+const PHASE: DumpPhase = DumpPhase::SyntaxDiagnostics;
 
 // The source name the driver stamps into the location line when reporting on a
 // single file.

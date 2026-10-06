@@ -88,6 +88,11 @@ docs-packages:
 scoreboard *ARGS:
     ./scripts/scoreboard.py {{ ARGS }}
 
+# Count each crate's undocumented public items for the scoreboard.
+[group('generated artifacts')]
+docs-debt:
+    ./scripts/docs_debt.py
+
 # Regenerate the parser baseline; pass `--check` to verify it.
 [group('generated artifacts')]
 parser-baseline *ARGS:
@@ -96,7 +101,7 @@ parser-baseline *ARGS:
 # Check or explicitly accept the frozen parser corpus.
 [group('generated artifacts')]
 parser-corpus COMMAND="check" *ARGS:
-    ./scripts/parser-compaction-corpus.py {{ COMMAND }} --oracle 46886c1fa7064e4809020c1b788b3ee3531d6a63 {{ ARGS }}
+    ./scripts/parser-compaction-corpus.py {{ COMMAND }} {{ ARGS }}
 
 # Regenerate Core and lowering dumps used by the book.
 [group('docs')]

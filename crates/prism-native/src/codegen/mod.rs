@@ -36,3 +36,20 @@ pub use native_kont::{
 
 #[cfg(feature = "mlir")]
 pub use mlir::emit as emit_mlir;
+
+/// Keep a module a backend tool rejected in the temp directory for inspection,
+/// and say where for the error message.
+///
+/// Each failure gets its own file, named by process and a per-process count,
+/// so concurrent failures (parallel shards, or several compiler processes) do
+/// not overwrite one another's evidence.
+#[must_use]
+pub fn keep_failed(ext: &str, bytes: &[u8]) -> String {
+    static COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let kept = std::env::temp_dir().join(format!("prism_failed-{}-{n}.{ext}", std::process::id()));
+    match std::fs::write(&kept, bytes) {
+        Ok(()) => format!("kept at {}", kept.display()),
+        Err(error) => format!("not kept ({}: {error})", kept.display()),
+    }
+}

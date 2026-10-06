@@ -1,95 +1,138 @@
 {
   "schema": "prism-parser-compaction-handwritten-status-v1",
-  "oracle_commit": "46886c1fa7064e4809020c1b788b3ee3531d6a63",
+  "oracle_tree": "cd110efef00d124b955cb6648724887e8e5517f4",
   "corpus_version": 2,
   "subject": "recorded handwritten Prism parser executable",
   "subject_provenance": {
     "compiler_path": "/Users/sdiehl/Git/prism/target/debug/prism",
-    "compiler_blake3": "2ec1c73be1e302a3ce70ae347137c881105e191d992b761b4ceebf2e07cd6118",
+    "compiler_blake3": "ce31cf2c8c0e22954b6a33f1c471e4f60026c80d0adcda1821d125df1b8153c9",
     "harness_executable_path": "/Users/sdiehl/Git/prism/target/parser-compaction-check",
-    "harness_executable_blake3": "098628ebf5b68efc58e4e9d5a57ba5171e7b16d0efa1df571b40347bd4e1fd5a",
+    "harness_executable_blake3": "cd5d32bac4393e502f3d203c51a252856b3b1f14d494e27c8c302eec8d7724bb",
     "harness_source_path": "tests/fixtures/parser/compaction_check.pr",
     "harness_source_blake3": "5011fafe2da58c198d45b5168be436f88a7a8d831f5cf75830044890fc64ed51",
-    "git_head": "bed252bcf630032f4e5ae44f0f15db493d6e1b9a",
-    "git_head_tree": "48ed7792de92480d9b4a97cd8f11cd59e06097a1",
+    "git_head": "dac485f417ac93539addf76502d43af0bfdbd014",
+    "git_head_tree": "70644a538606f49a3ae6c1f62aedf41bf6a3bac8",
     "tracked_worktree_status": [
-      " M scripts/parser-compaction-corpus.py",
+      " M CHANGELOG.md",
+      " M bin/prism.rs",
+      " M docs/src/packages/spectra/docs.plineage",
+      " M docs/src/packages/tc/docs.plineage",
+      " M docs/src/packages/typst/docs.plineage",
+      " M docs/src/packages/tzdb/docs.plineage",
+      " M docs/src/spec.md",
+      " M docs/src/stdlib/index.md",
+      " M docs/src/stdlib/syntax-ast.md",
+      " M docs/src/stdlib/syntax-codec.md",
+      " M docs/src/stdlib/syntax-identity.md",
+      " M docs/src/stdlib/syntax-parse-decl.md",
+      " M docs/src/stdlib/syntax-parse-declclass.md",
+      " M docs/src/stdlib/syntax-parse-declstable.md",
+      " M docs/src/stdlib/syntax-parse-expr.md",
+      " M docs/src/stdlib/syntax-parse.md",
+      " M docs/src/stdlib/teleport.md",
+      " M docs/src/stdlib/test.md",
+      " M lib/std/Syntax/Parse/Decl.pr",
+      " M lib/std/Syntax/Parse/DeclClass.pr",
+      " M lib/std/Teleport.pr",
+      " M lib/std/Test.pr",
+      " M packages/lint/src/RulesTests.pr",
+      " M packages/spectra/docs/docs.plineage",
+      " M packages/spectra/src/SpectraBuild.pr",
+      " M packages/spectra/src/SpectraCli.pr",
+      " M packages/tc/docs/docs.plineage",
+      " M packages/tc/src/Bootstrap.pr",
+      " M packages/tc/src/TcLaws.pr",
+      " M packages/typst/docs/docs.plineage",
+      " M packages/typst/src/Typst.pr",
+      " M packages/typst/src/Typst/Markup.pr",
+      " M packages/tzdb/docs/docs.plineage",
+      " M src/cli/test.rs",
+      " M src/testing/check.rs",
+      " M src/testing/discovery.rs",
+      " M src/testing/events.rs",
+      " M src/testing/manifest.rs",
+      " M src/testing/mod.rs",
+      " M src/testing/report.rs",
+      " M src/testing/runner.rs",
       " M tests/fixtures/parser/compaction/entries/prism-let-pattern.receipt.json",
       " M tests/fixtures/parser/compaction/entries/prism-type.receipt.json",
       " M tests/fixtures/parser/compaction/entries/rust-typesig.receipt.json",
-      " M tests/fixtures/parser/compaction/mutation-seeds.json"
+      " M tests/fixtures/parser/compaction/manifest.json",
+      " M tests/fixtures/prism_test/basic.manifest.bin",
+      " M tests/snapshots/snapshots__stdlib_shape_digests.snap",
+      " M tests/tooling/prism_test.rs"
     ],
-    "worktree_diff_blake3": "740eeb046cd558ede86877dcf0be26d258f7776e4ae62c1b9e41746da41ee5c2",
+    "worktree_diff_blake3": "9b0e866e1699e1adc3464a59ce17af942cb877fda30b89437752443cd486f14c",
     "index_diff_blake3": "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
-    "parser_source_snapshot_blake3": "4497556709ff29943265ba0598a9eb457ae75b86624fb6018de181f5e30e447b",
+    "parser_source_snapshot_blake3": "89e3a8a8b7cc7bcd3a81f18a73fded0f60f62cf030e01072a037c36d17274820",
     "parser_sources": [
       {
         "path": "lib/std/Syntax/Cursor.pr",
-        "blake3": "297e8901e9caf25a27529a020d36b3c4ccf69bcb9356d2a3a515a56ef48138c4"
+        "blake3": "c85afa866cdcf906dd3211d43edf81ba33bebabd4c789ca2d0a79825cfb227a7"
       },
       {
         "path": "lib/std/Syntax/Layout.pr",
-        "blake3": "6983f788c5af0f7f3294a77c4cefe10d336cf65e547a7f036aa1619b3aebde5a"
+        "blake3": "76cda4f996e2f6cde26470aebaae348ee46a7d6276b949041e15c67616eba663"
       },
       {
         "path": "lib/std/Syntax/Lex.pr",
-        "blake3": "9e51013c3284a0acb579c2254a6fee9fefc385a0f001e6178cba58b40eee4d9e"
+        "blake3": "1c9fc9e1688b471f97fb0075c1342ccbc29e768d32d527beae0e1fec0153a4e7"
       },
       {
         "path": "lib/std/Syntax/Parse/Build.pr",
-        "blake3": "7d0357a7e6c77238ac2a06652096f2611658c27615251e8b1c848211e0a6f39a"
+        "blake3": "68292a455e17ed85aa567835f5955423a9bb8af516f0f5fb762982593f15e238"
       },
       {
         "path": "lib/std/Syntax/Parse/Decl.pr",
-        "blake3": "ce99b4f035b82eda30b434bccfa7fd445353d2a4578fd8c52c3ecd05e8255cca"
+        "blake3": "c9bff94a099f94598b41ac4dcf5e26c82d920d575e51017deff444cac276a2b1"
       },
       {
         "path": "lib/std/Syntax/Parse/DeclClass.pr",
-        "blake3": "09a078fe76ab12b1fdf5f163da4a9b01eb7fe135aa947acbf3442fb0c9ceb64a"
+        "blake3": "7a1698dea0ed91ca2bd46331c5ca72253837c3029fcfbac2d1b30428fafd7bb8"
       },
       {
         "path": "lib/std/Syntax/Parse/DeclStable.pr",
-        "blake3": "435be130f63bc1c27da057eb732408f65276e4a77c272a693c9ff9ac9b4de0db"
+        "blake3": "b05202496af86fec067c00dc5a8dc89e9b7b1ad2795c6cc4fde85dd8b6b0c9c6"
       },
       {
         "path": "lib/std/Syntax/Parse/Expr.pr",
-        "blake3": "221df6febf7d14b2996e3d50fb47c4270d1a4e4e2305fd5201d81f0e9f05b507"
+        "blake3": "c863bf9c5c604fb2adcd3d1850d87b2dbd07ffb8b0e40bf6874c67613b023cae"
       },
       {
         "path": "lib/std/Syntax/Parse/GeneratedControl.pr",
-        "blake3": "20e631719b7fb19d2941efb70c27e9a2d9b14ca6cc73454e723970a5c424b1c4"
+        "blake3": "279ebbce06d0c60375b54209e8f60ea91c40313061cce6d0d89cd0cc3a7b84f9"
       },
       {
         "path": "lib/std/Syntax/Parse/GeneratedPattern.pr",
-        "blake3": "dd30af2f790490d6527d56c60f5132fa035888135214713c992a50e8ef73f2db"
+        "blake3": "a9f5d24f8c555a7a07c8c28909ee723977230e04d3aa122dd60214683f088c25"
       },
       {
         "path": "lib/std/Syntax/Parse/GeneratedType.pr",
-        "blake3": "b24eb2be5dcde05354db783fd9ddff3436b8bed3c59f5309580d3090f0a128b3"
+        "blake3": "a2fc410fe93723ffe2982ffdeaece11208aa09df9eb1105a824718c8749ef053"
       },
       {
         "path": "lib/std/Syntax/Parse/Pattern.pr",
-        "blake3": "7651825c7e84c9007ddffbbe893ba847ef5acc329cc4253bf5704c97ce9d8f95"
+        "blake3": "de60c030b44a3028cc5418489f8bf9003820313e349df300dad6c7c33bcae5f2"
       },
       {
         "path": "lib/std/Syntax/Parse/PatternSemantics.pr",
-        "blake3": "7a1580bd99d0bc37eb55999fc52822188234494a532ea4a19a769470148ab2c5"
+        "blake3": "44752236cb6945300e0f6fd2ea83b1e7372dd707260deb8874bdf62f59bfb43f"
       },
       {
         "path": "lib/std/Syntax/Parse/Support.pr",
-        "blake3": "ff1987d3b782fd1e9d60a424b1dc512856294982df82fa34692f7b01c91aed50"
+        "blake3": "771045869db265eca41529e5bdc2618a7fb76ce7205922a346c9702a4a53664e"
       },
       {
         "path": "lib/std/Syntax/Parse/Type.pr",
-        "blake3": "db7ae6151c8a48fb07af285bc2a5e36de9c829e8ac7cb85ff53b738023aced98"
+        "blake3": "c743073c3ab59305ca228fdef68eed43340167d4ca21102a6583860c5050d867"
       },
       {
         "path": "lib/std/Syntax/Parse/TypeSemantics.pr",
-        "blake3": "11a703c9f38fdad35e13912824517544150400400ae3bfa6489f3832bdee08f0"
+        "blake3": "a8adf1d081d2764206448c87099c777099c8ebab262d562eaa85a746df17d803"
       },
       {
         "path": "lib/std/Syntax/Parse.pr",
-        "blake3": "01c7271d6652fac5bba77e0e83bd3b95dbfda4837425dc6c935c4a74dd1ddae9"
+        "blake3": "65588088731afbefe52f61c2e780da4c5145a3cd9ff813fc39b2cf34b2eb54c3"
       }
     ],
     "note": "The executable digests identify the actual comparison subject. Git fields describe the concurrent worktree when replay ran; they do not claim that the compiler binary was rebuilt after every dirty-tree edit."

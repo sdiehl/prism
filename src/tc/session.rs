@@ -40,7 +40,11 @@ impl TcErr {
     // Attach a span: mismatches become located errors, ICEs pass through.
     pub(super) fn at(self, span: Span) -> TypeError {
         match self {
-            Self::Fail(msg) | Self::Keep(msg) => TypeError::TypeFailure { span, msg },
+            Self::Fail(msg) | Self::Keep(msg) => TypeError::TypeFailure {
+                span,
+                msg,
+                origin: None,
+            },
             Self::Ice(msg) => TypeError::InternalInvariant { msg },
         }
     }
@@ -59,10 +63,15 @@ impl TcErr {
         match self {
             Self::Fail(_) => fallback,
             Self::Keep(msg) => match fallback.span() {
-                Some(&span) => TypeError::TypeFailure { span, msg },
+                Some(&span) => TypeError::TypeFailure {
+                    span,
+                    msg,
+                    origin: None,
+                },
                 None => TypeError::TypeFailure {
                     span: Span::default(),
                     msg,
+                    origin: None,
                 },
             },
             Self::Ice(msg) => TypeError::InternalInvariant { msg },
@@ -145,6 +154,12 @@ pub(super) struct Tc<'a> {
     // span inside it renders under one scheme instead of canonicalizing afresh
     // per node and calling the same variable `a` in one place and `c` in another.
     pub(super) decl_renames: Option<Renames>,
+    // The row variables a caller can see in the declaration being flushed: those
+    // its parameters and result mention, not its own latent row. A span whose
+    // label-free row tail is none of these and absent from the span's own type
+    // renders as the type alone, since that row only says the node fits any
+    // context. `None` (an instance method) keeps every row.
+    pub(super) decl_rows: Option<BTreeSet<String>>,
     // Hold each member's spans until the whole recursion group is solved. A later
     // sibling may still constrain an earlier member's parameters.
     pub(super) deferred_spans: std::collections::VecDeque<DeferredSpans>,
@@ -202,6 +217,9 @@ pub(super) struct Tc<'a> {
     // operation tunnels past that one handler and stays in the residual row
     // (the handler it skips is the innermost enclosing one, by construction).
     pub(super) handler_stack: Vec<HandlerFrame>,
+    // Residual rows of handlers that chose their body's tail, each waiting to
+    // join the scope it left; see `settle_residuals`.
+    pub(super) pending_residuals: Vec<PendingResidual>,
     // Operation-local effect uses for the expression currently being checked.
     // Public rows remain effect-granular; this private summary lets adjacent
     // partial handlers cancel complementary, syntactically known operations.
@@ -353,6 +371,9 @@ pub(super) struct SelfRef {
     pub(super) name: String,
     pub(super) self_ty: Type,
     pub(super) constraints: Vec<(String, Type)>,
+    // Row existentials a signature names. A handler never owns one: the
+    // signature already says which rows the action and the caller share.
+    pub(super) signature_rows: BTreeSet<u32>,
 }
 
 // Open row existential tail plus the concrete labels in its fixed prefix.
@@ -368,6 +389,20 @@ pub(super) struct RowScope {
     // mutable accumulator above: an explicitly pure context stays `{}` even
     // while the accumulator is represented by a fresh row existential.
     pub(super) expected: EffRow,
+    // The tails of every scope this one is nested in, outermost first. A
+    // residual effect leaving this scope flows into these, so a handler must
+    // not choose a solution for any of them.
+    pub(super) outer: Vec<u32>,
+}
+
+// A handler residual held back from its enclosing scope until the declaration's
+// body is checked, with that scope's tail, its fixed prefix, and the handler's
+// span for the report.
+pub(super) struct PendingResidual {
+    pub(super) row: EffRow,
+    pub(super) tail: u32,
+    pub(super) prefix: Vec<Label>,
+    pub(super) span: Span,
 }
 
 /// The recorded principal-body-effect witness of one function declaration: the

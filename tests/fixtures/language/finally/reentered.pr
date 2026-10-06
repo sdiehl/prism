@@ -1,0 +1,13 @@
+effect Ask
+  ask() : Int
+
+fn go() : Int ! {Ask, IO} =
+  handle ask() + 1 with
+    return x => x
+    finally => println("cleanup")
+
+fn main() : Unit ! {IO} =
+  println(handle go() with {
+    ask() resume k => k(1) + k(2),
+    return r => r
+  })

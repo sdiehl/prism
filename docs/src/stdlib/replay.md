@@ -10,8 +10,8 @@ Record/replay handlers for the capability effects.
 
 ### `record`
 
-```prism,sig,h-fdb01855ca624aca0c20cb2852fef4c666bfd9b33a8500acebe7b8e747e7637f
-record : forall e0 a. ((Unit) -> a ! {IO, e0}) -> (a, List(Replay@TraceEntry)) ! {IO, e0}
+```prism,sig,h-e121dff7c59bb9ed6d24bc95d49dac69d1892e4a9b0ed3ee02c66501f958a18b
+record : forall e0 a. ((Unit) -> a ! {Console, Env, FileSystem, IO, Random, e0}) -> (a, List(Replay@TraceEntry)) ! {IO, e0}
 ```
 
 Run `action` against the real world, logging every capability observation (console, file, random, and environment reads) into a trace. Returns `(result, trace)`; feed the trace to `replay` to reproduce the run without IO.
@@ -22,8 +22,8 @@ record(\(u) -> rng_rand() + rng_rand())
 
 ### `replay`
 
-```prism,sig,h-8c59b7f3b024cbb18f2a5a9f4fb9a350d45b5f706e24eddd0d70be2ee11405f7
-replay : forall e0 a. (List(Replay@TraceEntry), (Unit) -> a ! {Fail, e0}) -> a ! {Fail, e0}
+```prism,sig,h-3570b08dd4b5091a20555294e1631fc58b72b106fba928ff759bd53339703c50
+replay : forall e0 a. (List(Replay@TraceEntry), (Unit) -> a ! {Console, Env, Fail, FileSystem, Output, Random, e0}) -> a ! {Fail, e0}
 ```
 
 Re-run `action` against a recorded `trace`, performing no real IO: each capability read is served from the trace and output is dropped, reproducing the original result. Fails if the trace does not match the action.
@@ -66,8 +66,8 @@ I2:42S3:abc
 
 ### `durable`
 
-```prism,sig,h-24f9169753777c8000d359639f50ed172d8eec22b14058ef0d9f0cbc5226a0ea
-durable : forall e0 a. (String, (Unit) -> a ! {Fail, IO, e0}) -> a ! {Fail, IO, e0}
+```prism,sig,h-914dd717405813273b7c4c9daa0815c55b0bf00ddcd733ec1a2d0e9539ab1bf8
+durable : forall e0 a. (String, (Unit) -> a ! {Console, Env, Fail, FileSystem, IO, Output, Random, e0}) -> a ! {Fail, IO, e0}
 ```
 
 Durable record/replay against a persisted log at `path`: replay the recorded prefix with no real IO, then perform each new observation for real, appending a frame per observation so an interrupted run resumes where it left off, exactly once at the crash boundary.

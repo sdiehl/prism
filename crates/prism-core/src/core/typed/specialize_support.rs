@@ -326,9 +326,13 @@ impl Rewrite for TermSubstitution<'_> {
                 body,
                 return_binder,
                 return_body,
+                finally_body,
                 ops,
             } => {
                 let body = Box::new(self.comp(body, substitution));
+                let finally_body = finally_body
+                    .as_ref()
+                    .map(|body| Box::new(self.comp(body, substitution)));
                 let (return_binder, return_body) = match return_binder {
                     Some(binder) => {
                         let (renames, next) =
@@ -377,6 +381,7 @@ impl Rewrite for TermSubstitution<'_> {
                         body,
                         return_binder,
                         return_body,
+                        finally_body,
                         ops: TypedHandler {
                             arms,
                             forwarded: ops.forwarded.clone(),
@@ -563,9 +568,13 @@ impl Rewrite for Freshen<'_> {
                 body,
                 return_binder,
                 return_body,
+                finally_body,
                 ops,
             } => {
                 let body = Box::new(self.comp(body, renames));
+                let finally_body = finally_body
+                    .as_ref()
+                    .map(|body| Box::new(self.comp(body, renames)));
                 let (return_binder, return_body) = match return_binder {
                     Some(binder) => {
                         let mut next = renames.clone();
@@ -607,6 +616,7 @@ impl Rewrite for Freshen<'_> {
                         body,
                         return_binder,
                         return_body,
+                        finally_body,
                         ops: TypedHandler {
                             arms,
                             forwarded: ops.forwarded.clone(),
@@ -716,6 +726,7 @@ mod tests {
                         vec![(TypedPattern::Var(binder("pattern")), ret(var("pattern")))],
                     ),
                 ))),
+                finally_body: None,
                 ops: TypedHandler {
                     arms: vec![TypedHandleOp {
                         name: sym("ask"),
@@ -1155,6 +1166,7 @@ mod tests {
                 body: Box::new(body),
                 return_binder: Some(TypedBinder::new(sym("returned"), variable_type.clone())),
                 return_body: Some(Box::new(ret(var("returned")))),
+                finally_body: None,
                 ops: TypedHandler {
                     arms: vec![TypedHandleOp {
                         name: sym("emit"),

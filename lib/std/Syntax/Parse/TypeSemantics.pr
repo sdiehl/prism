@@ -37,12 +37,12 @@ fn validate_usage_facts(
   accepted : List(String)
 ) : Result(List(String), String) =
   match facts of
-    Nil =>
+    [] =>
       if is_nil(accepted) then
         Err("a usage row cannot be empty")
       else
         Ok(accepted)
-    Cons(fact, rest) =>
+    fact :: rest =>
       if not(known_usage_fact(fact)) then
         Err("unknown usage fact `{fact}`")
       elif has_usage_fact(fact, accepted) then
@@ -89,8 +89,8 @@ fn conflicting_usage_fact(
   accepted : List(String)
 ) : Option(String) =
   match accepted of
-    Nil => None
-    Cons(prior, rest) =>
+    [] => None
+    prior :: rest =>
       if (usage_axis_exclusive(fact) && usage_axis(prior) == usage_axis(fact)) then
         Some(prior)
       else
@@ -98,8 +98,8 @@ fn conflicting_usage_fact(
 
 fn has_usage_fact(fact : String, facts : List(String)) : Bool =
   match facts of
-    Nil => false
-    Cons(x, rest) =>
+    [] => false
+    x :: rest =>
       if x == fact then
         true
       else
@@ -107,8 +107,8 @@ fn has_usage_fact(fact : String, facts : List(String)) : Bool =
 
 fn insert_usage_fact(fact : String, facts : List(String)) : List(String) =
   match facts of
-    Nil => [fact]
-    Cons(x, rest) =>
+    [] => [fact]
+    x :: rest =>
       if fact < x then
         Cons(fact, facts)
       else

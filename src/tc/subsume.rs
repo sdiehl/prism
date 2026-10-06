@@ -1,7 +1,12 @@
 use std::collections::BTreeSet;
+use std::mem;
+
+use marginalia::Span;
 
 use super::context::ROW_ESCAPES_SCOPE;
+use super::session::{PendingResidual, RowScope};
 use super::{Entry, Tc, TcErr};
+use crate::error::TypeError;
 use crate::names::{self, ScopedEscape};
 use crate::sym::Sym;
 use crate::types::coeffect::{CoeffectFact, CoeffectRow};
@@ -201,7 +206,7 @@ impl Tc<'_> {
                 let b1 = b0.subst_var(*n, &Type::Var(sk));
                 self.ctx.push(Entry::Uni(sk));
                 self.subtype(a, &b1)?;
-                self.drop_uni(sk);
+                self.drop_uni(sk)?;
                 Ok(())
             }
             (Type::RowForall(n, a0), _) => {
@@ -214,7 +219,7 @@ impl Tc<'_> {
                 let b1 = b0.subst_row_var(*n, &EffRow::Var(sk));
                 self.ctx.push(Entry::RowUni(sk));
                 self.subtype(a, &b1)?;
-                self.drop_row_uni(sk);
+                self.drop_row_uni(sk)?;
                 Ok(())
             }
             // A `Row`-kinded argument position: unify the carried effect rows.
@@ -403,7 +408,7 @@ impl Tc<'_> {
                 self.ctx.push(Entry::Uni(sk));
                 let body2 = self.apply(&body);
                 self.inst(ex, &body2, true)?;
-                self.drop_uni(sk);
+                self.drop_uni(sk)?;
                 Ok(())
             }
             Type::Forall(n, body) => {
@@ -421,7 +426,7 @@ impl Tc<'_> {
                 self.ctx.push(Entry::RowUni(sk));
                 let body2 = self.apply(&body);
                 self.inst(ex, &body2, true)?;
-                self.drop_row_uni(sk);
+                self.drop_row_uni(sk)?;
                 Ok(())
             }
             Type::RowForall(n, body) => {
@@ -516,7 +521,7 @@ impl Tc<'_> {
     // match by effect name, then their instantiation arguments must unify, so
     // `Emit(Int)` never silently passes for `Emit(String)`. An existential
     // tail is solved to `label | fresh`, returning the fresh tail.
-    fn rewrite_row(&mut self, row: &EffRow, label: &Label) -> Result<EffRow, TcErr> {
+    pub(super) fn rewrite_row(&mut self, row: &EffRow, label: &Label) -> Result<EffRow, TcErr> {
         match row {
             EffRow::Extend(l, rest) if l.name == label.name => {
                 if l.args.len() != label.args.len() {
@@ -647,6 +652,63 @@ impl Tc<'_> {
         let live = resid.label_names();
         self.absorb_row(&resid)?;
         Ok(live)
+    }
+
+    // `discharge_row` for a handler that chose its body's tail: the residual is
+    // held back rather than absorbed now. Absorbing it here would equate it with
+    // the enclosing ambient, and every effect that ambient gains afterwards (the
+    // handler's own clauses re-performing the handled effect, as `smap`'s
+    // `emit(f(x))` does) would land in the action's row as a second copy.
+    pub(super) fn discharge_row_deferred(
+        &mut self,
+        body_row: u32,
+        handled: &BTreeSet<Sym>,
+        span: Span,
+    ) -> (BTreeSet<Sym>, EffRow) {
+        let row = self.apply_row(&EffRow::Exist(body_row));
+        let resid = without_labels_once(&row, handled);
+        let live = resid.label_names();
+        if let Some(scope) = &self.cur_row {
+            self.pending_residuals.push(PendingResidual {
+                row: resid.clone(),
+                tail: scope.tail,
+                prefix: scope.prefix.clone(),
+                span,
+            });
+        }
+        (live, resid)
+    }
+
+    // Join each held residual to the scope it left, once the declaration's body
+    // has put everything it performs into that scope. A residual that is still a
+    // bare tail joins the scope's open tail, after the labels the scope already
+    // carries, which is what an annotated `! {X | e}` gives it. One that gained
+    // labels meanwhile is absorbed as any other row is.
+    pub(super) fn settle_residuals(&mut self) -> Result<(), TypeError> {
+        for pending in mem::take(&mut self.pending_residuals) {
+            let row = self.apply_row(&pending.row);
+            let ambient = self.apply_row(&EffRow::Exist(pending.tail));
+            let joined = match (&row, ambient.tail()) {
+                (EffRow::Exist(b), tail) if EffRow::Exist(*b) == *tail => Ok(()),
+                (EffRow::Exist(_), tail) => {
+                    let tail = tail.clone();
+                    self.unify_row(&row, &tail)
+                }
+                _ => {
+                    let saved = self.cur_row.replace(RowScope {
+                        tail: pending.tail,
+                        prefix: pending.prefix,
+                        expected: EffRow::Exist(pending.tail),
+                        outer: Vec::new(),
+                    });
+                    let absorbed = self.absorb_row(&row);
+                    self.cur_row = saved;
+                    absorbed
+                }
+            };
+            joined.map_err(|e| e.at(pending.span))?;
+        }
+        Ok(())
     }
 
     // A row is missing `label`. When `label` is a scoped effect that leaked out
@@ -841,6 +903,7 @@ mod tests {
             tooltip_row_scaffolds: BTreeSet::new(),
             pending: Vec::new(),
             decl_renames: None,
+            decl_rows: None,
             deferred_spans: std::collections::VecDeque::new(),
             hole_sites: Vec::new(),
             holes: Vec::new(),
@@ -859,6 +922,7 @@ mod tests {
             row_ctx: Vec::new(),
             cur_row: None,
             handler_stack: Vec::new(),
+            pending_residuals: Vec::new(),
             operation_uses: super::super::OperationUses::default(),
             precise_calls: BTreeMap::new(),
             handler_nodes: BTreeSet::new(),

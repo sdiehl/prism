@@ -358,8 +358,8 @@ fn declared_type_refs(sources: &Sources<'_>) -> BTreeMap<String, BTreeSet<String
         }
     }
     for c in &program.classes {
-        for (_, t) in &c.methods {
-            add(&c.name, t);
+        for m in &c.methods {
+            add(&c.name, &m.ty);
         }
     }
     for e in &program.effects {

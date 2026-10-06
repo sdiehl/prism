@@ -18,16 +18,19 @@ Program {
                     name: "Red",
                     args: [],
                     fields: None,
+                    span: 13..16,
                 },
                 Ctor {
                     name: "Green",
                     args: [],
                     fields: None,
+                    span: 19..24,
                 },
                 Ctor {
                     name: "Blue",
                     args: [],
                     fields: None,
+                    span: 27..31,
                 },
             ],
             deriving: [],
@@ -44,9 +47,9 @@ Program {
             param: "a",
             supers: [],
             methods: [
-                (
-                    "eq2",
-                    Fun(
+                ClassMethod {
+                    name: "eq2",
+                    ty: Fun(
                         [
                             Var(
                                 "a",
@@ -58,7 +61,8 @@ Program {
                         Empty,
                         Bool,
                     ),
-                ),
+                    span: 48..51,
+                },
             ],
             span: 33..68,
         },

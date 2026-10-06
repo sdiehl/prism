@@ -190,12 +190,12 @@ fn encode_class(c: &ClassDecl) -> String {
     }
     e.out.push('>');
     // Methods are addressed by name: sort, then encode (name, signature).
-    let mut methods: Vec<&(String, Ty)> = c.methods.iter().collect();
-    methods.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut methods: Vec<_> = c.methods.iter().collect();
+    methods.sort_by(|a, b| a.name.cmp(&b.name));
     e.out.push('{');
-    for (name, ty) in methods {
-        e.tok(name);
-        e.ty(ty);
+    for m in methods {
+        e.tok(&m.name);
+        e.ty(&m.ty);
     }
     e.out.push('}');
     e.out
@@ -437,6 +437,7 @@ mod tests {
             name: name.into(),
             args,
             fields: None,
+            span: Span::default(),
         }
     }
 

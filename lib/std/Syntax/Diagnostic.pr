@@ -40,5 +40,5 @@ pub fn diagnostics_schema() : String = "prism-syntax-diagnostics-v1"
 -- | Whether the document accepted its source (no diagnostics).
 pub fn doc_accepted(d : DiagnosticsDoc) : Bool =
   match d.diagnostics of
-    Nil => true
-    Cons(_, _) => false
+    [] => true
+    _ :: _ => false

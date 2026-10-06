@@ -38,7 +38,7 @@ fn indexed() : Int ! {Fail} =
   xs[1] += 1
   xs[2] := 7
   match xs of
-    Cons(a, Cons(b, Cons(c, Nil))) => a + b + c
+    [a, b, c] => a + b + c
     _ => -1
 
 -- Reified host: anchored literals sit inline, with no annotation anywhere.

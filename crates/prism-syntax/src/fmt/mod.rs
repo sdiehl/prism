@@ -81,10 +81,15 @@ const fn indent_col(indent: usize) -> usize {
     indent * INDENT.len()
 }
 
-// The width oracle: does `s` fit on one line when its first character lands at
-// column `col`? Every inline/break decision in the printers goes through here.
+// The width oracle: does `s` fit when its first character lands at column
+// `col`? Every inline/break decision in the printers goes through here. A
+// rendering that already spans lines (a raw multiline literal, reprinted as
+// written) is measured line by line: only its first line starts at `col`, and
+// each later line starts at column zero of its own.
 fn fits_at(col: usize, s: &str) -> bool {
-    col + text_width(s) <= LINE_WIDTH
+    let mut lines = s.split('\n');
+    let first = lines.next().unwrap_or_default();
+    col + text_width(first) <= LINE_WIDTH && lines.all(|l| text_width(l) <= LINE_WIDTH)
 }
 
 // Layout mode prints offside blocks. Flat is for bracketed contexts where
@@ -109,6 +114,21 @@ pub(super) struct Fmt<'a> {
 /// # Errors
 /// Fails when the source does not parse.
 pub fn format(src: &str) -> Result<String, Error> {
+    let ParseResult { program, trivia } = parse(src)?;
+    let cx = Fmt {
+        source: src,
+        trivia: &trivia,
+    };
+    let items = cx.items(&program);
+    cx.hoisted_imports(&program, &items).map_or_else(
+        || Ok(cx.fmt_program_items(&program, items)),
+        |hoisted| format_hoisted(&hoisted),
+    )
+}
+
+// The rewrite moves whole lines and nothing else, so it parses, and its imports
+// lead, so formatting it does not hoist again.
+fn format_hoisted(src: &str) -> Result<String, Error> {
     let ParseResult { program, trivia } = parse(src)?;
     let cx = Fmt {
         source: src,

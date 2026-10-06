@@ -39,8 +39,8 @@ fn list_prefix(xs : List(Int), k : Int) : List(Int) =
     Nil
   else
     match xs of
-      Nil => Nil
-      Cons(h, t) => Cons(h, list_prefix(t, k - 1))
+      [] => Nil
+      h :: t => Cons(h, list_prefix(t, k - 1))
 
 fn bytes_prefix(bs : Bytes, k : Int) : Bytes =
   bytes_of_list(list_prefix(bytes_to_list(bs), k))

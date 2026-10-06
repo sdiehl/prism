@@ -237,7 +237,7 @@ fn optimizer_configurations_are_engaged() {
         if !runnable_corpus_source(&full) {
             continue;
         }
-        for phase in ["core", "lowered"] {
+        for phase in [prism::DumpPhase::Core, prism::DumpPhase::Lowered] {
             let dumped = variants
                 .iter()
                 .map(|variant| prism::dump_on(phase, &full, &roots, &variant.config))

@@ -19,8 +19,8 @@ fn contained() : Int = weigh(label(7, Nil))
 
 fn weigh(xs : List(Tagged)) : Int =
   match xs of
-    Nil => 0
-    Cons(t, rest) =>
+    [] => 0
+    t :: rest =>
       match t of
         Tagged(s, n) => str_len(s) + n + weigh(rest)
 

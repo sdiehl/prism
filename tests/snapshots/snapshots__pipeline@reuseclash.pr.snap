@@ -21,6 +21,7 @@ Program {
                         Int,
                     ],
                     fields: None,
+                    span: 146..150,
                 },
             ],
             deriving: [],

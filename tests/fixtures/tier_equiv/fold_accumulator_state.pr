@@ -1,0 +1,31 @@
+-- A fold whose accumulator lives in a state handler. Each element's weight is
+-- computed once before it is added; a tier that replays a step recomputes the
+-- weight and prints it again.
+effect Tally
+  get() : Int
+  put(Int) : Unit
+
+fn shared(n : Int) : Int ! {IO} =
+  println("shared {n}")
+  n * n
+
+fn add(x : Int) : Unit ! {Tally, IO} =
+  let w = shared(x)
+  put(get() + w)
+
+fn fold(xs : List(Int)) : Int ! {Tally, IO} =
+  match xs of
+    [] => get()
+    x :: rest =>
+      add(x)
+      fold(rest)
+
+fn run_fold(xs : List(Int)) : Int ! {IO} =
+  let f =
+    handle fold(xs) with
+      get() resume k => \(s) -> k(s)(s)
+      put(s2) resume k => \(_s) -> k(())(s2)
+      return r => \(_s) -> r
+  f(0)
+
+fn main() = println(run_fold([1, 2, 3]))

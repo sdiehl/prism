@@ -205,8 +205,8 @@ fn collect_pattern_clauses(
   makefn : Option(Sp(Expr))
 ) : Checked((Option(Sp(Expr)), Option(Sp(Expr)))) =
   match clauses of
-    Nil => CheckOk((viewfn, makefn))
-    Cons(clause, rest) =>
+    [] => CheckOk((viewfn, makefn))
+    clause :: rest =>
       let want =
         if clause.word == "view" then
           1

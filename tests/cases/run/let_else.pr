@@ -16,7 +16,7 @@ fn area(s) =
   w * h
 
 fn first_of(xs) =
-  let Cons(x, _) = xs else -1
+  let x :: _ = xs else -1
   x
 
 fn main() =

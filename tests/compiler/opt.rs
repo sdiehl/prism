@@ -3,6 +3,7 @@
 // Behavior is checked separately by the parity oracle; this checks that the
 // optimization happened at all rather than silently degrading into a no-op.
 
+use prism::DumpPhase;
 use std::path::Path;
 
 use prism::core::{lint_core, pass_fingerprint, CorePass, OptLevel, PassSpec, PassStage};
@@ -10,7 +11,7 @@ use prism::{default_roots, dump, dump_on, with_prelude, Config, DynFlags};
 use prism_core::core::opt::OptimizationPlan;
 
 fn core(src: &str) -> String {
-    dump("core", &with_prelude(src)).expect("core dump")
+    dump(DumpPhase::Core, &with_prelude(src)).expect("core dump")
 }
 
 #[test]
@@ -150,7 +151,7 @@ fn specialization_is_idempotent() {
         cfg.set_optimization_plan(OptimizationPlan::explicit(
             PassSpec::parse(spec).expect("valid spec"),
         ));
-        dump_on("core", &full, &roots, &cfg).expect("core dump")
+        dump_on(DumpPhase::Core, &full, &roots, &cfg).expect("core dump")
     };
     let once = dump_with("pre:EraseNewtypes,Specialize");
     let twice = dump_with("pre:EraseNewtypes,Specialize,Specialize");

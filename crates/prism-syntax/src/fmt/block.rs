@@ -21,6 +21,7 @@ pub(super) const fn arm_body(arm: &HandlerArm) -> &S<Expr> {
     match arm {
         HandlerArm::Return(_, b)
         | HandlerArm::Op(_, _, _, b)
+        | HandlerArm::Finally(b)
         | HandlerArm::Sugar(
             SugarArm::Once(_, _, b) | SugarArm::Never(_, _, b) | SugarArm::Val(_, b),
         ) => b,
@@ -33,6 +34,7 @@ pub(super) const fn arm_body(arm: &HandlerArm) -> &S<Expr> {
 pub(super) fn arm_head(arm: &HandlerArm, ind: &str) -> String {
     match arm {
         HandlerArm::Return(x, _) => format!("{ind}{} {x} {}", kw::RETURN, kw::FAT_ARROW),
+        HandlerArm::Finally(_) => format!("{ind}{} {}", kw::FINALLY, kw::FAT_ARROW),
         HandlerArm::Op(name, params, k, _) => {
             // The continuation prints after `resume`, in its visibly special
             // position, rather than as a trailing parameter.
@@ -355,7 +357,7 @@ impl Fmt<'_> {
         // from the gap between the previous arm's body and this arm's body. The
         // first arm reaches back to the block opener.
         let mut prev = from;
-        let mut arm_strs: Vec<String> = Vec::with_capacity(arms.len());
+        let mut arm_strs: Vec<(bool, String)> = Vec::with_capacity(arms.len());
         for arm in arms {
             let body = arm_body(arm);
             let head = arm_head(arm, &ind);
@@ -364,9 +366,19 @@ impl Fmt<'_> {
                 "{head}{}",
                 self.fmt_arm_body(body, indent, text_width(&head), body.span.start)
             );
-            arm_strs.push(format!("{lead}{rendered}"));
+            arm_strs.push((
+                matches!(arm, HandlerArm::Finally(_)),
+                format!("{lead}{rendered}"),
+            ));
             prev = body.span.end;
         }
-        arm_strs.join("\n")
+        // The parser accepts the cleanup clause anywhere among the arms; it
+        // prints last, with its comments, so a handler has one canonical form.
+        arm_strs.sort_by_key(|(cleanup, _)| *cleanup);
+        arm_strs
+            .into_iter()
+            .map(|(_, arm)| arm)
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 }

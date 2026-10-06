@@ -10,6 +10,7 @@
 // `emit_ir` requires the `native` feature but does not invoke a C compiler.
 #![cfg(feature = "native")]
 
+use prism::DumpPhase;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
@@ -29,7 +30,7 @@ fn ir(full: &str) -> String {
 
 // The per-definition content hashes, keyed by name, over a full program.
 fn hashes(full: &str) -> BTreeMap<String, String> {
-    prism::dump("core-hash", full)
+    prism::dump(DumpPhase::CoreHash, full)
         .expect("core-hash dump")
         .lines()
         .filter_map(|l| {

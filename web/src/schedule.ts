@@ -2,7 +2,7 @@
 // node is one seeded interleaving of the same Prism program, computed by the
 // existing wasm export; clicking a node shows the schedule trace and the shared
 // final-state hash.
-import init, { chaos_run, tokens } from "../pkg/prism.js";
+import init, { resident_run, tokens } from "../pkg/prism.js";
 import { examples } from "./examples.js";
 import { highlight, initFaces, kernel } from "./showcase.js";
 import "./schedule.css";
@@ -42,7 +42,7 @@ function parseTrace(line: string): number[] {
 }
 
 function readNode(seed: number): ScheduleNode {
-  const raw = chaos_run(seed, 1);
+  const raw = resident_run("chaos", `batch_report(${seed}, 1, n_workers)`);
   if (raw.startsWith("error:")) throw new Error(raw);
   const lines = raw.trimEnd().split("\n");
   const [agreed, count, hash] = lines[0].split(" ");

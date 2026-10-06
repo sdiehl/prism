@@ -27,6 +27,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 
+use crate::core::Digest;
 use crate::pkg::transport::{Transport, TransportError};
 use crate::store::codec::decode_def;
 
@@ -107,11 +108,13 @@ pub fn resolve_closure(
             .map_err(|e| ResolveError::Transport(format!("decoding {hash}: {e}")))?
             .dep_hashes;
         for dep in &deps {
-            if !closure.hashes.contains(dep) {
-                queue.push_back((dep.clone(), Some(hash.clone())));
+            if !closure.hashes.contains(dep.as_str()) {
+                queue.push_back((dep.to_string(), Some(hash.clone())));
             }
         }
-        closure.edges.insert(hash, deps);
+        closure
+            .edges
+            .insert(hash, deps.into_iter().map(Digest::into_string).collect());
     }
     Ok(closure)
 }

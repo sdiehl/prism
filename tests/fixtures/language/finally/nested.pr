@@ -1,0 +1,13 @@
+effect Quit
+  never quit(Unit) : Int
+
+fn scope(name : String, body : () -> Int ! {Quit, IO}) : Int ! {Quit, IO} =
+  handle body() with
+    return x => x
+    finally => println("leave {name}")
+
+fn main() : Unit ! {IO} =
+  println(handle scope("outer", \() -> scope("middle", \() -> scope("inner", \() -> quit(())))) with {
+    never quit(u) => 0,
+    return r => r
+  })

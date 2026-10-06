@@ -343,8 +343,8 @@ fn rp_report_all(
   acc : String
 ) : Option(String) =
   match ds of
-    Nil => Some(acc)
-    Cons(d, rest) =>
+    [] => Some(acc)
+    d :: rest =>
       match rp_report(name, text, d) of
         None => None
         Some(s) => rp_report_all(name, text, rest, concat(acc, s))

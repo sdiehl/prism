@@ -300,7 +300,7 @@ fn package_index_rows_name_the_hash_scheme() {
         tag: "2.0".into(),
         scheme: HASH_SCHEME.into(),
         kind: INDEX_KIND_SOURCE.into(),
-        root: Digest::from("a3f9".repeat(16)),
+        root: Digest::parse("a3f9".repeat(16)).unwrap(),
     };
     let body = serialize_index(std::slice::from_ref(&row));
     let text = String::from_utf8(body.clone()).unwrap();
@@ -343,7 +343,7 @@ fn signed_index_round_trips_and_detects_tampering() {
         tag: "2.0".into(),
         scheme: HASH_SCHEME.into(),
         kind: INDEX_KIND_SOURCE.into(),
-        root: Digest::from("a3f9".repeat(16)),
+        root: Digest::parse("a3f9".repeat(16)).unwrap(),
     }];
     let body = serialize_index(&rows);
     let sig = sign(&body, &flags).expect("sign").expect("a signature");
@@ -381,7 +381,7 @@ fn unsigned_mode_produces_no_signature() {
         tag: "1".into(),
         scheme: HASH_SCHEME.into(),
         kind: INDEX_KIND_SOURCE.into(),
-        root: Digest::from("00".repeat(32)),
+        root: Digest::parse("00".repeat(32)).unwrap(),
     }]);
     assert!(sign(&body, &flags).unwrap().is_none());
     let artifact = SignedArtifact { body, sig: None };
@@ -402,7 +402,7 @@ fn log_is_append_only_and_detects_repoints() {
             "2.0",
             HASH_SCHEME,
             INDEX_KIND_SOURCE,
-            "aaaa",
+            &root('a'),
         )
         .unwrap(),
         0
@@ -414,7 +414,7 @@ fn log_is_append_only_and_detects_repoints() {
             "1.0",
             HASH_SCHEME,
             INDEX_KIND_SOURCE,
-            "bbbb",
+            &root('b'),
         )
         .unwrap(),
         1
@@ -429,7 +429,7 @@ fn log_is_append_only_and_detects_repoints() {
             "2.0",
             HASH_SCHEME,
             INDEX_KIND_SOURCE,
-            "aaaa",
+            &root('a'),
         )
         .unwrap(),
         2
@@ -444,7 +444,7 @@ fn log_is_append_only_and_detects_repoints() {
             "2.0",
             HASH_SCHEME,
             INDEX_KIND_SOURCE,
-            "cccc",
+            &root('c'),
         )
         .unwrap(),
         3
@@ -453,8 +453,8 @@ fn log_is_append_only_and_detects_repoints() {
     assert_eq!(repoints.len(), 1);
     assert_eq!(repoints[0].origin, "github.com/prism-lang/http");
     assert_eq!(repoints[0].name, "http");
-    assert_eq!(repoints[0].from_root, "aaaa");
-    assert_eq!(repoints[0].to_root, "cccc");
+    assert_eq!(repoints[0].from_root, root('a'));
+    assert_eq!(repoints[0].to_root, root('c'));
 
     // The sequence is dense and monotonic, and every entry is preserved.
     let entries = log.entries().unwrap();
@@ -552,7 +552,7 @@ fn audit_passes_the_green_path_and_names_each_failure() {
 
     // Failure 2: a pin the signed index does not match is a named failure.
     let mismatch = IndexRow {
-        root: Digest::from("de".repeat(32)),
+        root: Digest::parse("de".repeat(32)).unwrap(),
         ..row.clone()
     };
     let bad = audit(
@@ -615,7 +615,7 @@ fn empty_log_file_is_uninitialized_not_bricked() {
             "1.0",
             HASH_SCHEME,
             INDEX_KIND_SOURCE,
-            "aaaa",
+            &root('a'),
         )
         .unwrap();
     assert_eq!(seq, 0);
@@ -635,7 +635,7 @@ fn header_only_log_appends_without_a_second_header() {
         "1.0",
         HASH_SCHEME,
         INDEX_KIND_SOURCE,
-        "aaaa",
+        &root('a'),
     )
     .unwrap();
     let text = fs::read_to_string(&path).unwrap();
@@ -649,7 +649,7 @@ fn header_only_log_appends_without_a_second_header() {
             "1.0",
             HASH_SCHEME,
             INDEX_KIND_SOURCE,
-            "bbbb",
+            &root('b'),
         )
         .unwrap();
     assert_eq!(seq, 0);
@@ -677,12 +677,15 @@ fn a_sequence_hole_is_a_loud_error_not_a_renumbering() {
     let log = Log::at(&path);
     let d_header = log.head().unwrap().expect("header digests");
     let line0 = format!(
-        "0\t1\t{d_header}\tgithub.com/prism-lang/x\thttp\t1.0\t{HASH_SCHEME}\tsource-bundle\taaaa"
+        "0\t1\t{d_header}\tgithub.com/prism-lang/x\thttp\t1.0\t{HASH_SCHEME}\tsource-bundle\t{}",
+        root('a')
     );
     fs::write(&path, format!("{header}\n{line0}\n")).unwrap();
     let d0 = log.head().unwrap().expect("line 0 digests");
-    let line2 =
-        format!("2\t3\t{d0}\tgithub.com/prism-lang/x\ttz\t1.0\t{HASH_SCHEME}\tsource-bundle\tcccc");
+    let line2 = format!(
+        "2\t3\t{d0}\tgithub.com/prism-lang/x\ttz\t1.0\t{HASH_SCHEME}\tsource-bundle\t{}",
+        root('c')
+    );
     fs::write(&path, format!("{header}\n{line0}\n{line2}\n")).unwrap();
     let err = log.entries().unwrap_err().to_string();
     assert!(err.contains("sequence hole"), "unexpected error: {err}");
@@ -693,7 +696,7 @@ fn a_sequence_hole_is_a_loud_error_not_a_renumbering() {
             "1.0",
             HASH_SCHEME,
             INDEX_KIND_SOURCE,
-            "dddd",
+            &root('d'),
         )
         .is_err(),
         "append into a holey log must refuse"
@@ -713,7 +716,7 @@ fn an_unrecognized_line_is_a_loud_error() {
         "1.0",
         HASH_SCHEME,
         INDEX_KIND_SOURCE,
-        "aaaa",
+        &root('a'),
     )
     .unwrap();
     let mut text = fs::read_to_string(&path).unwrap();
@@ -733,14 +736,14 @@ fn editing_a_line_in_place_breaks_the_chain() {
     let tmp = TempDir::new("log-chain-tamper");
     let path = tmp.join("log");
     let log = Log::at(&path);
-    for (name, root) in [("http", "aaaa"), ("geo", "bbbb"), ("tz", "cccc")] {
+    for (name, c) in [("http", 'a'), ("geo", 'b'), ("tz", 'c')] {
         log.append(
             "github.com/prism-lang/x",
             name,
             "1.0",
             HASH_SCHEME,
             INDEX_KIND_SOURCE,
-            root,
+            &root(c),
         )
         .unwrap();
     }
@@ -762,14 +765,14 @@ fn suffix_truncation_moves_the_chain_head() {
     let tmp = TempDir::new("log-chain-head");
     let path = tmp.join("log");
     let log = Log::at(&path);
-    for (name, root) in [("http", "aaaa"), ("geo", "bbbb")] {
+    for (name, c) in [("http", 'a'), ("geo", 'b')] {
         log.append(
             "github.com/prism-lang/x",
             name,
             "1.0",
             HASH_SCHEME,
             INDEX_KIND_SOURCE,
-            root,
+            &root(c),
         )
         .unwrap();
     }
@@ -814,7 +817,7 @@ fn a_legacy_log_is_rejected_outright() {
                 "1.0",
                 HASH_SCHEME,
                 INDEX_KIND_SOURCE,
-                "bbbb",
+                &root('b'),
             )
             .unwrap_err()
             .to_string();
@@ -823,4 +826,9 @@ fn a_legacy_log_is_rejected_outright() {
             "unexpected error for {legacy_header}: {err}"
         );
     }
+}
+
+// A well-formed root of one repeated hex digit.
+fn root(c: char) -> Digest {
+    Digest::parse(c.to_string().repeat(64)).unwrap()
 }

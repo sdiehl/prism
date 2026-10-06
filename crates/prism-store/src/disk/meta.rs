@@ -21,9 +21,11 @@
 use std::io;
 use std::path::Path;
 
+use prism_common::format::FormatTag;
+
 use super::{evict_shard_overflow, shard_path, HashHex, FIELD_SEP, META_DIR, OBJECT_SHARD_BUDGET};
 
-const META_HEADER: &str = "prism-store-meta\tv1";
+const META_HEADER: FormatTag = FormatTag::new("prism-store-meta\tv1");
 const KEY_NAME: &str = "name";
 const KEY_TYPE: &str = "type";
 const KEY_DOC: &str = "doc";
@@ -73,10 +75,10 @@ pub(super) fn get(
     let text = String::from_utf8(bytes)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
     let mut lines = text.lines();
-    if lines.next() != Some(META_HEADER) {
+    if let Err(e) = META_HEADER.expect(lines.next().unwrap_or_default()) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            format!("malformed metadata at {}", path.display()),
+            format!("malformed metadata at {}: {e}", path.display()),
         ));
     }
     let mut m = DefMeta::default();

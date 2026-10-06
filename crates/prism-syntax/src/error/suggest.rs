@@ -69,8 +69,23 @@ pub fn edit_distance(a: &str, b: &str) -> usize {
     prev1[n]
 }
 
+/// Names other languages spell differently, paired with Prism's spelling.
+/// These are not typos, so no edit budget reaches them: `Just` is four edits
+/// from `Some` and one from `fst`.
+pub const FAMILIAR: &[(&str, &str)] = &[
+    ("Maybe", "Option"),
+    ("Just", "Some"),
+    ("Nothing", "None"),
+    ("Either", "Result"),
+    ("Left", "Err"),
+    ("Right", "Ok"),
+];
+
 /// Every candidate within the edit budget for `target`, closest first, ties
 /// broken alphabetically, capped at [`MAX_SUGGESTIONS`].
+///
+/// A [`FAMILIAR`] spelling of a name in `candidates` leads, ahead of any near
+/// miss.
 ///
 /// Exact matches are never suggested: the caller already knows the name is
 /// unknown, so an identical candidate is a scoping bug, not a typo.
@@ -79,10 +94,17 @@ pub fn suggest<'a, I>(target: &str, candidates: I) -> Vec<&'a str>
 where
     I: IntoIterator<Item = &'a str>,
 {
+    let familiar = FAMILIAR
+        .iter()
+        .find(|(other, _)| *other == target)
+        .map(|(_, ours)| *ours);
     let budget = max_edits(target.chars().count());
     let mut scored: Vec<(usize, &str)> = candidates
         .into_iter()
         .filter_map(|c| {
+            if familiar == Some(c) {
+                return Some((0, c));
+            }
             let d = edit_distance(target, c);
             (d > 0 && d <= budget).then_some((d, c))
         })
@@ -184,5 +206,11 @@ mod tests {
             Some("did you mean `bold` or `cold`?".to_string())
         );
         assert_eq!(suggestion("mold", ["zebra"]), None);
+    }
+
+    #[test]
+    fn a_familiar_spelling_leads_only_when_in_scope() {
+        assert_eq!(suggest("Just", ["fst", "Some"]), ["Some", "fst"]);
+        assert_eq!(suggest("Just", ["fst"]), ["fst"]);
     }
 }

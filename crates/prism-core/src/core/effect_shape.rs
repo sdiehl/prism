@@ -629,12 +629,16 @@ fn each_subcomp<'a>(comp: &'a Comp, visit: &mut impl FnMut(&'a Comp)) {
         Comp::Handle {
             body,
             return_body,
+            finally_body,
             ops,
             ..
         } => {
             visit(body);
             if let Some(return_body) = return_body {
                 visit(return_body);
+            }
+            if let Some(finally_body) = finally_body {
+                visit(finally_body);
             }
             for op in ops {
                 visit(&op.body);

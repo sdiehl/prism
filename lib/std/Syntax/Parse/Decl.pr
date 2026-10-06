@@ -22,7 +22,7 @@ import Syntax.Parse.DeclStable (..)
 -- A visibility prefix in the surface vocabulary.
 type PVis = VPrivate | VPublic | VOpaque deriving (Eq)
 
-type RetSpec = RetSpec { ret: Option(Ty), eff: Option(Row), no_alloc: Bool }
+type RetSpec = RetSpec { ret: Option(Ty), eff: Option(Row), claims: DeclClaims }
 
 type FnSpec = FnSpec {
   ret: Option(Ty),
@@ -31,7 +31,7 @@ type FnSpec = FnSpec {
   reqs: List(Sp(Expr)),
   enss: List(Ensure),
   measure: Option(Sp(Expr)),
-  no_alloc: Bool
+  claims: DeclClaims
 }
 
 fn vis_value(v : PVis) : Option(String) =
@@ -462,10 +462,10 @@ fn parse_data(
 
 fn newtype_shape(ctors : List(Ctor)) : Bool =
   match ctors of
-    Cons(c, Nil) =>
+    [c] =>
       match c.shape of
-        CPositional(Cons(_, Nil)) => true
-        CRecord(Cons(_, Nil)) => true
+        CPositional([_]) => true
+        CRecord([_]) => true
         _ => false
     _ => false
 
@@ -568,16 +568,17 @@ fn parse_ctors_go(
 fn parse_ctor(c : Cursor, depth : Int) : Parsed(Ctor) =
   let p1 = take_word(c, TUid)
   let PTook(name, c1) = p1 else parsed_refused(p1)
+  let s = cursor_since(c, c1)
   if at_fixed(c1, "\{") then
     let p2 = parse_ctor_fields(cursor_advance(c1), depth, Nil)
     let PTook(fs, c2) = p2 else parsed_refused(p2)
-    PTook(Ctor { name = name, shape = CRecord(fs) }, c2)
+    PTook(Ctor { name = name, shape = CRecord(fs), span = s }, c2)
   elif at_fixed(c1, "(") then
     let p3 = parse_types_until(cursor_advance(c1), ")", depth, Nil)
     let PTook(ts, c2) = p3 else parsed_refused(p3)
-    PTook(Ctor { name = name, shape = CPositional(ts) }, c2)
+    PTook(Ctor { name = name, shape = CPositional(ts), span = s }, c2)
   else
-    PTook(Ctor { name = name, shape = CPositional(Nil) }, c1)
+    PTook(Ctor { name = name, shape = CPositional(Nil), span = s }, c1)
 
 -- lint: allow(L0105)
 fn parse_ctor_fields(
@@ -734,7 +735,9 @@ fn parse_fn(
           totality = totality,
           fip_word = fip_mode,
           is_replayable = is_replayable,
-          is_no_alloc = spec.no_alloc,
+          is_no_alloc = spec.claims.no_alloc,
+          is_bounded_stack = spec.claims.bounded_stack,
+          is_linear = spec.claims.linear,
           span = cursor_since(saved, c9)
         }
       PTook(
@@ -766,7 +769,7 @@ fn parse_fn_spec(c : Cursor, depth : Int) : Parsed(FnSpec) =
         reqs = reqs,
         enss = enss,
         measure = measure,
-        no_alloc = ret.no_alloc
+        claims = ret.claims
       },
       c5,
     )
@@ -774,7 +777,7 @@ fn parse_fn_spec(c : Cursor, depth : Int) : Parsed(FnSpec) =
 -- lint: allow(L0101)
 fn parse_ret_spec(c : Cursor, depth : Int) : Parsed(RetSpec) =
   if not(at_fixed(c, ":")) then
-    PTook(RetSpec { ret = None, eff = None, no_alloc = false }, c)
+    PTook(RetSpec { ret = None, eff = None, claims = no_claims() }, c)
   else
     let after_colon = cursor_advance(c)
     if at_fixed(after_colon, "!") then
@@ -795,36 +798,32 @@ fn parse_ret_spec(c : Cursor, depth : Int) : Parsed(RetSpec) =
             let PTook(row, c2) = p2 else parsed_refused(p2)
             match attach_return_effect(raw, row) of
               Some(with_eff) =>
-                match lift_noalloc(with_eff) of
-                  (ret, no_alloc) =>
+                match lift_decl_claims(with_eff) of
+                  (ret, claims) =>
                     PTook(
                         RetSpec {
                           ret = Some(ret),
                           eff = None,
-                          no_alloc = no_alloc
+                          claims = claims
                         },
                         c2,
                       )
               None =>
-                match lift_noalloc(raw) of
-                  (ret, no_alloc) =>
+                match lift_decl_claims(raw) of
+                  (ret, claims) =>
                     PTook(
                         RetSpec {
                           ret = Some(ret),
                           eff = Some(row),
-                          no_alloc = no_alloc
+                          claims = claims
                         },
                         c2,
                       )
           else
-            match lift_noalloc(raw) of
-              (ret, no_alloc) =>
+            match lift_decl_claims(raw) of
+              (ret, claims) =>
                 PTook(
-                    RetSpec {
-                      ret = Some(ret),
-                      eff = None,
-                      no_alloc = no_alloc
-                    },
+                    RetSpec { ret = Some(ret), eff = None, claims = claims },
                     c1,
                   )
 
@@ -850,18 +849,6 @@ fn parse_retired_ret_spec(
               "the effect row now follows the result type: write `: Result ! \{Effects\}` instead of `: !\{Effects\} Result`",
             ),
         )
-
-fn lift_noalloc(t : Ty) : (Ty, Bool) =
-  match t of
-    TyUsage(inner, facts) =>
-      match facts of
-        Cons(f, Nil) =>
-          if f == "noalloc" then
-            (inner, true)
-          else
-            (TyUsage(inner, facts), false)
-        _ => (TyUsage(inner, facts), false)
-    _ => (t, false)
 
 -- Attach a suffix to a returned closure, including through an outer forall.
 -- `None` means the parsed result was a value type and the row belongs to the
@@ -1046,22 +1033,22 @@ fn note_fn_mod_follow(
 
 fn classify_fn_mod_words(words : List(String)) : Option((Bool, Option(String))) =
   match words of
-    Nil => Some((false, None))
-    Cons(a, Nil) =>
+    [] => Some((false, None))
+    [a] =>
       if a == "test" then
         Some((true, None))
       elif a == "total" then
         Some((false, Some("prove")))
       else
         None
-    Cons(a, Cons(b, Nil)) =>
+    [a, b] =>
       if a == "test" && b == "total" then
         Some((true, Some("prove")))
       elif a == "assume" && b == "total" then
         Some((false, Some("assume")))
       else
         None
-    Cons(a, Cons(b, Cons(c, Nil))) =>
+    [a, b, c] =>
       if a == "test" && b == "assume" && c == "total" then
         Some((true, Some("assume")))
       else
@@ -1076,16 +1063,7 @@ fn parse_reserved_fn_mods(
   if at_fixed(c, "replayable") then
     let c1 = cursor_advance(c)
     if at_fixed(c1, "fip") || at_fixed(c1, "fbip") then
-      let mode =
-        if at_fixed(c1, "fip") then
-          "fip"
-        else
-          "fbip"
-      let c2 = cursor_advance(c1)
-      if at_fixed(c2, "fn") then
-        PTook((is_test, totality, Some(mode), true), c2)
-      else
-        PStuck(cursor_note(c2, TFixed("fn")))
+      parse_fip_then_fn(c1, is_test, totality, true)
     elif at_fixed(c1, "fn") then
       PTook((is_test, totality, None, true), c1)
     else
@@ -1093,18 +1071,74 @@ fn parse_reserved_fn_mods(
       let c3 = cursor_note(c2, TFixed("fbip"))
       PStuck(cursor_note(c3, TFixed("fn")))
   elif at_fixed(c, "fip") || at_fixed(c, "fbip") then
-    let mode =
-      if at_fixed(c, "fip") then
-        "fip"
-      else
-        "fbip"
-    let c1 = cursor_advance(c)
-    if at_fixed(c1, "fn") then
-      PTook((is_test, totality, Some(mode), false), c1)
-    else
-      PStuck(cursor_note(c1, TFixed("fn")))
+    parse_fip_then_fn(c, is_test, totality, false)
   else
     PTook((is_test, totality, None, false), c)
+
+fn parse_fip_then_fn(
+  c : Cursor,
+  is_test : Bool,
+  totality : Option(String),
+  is_replayable : Bool
+) : Parsed((Bool, Option(String), Option(String), Bool)) =
+  let p1 = parse_fip_word(c)
+  let PTook(word, c1) = p1 else parsed_refused(p1)
+  if at_fixed(c1, "fn") then
+    PTook((is_test, totality, Some(word), is_replayable), c1)
+  elif c1.pos == cursor_advance(c).pos then
+    PStuck(cursor_note(cursor_note(c1, TFixed("(")), TFixed("fn")))
+  else
+    PStuck(cursor_note(c1, TFixed("fn")))
+
+-- A `fip` or `fbip` keyword with its optional allocation budget, in the
+-- spelling the certificate renders: bare at zero, `fip(n)` otherwise.
+fn parse_fip_word(c : Cursor) : Parsed(String) =
+  let word =
+    if at_fixed(c, "fip") then
+      "fip"
+    else
+      "fbip"
+  let c1 = cursor_advance(c)
+  if not(at_fixed(c1, "(")) then
+    PTook(word, c1)
+  else
+    let p2 = take_word(cursor_advance(c1), TInt)
+    let PTook(raw, c2) = p2 else parsed_refused(p2)
+    let p3 = take_fixed(c2, ")")
+    let PTook(_, c3) = p3 else parsed_refused(p3)
+    fip_budget(word, raw, cursor_since(c1, c3), c3)
+
+-- The largest allocation budget a certificate records (an unsigned 32-bit count).
+let max_fip_budget : Int = 4294967295
+
+-- Validate a parsed budget literal and render the keyword it spells.
+fn fip_budget(
+  word : String,
+  raw : String,
+  span : Span,
+  c : Cursor
+) : Parsed(String) =
+  if ends_with("i64", raw) || ends_with("u64", raw) then
+    PFault(
+        refuse(
+            span,
+            "an allocation budget is a plain integer; drop the width suffix",
+          ),
+      )
+  else
+    let digits = surface_int(raw)
+    match parse_int(digits) of
+      Some(n) =>
+        if n > max_fip_budget then
+          budget_out_of_range(span, digits)
+        elif n == 0 then
+          PTook(word, c)
+        else
+          PTook("{word}({digits})", c)
+      None => budget_out_of_range(span, digits)
+
+fn budget_out_of_range(span : Span, digits : String) : Parsed(String) =
+  PFault(refuse(span, "allocation budget `{digits}` is out of range"))
 
 -- lint: allow(L0101, L0105)
 fn parse_params(
@@ -1234,6 +1268,8 @@ fn parse_const(
       fip_word = None,
       is_replayable = false,
       is_no_alloc = false,
+      is_bounded_stack = false,
+      is_linear = false,
       span = cursor_since(saved, c4)
     }
   PTook(

@@ -96,6 +96,15 @@ impl Fmt<'_> {
                     self.fmt_expr_inline(e, Mode::Flat)
                         .unwrap_or_else(|| self.verbatim(e.span.start, e.span.end))
                 }),
+            // A lambda over a `handle` or `try`: the head on this line, the
+            // body offside beneath it, deeper than the lambda.
+            (Expr::Lam(ps, body), Mode::Layout) if !e.synth && Self::offside_body(body) => {
+                format!(
+                    "{}\n{}",
+                    self.fmt_lam_head(ps),
+                    self.fmt_block(body, indent + 1, body.span.start)
+                )
+            }
             (Expr::Handle(body, arms, HandlerMode::Partial), Mode::Layout) => {
                 // The offside preprocessor opens a handler block directly after
                 // `with`; the intervening `partial` marker therefore requires

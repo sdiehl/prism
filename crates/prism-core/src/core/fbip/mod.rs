@@ -19,7 +19,7 @@ mod rc;
 mod reuse;
 
 pub use balance::balanced;
-pub use borrow::infer_borrow_sigs;
+pub use borrow::{check_borrow_sigs, infer_borrow_sigs};
 pub use callable::{callable_requirements, check_callable_flow, CallableRequirements};
 pub use check::{
     bounded_stack_annots, check_alloc, check_bounded_stack, check_linear, fip_annots,

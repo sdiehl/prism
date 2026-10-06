@@ -638,6 +638,7 @@ fn checks_handler_residual_rows_and_resumption_type() {
             body: Box::new(handled.clone()),
             return_binder: None,
             return_body: None,
+            finally_body: None,
             ops: clauses,
         },
     );
@@ -673,6 +674,7 @@ fn checks_handler_residual_rows_and_resumption_type() {
             body: Box::new(handled),
             return_binder: None,
             return_body: None,
+            finally_body: None,
             ops: TypedHandler::new(vec![arm])
                 .unwrap()
                 .with_forwarded(vec![TypedForward::new(

@@ -802,7 +802,7 @@ impl DynFlags {
     /// # Errors
     /// Fails on an unknown flag name or a value of the wrong type.
     #[cfg(feature = "native")]
-    pub fn apply_toml(&mut self, table: &toml::Table) -> Result<(), String> {
+    pub fn apply_toml(&mut self, table: &toml::Table) -> Result<(), FlagError> {
         for (key, val) in table {
             self.apply_toml_entry(key, val)?;
         }
@@ -810,7 +810,7 @@ impl DynFlags {
     }
 
     #[cfg(feature = "native")]
-    fn apply_toml_entry(&mut self, key: &str, val: &toml::Value) -> Result<(), String> {
+    fn apply_toml_entry(&mut self, key: &str, val: &toml::Value) -> Result<(), FlagError> {
         match key {
             "native-effects" => self.native_effects = toml_bool(key, val)?,
             "trampoline" => self.trampoline = toml_bool(key, val)?,
@@ -856,31 +856,47 @@ impl DynFlags {
             "sign-allowed-signers" => {
                 self.sign_allowed_signers = Some(PathBuf::from(toml_string(key, val)?));
             }
-            _ => return Err(format!("prism.toml: unknown flag `{key}` in [flags]")),
+            _ => return Err(FlagError::Unknown(key.to_string())),
         }
         Ok(())
     }
 }
 
+/// A `[flags]` entry in `prism.toml` that does not apply.
 #[cfg(feature = "native")]
-fn toml_bool(key: &str, val: &toml::Value) -> Result<bool, String> {
-    val.as_bool()
-        .ok_or_else(|| format!("prism.toml: flag `{key}` must be a boolean"))
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum FlagError {
+    #[error("prism.toml: unknown flag `{0}` in [flags]")]
+    Unknown(String),
+    #[error("prism.toml: flag `{0}` must be a boolean")]
+    NotBool(String),
+    #[error("prism.toml: flag `{0}` must be a positive integer")]
+    NotPositive(String),
+    #[error("prism.toml: flag `{0}` must be a string")]
+    NotString(String),
+    #[error("prism.toml: invalid value for flag `{key}`: `{value}`")]
+    Invalid { key: String, value: String },
 }
 
 #[cfg(feature = "native")]
-fn toml_pos_int(key: &str, val: &toml::Value) -> Result<usize, String> {
+fn toml_bool(key: &str, val: &toml::Value) -> Result<bool, FlagError> {
+    val.as_bool()
+        .ok_or_else(|| FlagError::NotBool(key.to_string()))
+}
+
+#[cfg(feature = "native")]
+fn toml_pos_int(key: &str, val: &toml::Value) -> Result<usize, FlagError> {
     val.as_integer()
         .and_then(|n| usize::try_from(n).ok())
         .filter(|n| *n > 0)
-        .ok_or_else(|| format!("prism.toml: flag `{key}` must be a positive integer"))
+        .ok_or_else(|| FlagError::NotPositive(key.to_string()))
 }
 
 #[cfg(feature = "native")]
-fn toml_string(key: &str, val: &toml::Value) -> Result<String, String> {
+fn toml_string(key: &str, val: &toml::Value) -> Result<String, FlagError> {
     val.as_str()
         .map(str::to_string)
-        .ok_or_else(|| format!("prism.toml: flag `{key}` must be a string"))
+        .ok_or_else(|| FlagError::NotString(key.to_string()))
 }
 
 #[cfg(feature = "native")]
@@ -888,9 +904,12 @@ fn toml_parsed<T>(
     key: &str,
     val: &toml::Value,
     parse: impl Fn(&str) -> Option<T>,
-) -> Result<T, String> {
+) -> Result<T, FlagError> {
     let s = toml_string(key, val)?;
-    parse(&s).ok_or_else(|| format!("prism.toml: invalid value for flag `{key}`: `{s}`"))
+    parse(&s).ok_or_else(|| FlagError::Invalid {
+        key: key.to_string(),
+        value: s,
+    })
 }
 
 fn query_threads_from_env(base: usize) -> usize {

@@ -5,8 +5,8 @@ canonical Ord(Int) = ordInt
 
 fn print_all(xs : List(Int)) =
   match xs of
-    Nil => ()
-    Cons(x, rest) =>
+    [] => ()
+    x :: rest =>
       println(x)
       print_all(rest)
 

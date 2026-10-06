@@ -1,8 +1,8 @@
 //! Whole-program, confined-region, and selective orchestration.
 
 use super::{
-    abi, flow, union_effects, BTreeMap, BTreeSet, CompSig, CoreFnSig, CoreQuantifier, Decline,
-    EffRow, Fresh, Monadic, MonadicScope, OpIds, Refusal, Region, Rows, Sym, TypedCoreFn,
+    abi, flow, union_effects, walk, BTreeMap, BTreeSet, CompSig, CoreFnSig, CoreQuantifier,
+    Decline, EffRow, Fresh, Monadic, MonadicScope, OpIds, Refusal, Region, Rows, Sym, TypedCoreFn,
     ENTRY_POINT,
 };
 
@@ -51,6 +51,9 @@ pub fn lower_whole<R: Rows + ?Sized>(
         })
         .collect::<Result<_, Decline>>()?;
     let mut monadic = Monadic::new(ops, fresh, EffRow::Empty, &signatures);
+    monadic.cleanups = functions
+        .iter()
+        .any(|function| walk::contains_cleanup(function.body()));
     let mut lowered = Vec::with_capacity(functions.len());
     for function in functions {
         let row = rows

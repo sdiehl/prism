@@ -130,7 +130,12 @@ pub(super) fn judge_arms(
     widen: bool,
     reify: bool,
 ) -> Result<Vec<(Sym, ClauseClass)>, String> {
-    let TypedCompKind::Handle { ops: clauses, .. } = h.kind() else {
+    let TypedCompKind::Handle {
+        ops: clauses,
+        finally_body,
+        ..
+    } = h.kind()
+    else {
         return Err("not a handle".into());
     };
     // One erased clone per handle, so every clause-shape question is answered
@@ -147,7 +152,8 @@ pub(super) fn judge_arms(
             ))
         })
         .collect::<Result<_, String>>()?;
-    if arms.is_empty() {
+    // A bracket catches nothing and only delimits its cleanup.
+    if arms.is_empty() && finally_body.is_none() {
         return Err("a handler with no arm".into());
     }
     Ok(arms)

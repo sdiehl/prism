@@ -125,8 +125,8 @@ pub fn bind_push(env : BindEnv(a), name : String, payload : a) : BindEnv(a) =
 -- ```
 pub fn bind_push_all(env : BindEnv(a), entries : List((String, a))) : BindEnv(a) =
   match entries of
-    Nil => env
-    Cons(e, rest) => bind_push_all(bind_push(env, fst(e), snd(e)), rest)
+    [] => env
+    e :: rest => bind_push_all(bind_push(env, fst(e), snd(e)), rest)
 
 -- | Push binders that carry no payload beyond their own name.
 --
@@ -167,8 +167,8 @@ fn bind_scan(
   k : Int
 ) : Option(Index) =
   match slots of
-    Nil => None
-    Cons(e, rest) =>
+    [] => None
+    e :: rest =>
       if fst(e) == name then
         Some(MkIndex(k))
       else
@@ -200,8 +200,8 @@ fn bind_nth(slots : List((String, a)), k : Int) : Option((String, a)) =
     None
   else
     match slots of
-      Nil => None
-      Cons(e, rest) =>
+      [] => None
+      e :: rest =>
         if k == 0 then
           Some(e)
         else
@@ -281,8 +281,8 @@ fn bind_nl_seq(
   acc : List(String)
 ) : List(String) =
   match ts of
-    Nil => acc
-    Cons(t, rest) => bind_nl_seq(free, env, rest, bind_nl_go(free, env, t, acc))
+    [] => acc
+    t :: rest => bind_nl_seq(free, env, rest, bind_nl_go(free, env, t, acc))
 
 fn bind_nl_go(
   free : (String) -> String,

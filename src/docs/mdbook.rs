@@ -20,6 +20,7 @@
 //! `just docs-packages`) is therefore the only step that adds a module to the
 //! book; SUMMARY.md never changes.
 
+use crate::DumpPhase;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -381,8 +382,8 @@ fn analyze_types(body: &str, info: &str, extra_roots: &[PathBuf]) -> Result<Type
     let source_map = example_source_map(body, &program, prefix, skip);
     let display_len = display_of(body).len();
     let full = with_prelude(&program);
-    let json = dump_on("typespans", &full, &roots, &Config::default())?;
-    let analyzed = TypeSpans::from_json(&json).map_err(Error::CodegenDocs)?;
+    let json = dump_on(DumpPhase::Typespans, &full, &roots, &Config::default())?;
+    let analyzed = TypeSpans::from_json(&json).map_err(|e| Error::CodegenDocs(e.to_string()))?;
     let mut spans = analyzed
         .spans
         .into_iter()
@@ -405,7 +406,7 @@ fn analyze_types(body: &str, info: &str, extra_roots: &[PathBuf]) -> Result<Type
         ))
     });
     Ok(TypeSpans {
-        format: TYPESPANS_FORMAT.to_string(),
+        format: TYPESPANS_FORMAT,
         spans,
     })
 }

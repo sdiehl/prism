@@ -13,8 +13,8 @@ effect State
 
 fn run_thunks(fs, acc) =
   match fs of
-    Nil => acc
-    Cons(f, rest) => run_thunks(rest, acc + f())
+    [] => acc
+    f :: rest => run_thunks(rest, acc + f())
 
 fn traced() =
   let fs = [\() -> emit(1), \() -> emit(2), \() -> emit(3)]

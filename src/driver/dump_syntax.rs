@@ -19,6 +19,7 @@
 //! never emitted; the parse-sugar bit is emitted as `synth` only when set.
 
 use marginalia::{BuiltinKind, Trivia, TriviaTable};
+use prism_common::format::FormatTag;
 use prism_syntax::coeffect::CoeffectFact;
 use serde::Serialize;
 use serde_json::{json, Map, Value};
@@ -39,15 +40,16 @@ use super::dump::COMPILER_VERSION;
 
 // The versioned schema tags heading the two syntax seams. Self-describing and
 // versioned like the front-end seams; bump on any incompatible shape change.
-pub(super) const SYNTAX_TOKENS_SCHEMA: &str = "prism-syntax-tokens-v1";
-pub(super) const SURFACE_SYNTAX_SCHEMA: &str = "prism-surface-syntax-v1";
-pub(super) const SYNTAX_DIAGNOSTICS_SCHEMA: &str = "prism-syntax-diagnostics-v1";
+pub(super) const SYNTAX_TOKENS_SCHEMA: FormatTag = FormatTag::new("prism-syntax-tokens-v1");
+pub(super) const SURFACE_SYNTAX_SCHEMA: FormatTag = FormatTag::new("prism-surface-syntax-v2");
+pub(super) const SYNTAX_DIAGNOSTICS_SCHEMA: FormatTag =
+    FormatTag::new("prism-syntax-diagnostics-v1");
 
 // The token-stream envelope: the embedded source, the raw and post-layout
 // streams, and the trivia events, in stream order.
 #[derive(Serialize)]
 struct SyntaxTokens {
-    schema: &'static str,
+    schema: FormatTag,
     compiler: &'static str,
     source: SourceInfo,
     raw: Vec<TokenRow>,
@@ -58,7 +60,7 @@ struct SyntaxTokens {
 // The surface-AST envelope: the embedded source and the ordered item list.
 #[derive(Serialize)]
 struct SurfaceSyntax {
-    schema: &'static str,
+    schema: FormatTag,
     compiler: &'static str,
     source: SourceInfo,
     items: Vec<Value>,
@@ -348,6 +350,7 @@ fn data_item(d: &DataDecl) -> Value {
 fn ctor_value(c: &Ctor) -> Value {
     let mut m = Map::new();
     put(&mut m, "name", json!(c.name));
+    put(&mut m, "span", sp(c.span));
     match c.shape() {
         CtorShape::Positional(args) => {
             put_list(&mut m, "args", args.iter().map(ty_value).collect());
@@ -382,6 +385,7 @@ fn eff_op(op: &EffOp) -> Value {
     put(&mut m, "name", json!(op.name));
     put_list(&mut m, "params", op.params.iter().map(ty_value).collect());
     put(&mut m, "ret", ty_value(&op.ret));
+    put(&mut m, "span", sp(op.span));
     if !op.grade.is_default() {
         put(&mut m, "grade", json!(op.grade.word()));
     }
@@ -423,7 +427,7 @@ fn class_item(d: &ClassDecl) -> Value {
         "methods",
         d.methods
             .iter()
-            .map(|(name, t)| json!({"name": name, "ty": ty_value(t)}))
+            .map(|m| json!({"name": m.name, "span": sp(m.span), "ty": ty_value(&m.ty)}))
             .collect(),
     );
     put(&mut m, "span", sp(d.span));
@@ -987,6 +991,16 @@ fn sugar_node(s: &Sugar<Surface>) -> Value {
             "expr": expr_value(body),
             "fallback": expr_value(fallback),
         }),
+        Sugar::PathJoin(base, rest) => json!({
+            "kind": "path_join",
+            "base": expr_value(base),
+            "rest": expr_value(rest),
+        }),
+        Sugar::Cons(head, tail) => json!({
+            "kind": "cons",
+            "head": expr_value(head),
+            "tail": expr_value(tail),
+        }),
         Sugar::Transact(body, fallback) => json!({
             "kind": "transact",
             "body": expr_value(body),
@@ -1053,6 +1067,10 @@ fn handler_arm(a: &HandlerArm) -> Value {
         HandlerArm::Sugar(SugarArm::Val(name, body)) => json!({
             "kind": "val",
             "name": name,
+            "body": expr_value(body),
+        }),
+        HandlerArm::Finally(body) => json!({
+            "kind": "finally",
             "body": expr_value(body),
         }),
         HandlerArm::Sugar(SugarArm::Never(op, params, body)) => json!({
@@ -1167,7 +1185,7 @@ fn pattern_node(p: &Pattern) -> Value {
 // file exports an empty list, so acceptance and refusal share one schema.
 #[derive(Serialize)]
 struct SyntaxDiagnostics {
-    schema: &'static str,
+    schema: FormatTag,
     compiler: &'static str,
     source: SourceInfo,
     diagnostics: Vec<DiagnosticRow>,

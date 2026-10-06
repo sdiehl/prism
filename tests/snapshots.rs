@@ -3,6 +3,7 @@
 
 #![allow(clippy::format_push_string)]
 
+use prism::DumpPhase;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::{env, fs};
@@ -235,8 +236,11 @@ fn bounded_stack_rule_is_fip_only() {
             "fip fn wrap(x) = x\n{kw} fn relay(x) = wrap(relay(x))\nfn main() = println((relay(1) : Int))"
         ))
     };
-    prism::dump("core", &prog("fbip")).expect("fbip may recurse non-tail");
-    let err = format!("{}", prism::dump("core", &prog("fip")).unwrap_err());
+    prism::dump(DumpPhase::Core, &prog("fbip")).expect("fbip may recurse non-tail");
+    let err = format!(
+        "{}",
+        prism::dump(DumpPhase::Core, &prog("fip")).unwrap_err()
+    );
     assert!(
         err.contains("non-tail position"),
         "fip relay must be rejected for non-tail recursion: {err}"
@@ -477,7 +481,7 @@ fn cascade_config() -> prism::Config {
     cfg
 }
 
-fn cascade_dump(phase: &str, full: &str) -> String {
+fn cascade_dump(phase: DumpPhase, full: &str) -> String {
     prism::dump_on(
         phase,
         full,
@@ -496,7 +500,7 @@ fn cascade_dump(phase: &str, full: &str) -> String {
 fn local_monadification_partition() {
     let root = env!("CARGO_MANIFEST_DIR");
     let src = fs::read_to_string(format!("{root}/tests/cases/run/local_mono_combined.pr")).unwrap();
-    let lowered = cascade_dump("lowered", &prism::with_prelude(&src));
+    let lowered = cascade_dump(DumpPhase::Lowered, &prism::with_prelude(&src));
     // Extract a top-level function body (from `fn name(` to the next `\nfn `).
     let fn_body = |name: &str| -> String {
         let start = lowered
@@ -791,7 +795,7 @@ fn cbpv_example() {
     let out = interp_output(Path::new(&path));
     insta::assert_snapshot!("interpreter@cbpv.pr", out);
     let src = fs::read_to_string(&path).unwrap();
-    insta::assert_snapshot!("cbpv_core", prism::dump("core", &src).unwrap());
+    insta::assert_snapshot!("cbpv_core", prism::dump(DumpPhase::Core, &src).unwrap());
 }
 
 // Effect polymorphism showcase, also in examples/. The snapshot name keeps
@@ -841,7 +845,7 @@ fn optics_example() {
           let b = B { a = A { x = 1 } }
           print({ b | a.x = 2 }.a.x)
     "};
-    let fbip = prism::dump("fbip", src).unwrap();
+    let fbip = prism::dump(DumpPhase::Fbip, src).unwrap();
     assert!(fbip.contains("reuse#"), "nested update path must reuse");
 }
 
@@ -859,7 +863,7 @@ fn lens_derive_example() {
         fn main() =
           print(with_x(P { x = 1, y = 2 }, 9).x)
     "};
-    let fbip = prism::dump("fbip", src).unwrap();
+    let fbip = prism::dump(DumpPhase::Fbip, src).unwrap();
     assert!(fbip.contains("reuse#"), "derived setter must reuse");
 }
 
@@ -886,7 +890,7 @@ fn stream_fuse_example() {
     let out = interp_output(Path::new(&path));
     insta::assert_snapshot!("interpreter@stream_fuse.pr", out);
     let src = fs::read_to_string(&path).unwrap();
-    let lowered = prism::dump("lowered", &prism::with_prelude(&src)).unwrap();
+    let lowered = prism::dump(DumpPhase::Lowered, &prism::with_prelude(&src)).unwrap();
     assert!(
         !lowered.contains("EOp") && !lowered.contains("ebind"),
         "stream chain must fuse away the free monad (no EOp cells, no ebind)"
@@ -908,7 +912,7 @@ fn stream_fold_example() {
     let out = interp_output(Path::new(&path));
     insta::assert_snapshot!("interpreter@stream_fold.pr", out);
     let src = fs::read_to_string(&path).unwrap();
-    let lowered = prism::dump("lowered", &prism::with_prelude(&src)).unwrap();
+    let lowered = prism::dump(DumpPhase::Lowered, &prism::with_prelude(&src)).unwrap();
     assert!(
         !lowered.contains("EOp") && !lowered.contains("ebind"),
         "fold chain must fuse away the free monad (no EOp cells, no ebind)"
@@ -930,7 +934,7 @@ fn streams_example() {
     let out = interp_output(Path::new(&path));
     insta::assert_snapshot!("interpreter@streams.pr", out);
     let src = fs::read_to_string(&path).unwrap();
-    let lowered = prism::dump("lowered", &prism::with_prelude(&src)).unwrap();
+    let lowered = prism::dump(DumpPhase::Lowered, &prism::with_prelude(&src)).unwrap();
     assert!(
         !lowered.contains("EOp") && !lowered.contains("ebind"),
         "streams must fuse away the free monad (no EOp cells, no ebind)"
@@ -953,7 +957,7 @@ fn rc_balanced() {
             }
             let src = fs::read_to_string(&path).unwrap();
             let full = prism::with_prelude(&src);
-            if prism::dump("core", &full).is_err() {
+            if prism::dump(DumpPhase::Core, &full).is_err() {
                 continue;
             }
             if let Err(err) = prism::rc_balanced(&full) {
@@ -1124,12 +1128,12 @@ fn fmt_idempotent() {
 fn fmt_preserves_core() {
     for path in corpus_files() {
         let src = fs::read_to_string(&path).unwrap();
-        let Ok(core) = prism::dump("core", &prism::with_prelude(&src)) else {
+        let Ok(core) = prism::dump(DumpPhase::Core, &prism::with_prelude(&src)) else {
             continue;
         };
         let once = prism::format(&src)
             .unwrap_or_else(|e| panic!("{} parses but won't format: {e}", path.display()));
-        let formatted_core = prism::dump("core", &prism::with_prelude(&once))
+        let formatted_core = prism::dump(DumpPhase::Core, &prism::with_prelude(&once))
             .unwrap_or_else(|e| panic!("{} lost typeability after fmt: {e}", path.display()));
         assert_eq!(core, formatted_core, "fmt changed core: {}", path.display());
     }

@@ -54,7 +54,7 @@ fn by_name(syms: impl IntoIterator<Item = Sym>) -> Vec<Sym> {
 }
 
 fn seq(op: Comp, k: Comp) -> Comp {
-    Comp::Bind(Box::new(op), "_".into(), Box::new(k))
+    Comp::Bind(Box::new(op), names::WILD.into(), Box::new(k))
 }
 
 fn dup(v: Sym, k: Comp) -> Comp {
@@ -143,6 +143,7 @@ enum RcFrame<'a> {
     FinishHandle {
         return_var: Option<Sym>,
         has_return_body: bool,
+        has_finally_body: bool,
         ops: &'a CheckedHandler,
     },
     FinishLeaf {
@@ -262,8 +263,9 @@ impl<'a> RcInserter<'a> {
             RcFrame::FinishHandle {
                 return_var,
                 has_return_body,
+                has_finally_body,
                 ops,
-            } => self.finish_handle(return_var, has_return_body, ops),
+            } => self.finish_handle(return_var, has_return_body, has_finally_body, ops),
             RcFrame::FinishLeaf {
                 counts,
                 borrowed_uses,
@@ -321,7 +323,7 @@ impl<'a> RcInserter<'a> {
                 let first_free = renamed_freev(first, &renames);
                 let mut rest_free = renamed_freev(rest, &rest_renames);
                 rest_free.remove(binder);
-                let alias = binder.as_str() != "_"
+                let alias = binder.as_str() != names::WILD
                     && matches!(&**first, Comp::Return(Value::Var(var))
                         if borrowed.contains(&renamed(*var, &renames)));
                 let owned_first: Set = owned.intersection(&first_free).copied().collect();
@@ -431,11 +433,13 @@ impl<'a> RcInserter<'a> {
                 body,
                 return_var,
                 return_body,
+                finally_body,
                 ops,
             } => {
                 self.frames.push(RcFrame::FinishHandle {
                     return_var: *return_var,
                     has_return_body: return_body.is_some(),
+                    has_finally_body: finally_body.is_some(),
                     ops,
                 });
                 for op in ops.iter().rev() {
@@ -446,6 +450,14 @@ impl<'a> RcInserter<'a> {
                         owned: Rc::new(op.params.iter().copied().collect()),
                         borrowed: Rc::new(Set::new()),
                         renames: scoped_renames(&renames, &binders),
+                    });
+                }
+                if let Some(finally_body) = finally_body {
+                    self.frames.push(RcFrame::Comp {
+                        source: finally_body,
+                        owned: Rc::new(Set::new()),
+                        borrowed: Rc::new(Set::new()),
+                        renames: Rc::clone(&renames),
                     });
                 }
                 if let Some(return_body) = return_body {
@@ -627,16 +639,19 @@ impl<'a> RcInserter<'a> {
         &mut self,
         return_var: Option<Sym>,
         has_return_body: bool,
+        has_finally_body: bool,
         ops: &'a CheckedHandler,
     ) {
         let mut bodies = take_comps(
             &mut self.built,
-            1 + usize::from(has_return_body) + ops.len(),
+            1 + usize::from(has_return_body) + usize::from(has_finally_body) + ops.len(),
         )
         .into_iter();
         let body = Box::new(bodies.next().expect("a handler body was rebuilt"));
         let return_body =
             has_return_body.then(|| Box::new(bodies.next().expect("a return clause was rebuilt")));
+        let finally_body = has_finally_body
+            .then(|| Box::new(bodies.next().expect("a cleanup clause was rebuilt")));
         let ops = ops.rebuild(|op| HandleOp {
             name: op.name,
             params: op.params.clone(),
@@ -649,6 +664,7 @@ impl<'a> RcInserter<'a> {
             body,
             return_var,
             return_body,
+            finally_body,
             ops,
         }));
     }
@@ -1003,6 +1019,7 @@ mod tests {
             body: Box::new(Comp::Return(Value::Var(from))),
             return_var: Some(from),
             return_body: Some(Box::new(Comp::Return(Value::Var(from)))),
+            finally_body: None,
             ops: CheckedHandler::new(vec![op]).unwrap(),
         };
         let renamed = rename_free(&handler, from, to);
@@ -1093,7 +1110,7 @@ mod tests {
         assert!(matches!(
             &**post,
             Comp::Bind(drop, binder, rest)
-                if binder.as_str() == "_"
+                if binder.as_str() == names::WILD
                     && matches!(&**drop, Comp::Drop(Value::Var(var)) if *var == retained)
                     && matches!(&**rest, Comp::Return(Value::Var(var)) if var == result)
         ));

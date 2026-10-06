@@ -293,12 +293,13 @@ lvalue   ->  varid { "." varid | "[" expr [ "," expr , ... ] "]" }
           |  "get" "(" ")" ( "." varid | "[" expr [ "," expr , ... ] "]" )
                 { "." varid | "[" expr [ "," expr , ... ] "]" }
 binop    ->  "??" | "|>" | ">>" | "<<" | "||" | "&&" -- binding given in 4.1
-         |  "==" | "/=" | "<" | "<=" | ">" | ">="
+         |  "==" | "/=" | "<" | "<=" | ">" | ">=" | "</>" | "::"
          |  "+" | "-" | "*" | "/" | "%"
 (* ANCHOR_END: expr *)
 
 (* ANCHOR: pattern *)
-pattern  ->  patalt { "|" patalt }                   -- alternation: any alternative matches
+pattern  ->  patcons { "|" patcons }                 -- alternation: any alternative matches
+patcons  ->  patalt [ "::" patcons ]                 -- cons: `h :: t` is `Cons(h, t)`
 patalt   ->  conid [ "(" pattern , ... ")" ]         -- constructor
           |  qualid [ "(" pattern , ... ")" ]        -- qualified constructor
           |  conid "{" [ fieldpat { "," fieldpat } [ "," ".." ] | ".." ] "}"
@@ -312,9 +313,10 @@ patalt   ->  conid [ "(" pattern , ... ")" ]         -- constructor
           |  "(" pattern "," [ pattern , ... ] ")"   -- tuple (including a one-tuple)
 fieldpat ->  varid [ "=" pattern ]                    -- a bare field is a pun
 letpat   ->  ( conid | qualid ) [ "(" pattern , ... ")" ] -- a `let` destructures with a
-          |  "(" pattern "," [ pattern , ... ] ")"   -- constructor or tuple pattern only,
-                                                     -- and admits no alternation; it may
-                                                     -- be refutable only under `else`
+          |  "(" pattern "," [ pattern , ... ] ")"   -- constructor, tuple, list, or cons
+          |  "[" [ pattern , ... ] "]"                -- pattern only, and admits no
+          |  patalt "::" patcons                     -- alternation; it may be refutable
+                                                     -- only under `else`
 (* ANCHOR_END: pattern *)
 
 (* ANCHOR: handler *)

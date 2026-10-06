@@ -16,6 +16,7 @@ use std::io;
 use std::path::Path;
 
 use crate::provenance::{self, EVENT_HASH_SCHEME};
+use prism_common::format::FormatTag;
 use prism_syntax::error::Error;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -26,9 +27,9 @@ pub use super::node_id::NodeId;
 /// The build-lineage projection embedded inside a package-world report (see
 /// `BuildLineage::to_json`); not the standalone sidecar envelope,
 /// which is [`LINEAGE_GRAPH_FORMAT`].
-pub const LINEAGE_FORMAT: &str = "prism-build-lineage-v1";
+pub const LINEAGE_FORMAT: FormatTag = FormatTag::new("prism-build-lineage-v1");
 /// The shared lineage graph envelope every producer emits.
-pub const LINEAGE_GRAPH_FORMAT: &str = "prism-lineage-graph-v1";
+pub const LINEAGE_GRAPH_FORMAT: FormatTag = FormatTag::new("prism-lineage-graph-v1");
 pub const LINEAGE_EXTENSION: &str = "plineage";
 /// The fixed file name a docs manifest is written under, beside the generated
 /// pages (`<outdir>/docs.plineage`). One home so the writer and every verifier
@@ -39,7 +40,7 @@ pub const DOCS_MANIFEST_FILE: &str = "docs.plineage";
 pub const DOCS_PAGE_KIND: &str = "docs-page";
 /// The docs generator's format identifier, carried by the generator node so a
 /// manifest names which renderer produced its pages.
-pub const DOCS_GENERATOR_FORMAT: &str = "prism-docs-markdown-v1";
+pub const DOCS_GENERATOR_FORMAT: FormatTag = FormatTag::new("prism-docs-markdown-v1");
 /// The conventional extension of a run's durable trace (`foo.plineage` records its
 /// trace as `foo.replay`), named in verifier messages.
 ///
@@ -51,12 +52,10 @@ pub const STDOUT_SELECTOR: &str = "stdout";
 // The role prefix an input-file node id carries, so a read input and a produced
 // stdout of identical bytes cannot collide on one node.
 const INPUT_FILE_SELECTOR: &str = "input-file";
+/// Minted node ids (request, compiler identity, diagnostics, cache summary) commit
+/// their canonical payload bytes under this scheme; root and artifact nodes reuse
+/// the content digest they already carry.
 pub const ARTIFACT_DIGEST_SCHEME: &str = "blake3";
-// Minted node ids (request, compiler identity, diagnostics, cache summary) commit
-// their canonical payload bytes under this scheme; root and artifact nodes reuse
-// the content digest they already carry.
-const BACKEND_LLVM: &str = "llvm";
-const BACKEND_MLIR: &str = "mlir";
 // Node-kind discriminants, matching the `rename_all = "kebab-case"` serde tags on
 // `NodeKind`. Defined once here and echoed by `NodeKind::tag`; the round-trip is
 // guarded by a unit test so a rename cannot silently drift.
@@ -101,10 +100,6 @@ const REQUEST_DOCS: &str = "docs";
 const WRITE_MODE_WRITE: &str = "write";
 const WRITE_MODE_APPEND: &str = "append";
 const WRITE_MODE_REMOVE: &str = "remove";
-// The interpreter's backend label in a run's compiler identity, distinguishing a
-// recorded interpreter run from a native build in the shared graph.
-pub const BACKEND_INTERPRETER: &str = "interpreter";
-
 /// The kind of build request that produced a lineage graph.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -546,7 +541,7 @@ impl FileWritePayload {
 /// identifier, so a manifest names the renderer whose output it pins.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DocsGeneratorPayload {
-    pub format: String,
+    pub format: FormatTag,
 }
 
 /// One doctest that ran during a documentation build.
@@ -565,7 +560,7 @@ impl DocsGeneratorPayload {
     // The generator node is minted over its format identifier.
     #[must_use]
     pub fn node_id(&self) -> NodeId {
-        minted_id(self.format.as_bytes())
+        minted_id(self.format.as_str().as_bytes())
     }
 }
 
@@ -690,7 +685,7 @@ pub enum Variant {
 /// The shared, versioned lineage graph: one envelope, many producers.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LineageGraph {
-    pub format: String,
+    pub format: FormatTag,
     pub variant: Variant,
     pub nodes: Vec<Node>,
     pub edges: Vec<Edge>,
@@ -923,7 +918,7 @@ pub fn finalize(variant: Variant, mut nodes: Vec<Node>, mut edges: Vec<Edge>) ->
     edges.sort();
     edges.dedup();
     LineageGraph {
-        format: LINEAGE_GRAPH_FORMAT.to_string(),
+        format: LINEAGE_GRAPH_FORMAT,
         variant,
         nodes,
         edges,
@@ -1004,15 +999,6 @@ pub fn recompute_digest(scheme: &str, bytes: &[u8]) -> Result<String, Error> {
     }
 }
 
-#[must_use]
-pub const fn backend_name(mlir: bool) -> &'static str {
-    if mlir {
-        BACKEND_MLIR
-    } else {
-        BACKEND_LLVM
-    }
-}
-
 // The build-lineage-v1 root projection, shared by the v1 report body and adapter.
 #[must_use]
 pub fn root_json(root: &LineageRoot) -> Value {
@@ -1073,7 +1059,7 @@ mod tests {
     #[test]
     fn request_accessor_rejects_zero_or_many() {
         let empty = LineageGraph {
-            format: LINEAGE_GRAPH_FORMAT.to_string(),
+            format: LINEAGE_GRAPH_FORMAT,
             variant: Variant::Run,
             nodes: Vec::new(),
             edges: Vec::new(),
@@ -1085,7 +1071,7 @@ mod tests {
             kind: NodeKind::Request(BuildRequest::run(Path::new(entry))),
         };
         let one = LineageGraph {
-            format: LINEAGE_GRAPH_FORMAT.to_string(),
+            format: LINEAGE_GRAPH_FORMAT,
             variant: Variant::Run,
             nodes: vec![request("a.pr")],
             edges: Vec::new(),
@@ -1093,7 +1079,7 @@ mod tests {
         assert!(one.request().is_ok(), "one request resolves");
 
         let two = LineageGraph {
-            format: LINEAGE_GRAPH_FORMAT.to_string(),
+            format: LINEAGE_GRAPH_FORMAT,
             variant: Variant::Run,
             nodes: vec![request("a.pr"), request("b.pr")],
             edges: Vec::new(),

@@ -26,8 +26,8 @@ effect Log
 
 fn feed(c : Chan, items : List(Int)) : Int ! {Async(Int)} =
   match items of
-    Nil => 0
-    Cons(x, rest) =>
+    [] => 0
+    x :: rest =>
       send(c, x)
       yield()
       feed(c, rest)

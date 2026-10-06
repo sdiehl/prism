@@ -1,6 +1,5 @@
 ---
 source: tests/snapshots.rs
-assertion_line: 14
 expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/handler_arity.pr
 ---
@@ -22,6 +21,7 @@ Program {
                     ],
                     ret: Unit,
                     grade: Many,
+                    span: 212..215,
                 },
             ],
             span: 200..227,

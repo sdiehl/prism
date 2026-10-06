@@ -38,14 +38,14 @@ fn tok_key(t : Token) : String =
 -- first divergence.
 fn cmp_toks(got : List(Token), want : List(Token), idx : Int) : String =
   match got of
-    Nil =>
+    [] =>
       match want of
-        Nil => "ok"
-        Cons(_, _) => "mismatch parse-count got=fewer at idx={show_int(idx)}"
-    Cons(g, gr) =>
+        [] => "ok"
+        _ :: _ => "mismatch parse-count got=fewer at idx={show_int(idx)}"
+    g :: gr =>
       match want of
-        Nil => "mismatch parse-count got=more at idx={show_int(idx)}"
-        Cons(w, wr) =>
+        [] => "mismatch parse-count got=more at idx={show_int(idx)}"
+        w :: wr =>
           if tok_key(g) == tok_key(w) then
             cmp_toks(gr, wr, idx + 1)
           else

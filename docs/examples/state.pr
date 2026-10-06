@@ -20,8 +20,8 @@ fn step(op, s) : (Int, Int) =
 
 fn run(ops, s) : Unit ! {IO} =
   match ops of
-    Nil => ()
-    Cons(op, rest) =>
+    [] => ()
+    op :: rest =>
       let (v, s2) = step(op, s)
       println(v)
       run(rest, s2)

@@ -1038,4 +1038,46 @@ pub(super) const ENTRIES: &[Explanation] = &[
         fix: "Lift the callable to a top-level function and certify it, or thread \
               it through a parameter whose type already carries `@ noalloc`.",
     },
+    Explanation {
+        code: "E6088",
+        title: "a handler with a `finally` clause has a clause that may resume more than once",
+        prose: "A `finally` clause runs when its handler is left, after `return` \
+                on the normal path and in place of the rest of the handler when \
+                an operation clause drops its continuation, and it runs exactly \
+                once. That promise holds only when the handler is left exactly \
+                once, so every operation clause of such a handler resumes at \
+                most once. A clause that calls its continuation twice, stores \
+                it, or resumes under a lambda whose call count is unknown could \
+                re-enter a scope whose cleanup has already run, and for a closed \
+                socket or a released resource there is no correct meaning for \
+                that.",
+        example: "effect Ask\n  ask() : Int\n\nfn go() =\n  handle ask() with\n    finally => println(\"done\")\n    ask() resume k => k(1) + k(2)",
+        fix: "Resume exactly once in tail position (or mark the clause `once`), \
+              handle the operation with `never`, or drop the `finally` clause \
+              and release the resource by hand on each path.",
+    },
+    Explanation {
+        code: "E6089",
+        title: "a `finally` clause performs an operation that never resumes",
+        prose: "A `finally` clause runs while its scope is being torn down, \
+                possibly with other cleanups still pending behind it. An \
+                operation declared `never` abandons the rest of its computation, \
+                so performing one from the cleanup would leave those pending \
+                cleanups unrun. The restriction falls on the cleanup clause \
+                alone: the handled body may still perform such an operation, \
+                and the cleanup is exactly what runs when it does.",
+        example: "effect Ask\n  ask() : Int\n\neffect Quit\n  never quit(Unit) : Unit\n\nfn go() =\n  handle ask() with\n    finally => quit(())\n    ask() resume k => k(1)",
+        fix: "Make the cleanup total: report a failure through a value or a \
+              resumable operation rather than one that never resumes.",
+    },
+    Explanation {
+        code: "E6090",
+        title: "a handler has more than one `finally` clause",
+        prose: "A handler runs its cleanup exactly once when it is left, so it \
+                carries at most one `finally` clause. A second clause would have \
+                no defined order against the first and would run twice what the \
+                clause promises to run once.",
+        example: "effect Ask\n  ask() : Int\n\nfn go() =\n  handle ask() with\n    finally => println(\"a\")\n    finally => println(\"b\")\n    ask() resume k => k(1)",
+        fix: "Merge the two bodies into one `finally` clause.",
+    },
 ];

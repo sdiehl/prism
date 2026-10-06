@@ -9,8 +9,8 @@ fn keep(xs, p) = filter(p, xs)
 
 fn foreach(xs, f) =
   match xs of
-    Nil => ()
-    Cons(x, rest) =>
+    [] => ()
+    x :: rest =>
       f(x)
       foreach(rest, f)
 

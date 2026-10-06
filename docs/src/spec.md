@@ -96,6 +96,7 @@ The operator set is fixed; the language has no user-defined operators. Arithmeti
 | Logical    | `&&` `\|\|`                                   |
 | Pipeline   | `\|>` `>>` `<<`                               |
 | Failure    | `??` `?.` `?`                                 |
+| List       | `::`                                          |
 | Arrows     | `->` `<-` `=>`                                |
 | Binding    | `=` `:=` `:` and compound `+=` `-=` `*=` `%=` |
 | Effect     | `!`                                           |
@@ -221,7 +222,7 @@ Expressions, patterns, and the handler block of `handle`/`try` (used in [effects
 
 ### 4.1 Operator Precedence {#operator-precedence}
 
-The table gives the binding of each operator, loosest to tightest. Levels 1 to 8 are binary operators looser than unary minus; exponentiation at level 10 binds tighter than it, and level 11 is application, field access, and the postfix failure operators. Unary minus is a **tight prefix** below application and projection but above multiplication, so `-f(x)` is `-(f(x))`, `-x * y` is `(-x) * y`, and a leading `f -x` is the binary `f - x` (there is no juxtaposition application; write `f(-x)`). Exponentiation follows the mathematical convention: `-x ^ y` is `-(x ^ y)`, and a negative base needs parentheses.
+The table gives the binding of each operator, loosest to tightest. Levels 1 to 10 are binary operators looser than unary minus; exponentiation at level 12 binds tighter than it, and level 13 is application, field access, and the postfix failure operators. Unary minus is a **tight prefix** below application and projection but above multiplication, so `-f(x)` is `-(f(x))`, `-x * y` is `(-x) * y`, and a leading `f -x` is the binary `f - x` (there is no juxtaposition application; write `f(-x)`). Exponentiation follows the mathematical convention: `-x ^ y` is `-(x ^ y)`, and a negative base needs parentheses.
 
 | Level | Operators                              | Associativity |
 | ----- | -------------------------------------- | ------------- |
@@ -231,11 +232,17 @@ The table gives the binding of each operator, loosest to tightest. Levels 1 to 8
 | 4     | `\|\|`                                 | left          |
 | 5     | `&&`                                   | left          |
 | 6     | `==` `/=` `<` `<=` `>` `>=`            | none          |
-| 7     | `+` `-`                                | left          |
-| 8     | `*` `/` `%`                            | left          |
-| 9     | prefix `-` (unary minus)               | prefix        |
-| 10    | `^`                                    | right         |
-| 11    | `f(...)` `a[i]` `.field` `?.field` `?` | left          |
+| 7     | `</>`                                  | left          |
+| 8     | `::`                                   | right         |
+| 9     | `+` `-`                                | left          |
+| 10    | `*` `/` `%`                            | left          |
+| 11    | prefix `-` (unary minus)               | prefix        |
+| 12    | `^`                                    | right         |
+| 13    | `f(...)` `a[i]` `.field` `?.field` `?` | left          |
+
+The list operator `h :: t` is `Cons(h, t)`. It groups to the right, so `x :: y :: rest` is `x :: (y :: rest)`, and it sits between arithmetic and comparison, so `n + 1 :: xs == ys` compares the extended list.
+
+The path operator `a </> b` is the `PathJoin` method `path_append(a, b)`. It groups to the left, so `root() </> dir </> name` builds outward from the left operand, and it sits just below `::`. The prelude declares the class and `Path` gives the one instance; the operator is not defined on strings or numbers.
 
 ## 5. Functions {#functions}
 
@@ -1245,6 +1252,36 @@ The two tabs are the compiler's own dumps: **Core** (`prism dump core`) is the e
 
 An escape analysis keeps the purity honest: the compiler rejects any closure or returned value that would carry the var out of its block, so the state cannot outlive its handler.
 
+Because the state is a handler, where the `var` sits relative to another handler is part of the meaning, and it matters once a clause resumes more than once. A `var` declared outside a multishot handler is one cell its resumptions share, so a write made by the first is still there when the second runs. A `var` declared under the handler is part of the continuation the clause captures, so each resumption starts again from the value it had at the capture point:
+
+```prism
+effect Choose
+  choose() : Bool
+
+fn outside() : List(Int) =
+  var x := 1
+  handle let _ = if choose() then x := 2 else () in [x] with
+    choose() resume k => append(k(true), k(false))
+    return r => r
+
+fn scoped() : List(Int) ! {Choose} =
+  var x := 1
+  if choose() then
+    x := 2
+  [x]
+
+fn inside() : List(Int) =
+  handle scoped() with
+    choose() resume k => append(k(true), k(false))
+    return r => r
+
+fn main() =
+  println(outside())
+  println(inside())
+```
+
+The handler, the mutation, and the resumption order are the same in both halves, yet `outside` prints `[2, 2]` and `inside` prints `[2, 1]`. Erasing a `var` to a mutable cell is an optimization the compiler takes only where no resumption can tell the difference, so every lowering prints the same pair.
+
 ### 8.7 Errors and Failure {#errors-and-failure}
 
 Prism has no built-in exception type. Errors and failure are two related mechanisms, both resting on the non-resumable `never` clause of the [clause sugar](#clause-sugar). With the imperative `break`, `continue`, and `return` of [imperative control flow](#imperative-control-flow), they are one mechanism wearing several faces: each is a single-operation effect whose handler never resumes the captured continuation, installed only where the corresponding keyword actually occurs, so non-local control costs nothing where it is not used and (being handled at its boundary) surfaces in no effect row where it is.
@@ -1579,6 +1616,49 @@ fn adapt_v1_to_v2(action : () -> a ! {KvV1 | e}) =
     return r => r
 ```
 
+### 8.20 Cleanup Clauses {#cleanup-clauses}
+
+A handler may carry one `finally => e` clause, which runs `e` each time the handler is left. The parser accepts it anywhere among the clauses and the formatter prints it last. A handler with no operation clauses may carry it too. That is the **pure bracket**, which catches nothing and exists only to delimit a scope, so a scoped resource has one spelling whether or not it owns an effect.
+
+```text
+G |- body : A ! {ops(H) | e}
+G, r : A |- ret : B ! e
+G |- fin : Unit ! e
+---------------------------------------------------------------
+G |- handle body with H, return r => ret, finally => fin : B ! e
+```
+
+The clause is typed in `G`, the scope outside the handler, at the handler's residual row `e`. It binds nothing, so neither the `return` binder nor a continuation is in scope, and its answer is `Unit` because it is discarded. Every operation the cleanup performs is therefore answered strictly outside the delimiter being left, and a cleanup that performed an operation of its own handler is unrepresentable rather than a run-time search of a stack the handler has already left.
+
+Three gates keep the exactly-once promise. Every operation clause of a handler that carries the clause resumes at most once (E6088): with a `many` clause the machine would resume a segment whose cleanup has already run and re-enter a scope whose resource is gone, and no re-entry hook can reopen a socket. The cleanup performs no `never` operation, directly or through a call whose row names its effect (E6089), so a cleanup runs to completion and the cleanups pending behind it still run. A handler carries at most one such clause (E6090).
+
+The clause runs exactly once each time its handler is left, and a handler is left in one of two ways. On the **normal path** the `return` clause runs, then the cleanup, and the answer is unchanged. On the **abandoned path** an operation performed under the handler is answered by a clause outside it that drops the continuation; the cleanup is pending from the perform, and it runs when that clause body finishes without having resumed, before the clause's answer flows on. Several handlers abandoned together run their cleanups innermost first. A continuation that is resumed reinstates the handler instead, so nothing is pending and the handler is later left once, by whichever path it takes then. A `return` clause that itself aborts leaves its own handler's cleanup pending like any other. A mask changes which handler answers an operation, not which handlers it crosses, so a handler a masked operation skips is left through its cleanup if the continuation is dropped. A handler inside a segment that an outer `many` clause resumes twice is entered twice and left twice.
+
+```prism
+effect Abort
+  never abort(Int) : Int
+
+fn guarded(n : Int) : Int ! {Abort, IO} =
+  handle if n > 0 then n else abort(n) with
+    return r => r * 2
+    finally => println("released")
+
+fn attempt(n : Int) : Int ! {IO} =
+  handle guarded(n) with
+    never abort(x) => x
+    return r => r
+
+fn main() : Unit ! {IO} =
+  println(attempt(3))
+  println(attempt(-1))
+```
+
+Both calls print `released` before their answers: `6` on the normal path and `-1` on the abandoned one.
+
+**A machine fault is not an exit.** An operation that no handler answers stops the run without running any pending cleanup, on every tier. That path is a compiler or runtime defect rather than a program path, and the native runtime faults by aborting with no unwinder, so a rule it could not honour is one the interpreter does not promise either. A program that wants its cleanups to run before it reports a failure performs `fail()`, which is an abandonment.
+
+The cleanup's own effects are ordinary events. A recorded run logs the capability reads its cleanups perform, and the replay of that run runs each cleanup exactly once, as the recorded run did. A cleanup still owed is an obligation of the process that installed the handler, so a continuation that owes one does not travel: [sealing](#suspend-and-resume) it is refused as `Bracketed`. A handler that carries the clause and owes nothing moves like any other. Every lowering either honours the clause or declines the program in favour of one that does, so the interpreter and a native build print the same cleanups in the same order.
+
 ## 9. Coeffects {#usage-and-resource-annotations}
 
 Prism has two static axes that deliberately do not collapse into one row. The effect row records what a computation may _do_ to the world: perform `Console`, `FileSystem`, `Async`, `Clock`, `Fail`, a user effect, and so on. Usage and resource annotations record how a value, call tree, or continuation may be _used_. They are **coeffects**, the dual of effects: an effect flows outward from the computation and is discharged by a handler around it, while a coeffect flows inward from the context and is discharged by the boundary that consumes the value, so one tracks what the program does to its world and the other what the world may do with the program's values. The user model is one sentence: `!` says what happens; `@` says how a value may be used.
@@ -1755,7 +1835,7 @@ fn main() = println(twice(\(n) -> n + 1, 40))
 
 ### 9.8 portable {#coeffect-portable}
 
-The mobility contract: a `@ portable` closure may be moved to a fresh runtime, so everything it captures has to travel with it. A capture is admitted when it is a content-addressed top-level function or constructor, another portable parameter, or portable scalar data; a captured local closure, `var` cell, or handler operation is bound to the runtime it was created in and is rejected by name (E6060).
+The mobility contract: a `@ portable` closure may be moved to a fresh runtime, so everything it captures has to travel with it. A capture is admitted when it is a content-addressed top-level function or constructor, another portable parameter, or portable scalar data (a portable-typed parameter, or a `let` whose value is a literal, is ascribed a portable type, or is inferred to have one); a captured local closure, `var` cell, or handler operation is bound to the runtime it was created in and is rejected by name (E6060).
 
 ```prism
 fn answer() : Int = 42
@@ -1769,8 +1849,8 @@ fn main() = println(ship(\() -> answer()))
 fn ship(f : (() -> Int) @ portable) : Int = f()
 
 fn main() =
-  let n = 3
-  println(ship(\() -> n))
+  let g = \() -> 3
+  println(ship(\() -> g()))
 ```
 
 `teleport(work : (() -> a ! {IO}) @ {once, portable}) : Result(Unit, MoveError) ! {Placement, IO | e}` (the `Teleport` module) is the checked mobility boundary built from those facts: its parameter type makes each call prove the closure captures only content-addressed code and portable data and runs at most once, so the computation is safe to move to a fresh runtime. `teleport` does not call `work`. It seals the computation into an envelope carrying the machine state a suspend at that call would have captured, and hands the envelope to `place`, the one operation of the `Placement` effect, so where the computation goes is the installed transport's choice and never an argument here. The result reports delivery rather than the closure's value, because across a transport that leaves the process there is no value to return: the sealing run reaches `place` and the computation continues in another runtime, whose output continues the sealing run's rather than repeating it. What the annotation governs is still only what the compiler accepts; what a placement does is the transport's.
@@ -2191,7 +2271,7 @@ Patterns appear in `match` arms, `let` bindings, lambda and function parameters,
 
 ### 11.1 Destructuring {#pattern-destructuring}
 
-A **constructor pattern** matches a value built by that constructor and destructures its fields against nested patterns of their own: patterns nest to any depth, so one arm can reach through a tuple, into a constructor, into a record field, binding every name it needs in a single match. The remaining forms cover the value's other shapes: a **literal pattern** (`Int`, `Float`, `Char`, `Bool`, and a leading `-` folded into a numeric literal, since patterns have no general negation) matches an exact constant; a **variable pattern** binds the whole matched value under a name; the **wildcard** `_` matches anything and binds nothing; a **tuple pattern** `(p, q, ...)` destructures the matching tuple arity; and a **list pattern** `[p, q, ...]` is sugar for the nested `Cons`/`Nil` constructor patterns it expands to. A **record pattern** `C { f = p, ... }` names the fields it cares about; a bare field name **puns**, binding a variable of the same name (`C { f, .. }` is shorthand for `C { f = f, .. }`), and a trailing `..` ignores every field the pattern does not mention. The spread may stand alone: `C { .. }` matches the constructor without binding any of its fields.
+A **constructor pattern** matches a value built by that constructor and destructures its fields against nested patterns of their own: patterns nest to any depth, so one arm can reach through a tuple, into a constructor, into a record field, binding every name it needs in a single match. The remaining forms cover the value's other shapes: a **literal pattern** (`Int`, `Float`, `Char`, `Bool`, and a leading `-` folded into a numeric literal, since patterns have no general negation) matches an exact constant; a **variable pattern** binds the whole matched value under a name; the **wildcard** `_` matches anything and binds nothing; a **tuple pattern** `(p, q, ...)` destructures the matching tuple arity; a **list pattern** `[p, q, ...]` is sugar for the nested `Cons`/`Nil` constructor patterns it expands to; and a **cons pattern** `h :: t` is `Cons(h, t)`, grouping to the right so `x :: y :: rest` takes two elements off the front. A cons pattern binds tighter than alternation: `x :: _ | []` is two alternatives. The formatter prints every list constructor pattern in this sugar, `[]` for `Nil`, brackets for a list of known length, and `::` otherwise. A **record pattern** `C { f = p, ... }` names the fields it cares about; a bare field name **puns**, binding a variable of the same name (`C { f, .. }` is shorthand for `C { f = f, .. }`), and a trailing `..` ignores every field the pattern does not mention. The spread may stand alone: `C { .. }` matches the constructor without binding any of its fields.
 
 ```prism
 {{#include ../examples/destructuring.pr}}
@@ -2233,7 +2313,7 @@ Because the body is shared, every alternative must bind the same set of names; o
 {{#include ../examples/alternation.pr}}
 ```
 
-A `let` binding destructures with a constructor or tuple pattern and admits no alternation, since a binding names one shape and has nothing to choose between. Without an [`else` clause](#let-statements) the binding must be irrefutable, and a pattern that fails to cover its type is reported as the non-exhaustive match it denotes; with one, the uncovered shapes are what the fallback answers for.
+A `let` binding destructures with a constructor, tuple, list, or cons pattern and admits no alternation, since a binding names one shape and has nothing to choose between. Without an [`else` clause](#let-statements) the binding must be irrefutable, and a pattern that fails to cover its type is reported as the non-exhaustive match it denotes; with one, the uncovered shapes are what the fallback answers for.
 
 ### 11.3 Guards {#pattern-guards}
 
@@ -2447,6 +2527,8 @@ test fn double_of_three_is_six() =
 ```
 
 `prism test` accepts a project, one source file, or the enclosing project by default. Project discovery includes tests in every project-owned module, even modules unreachable from the executable entry point, and integration modules are checked as package consumers that see only the public API. Logical test identities and execution order are deterministic; the positional `FILTER` argument with `--exact`, plus `--list`, `--no-run`, `--format human|json`, `--show-output`, and `--fail-if-no-tests`, select or report the same manifest without changing it. Each test runs in a fresh interpreter world with captured output, so state and effects cannot leak between tests.
+
+The `Test` module's assertions fail a test with a structured report rather than a bare `fail()`: `fail_with(message)`, `expect(cond, message)`, `expect_equal(expected, actual)` for any type with `Eq` and `Show`, and `expect_text(expected, actual)` for strings. A failing equality reports both values and, when either spans lines, a line diff; the JSON events carry the same fields. A comment `-- test: skip(reason)` directly above a `test fn` reports the test as skipped with its reason instead of running it, and `-- test: tags(a, b)` labels it for `--tag a`, which selects the tests carrying any requested tag. An unrecognized `-- test:` line is an error. `--junit PATH` additionally writes the results as JUnit XML, one suite per module, with no timings, so the file is deterministic.
 
 Test declarations are retained only in test mode. Ordinary `check`, `build`, `run`, interfaces, Core hashes, native objects, and binaries strip them before semantic identity is taken, so adding or editing a test cannot change a production artifact.
 

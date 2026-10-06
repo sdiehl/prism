@@ -1,5 +1,5 @@
 {
-  "schema": "prism-surface-syntax-v1",
+  "schema": "prism-surface-syntax-v2",
   "compiler": "<version>",
   "source": {
     "digest": "c025e67e984f56f67a95de415733f5b802c38515484bf092520c1cb9639993d1",

@@ -28,6 +28,10 @@ pub struct TestOptions {
     pub show_output: bool,
     /// Make an empty selection a command failure.
     pub fail_if_no_tests: bool,
+    /// Run only the tests carrying at least one of these tags.
+    pub tags: Vec<String>,
+    /// Also write a `JUnit` XML report to this path.
+    pub junit: Option<std::path::PathBuf>,
 }
 
 /// Run the `prism test` command.

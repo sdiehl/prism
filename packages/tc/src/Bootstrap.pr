@@ -8,6 +8,7 @@
 import Control.Fresh (Fresh, gensym, run_fresh)
 import Control.Solve (Solve)
 import Data.Char (is_upper)
+import Test (expect_equal)
 import Data.Diff (Divergence, DiffAt, DiffLeftEnd, DiffRightEnd, first_diff)
 import Data.Foldable (length)
 import Data.List (..)
@@ -129,8 +130,8 @@ fn mono(ty : VTy) : Scheme = Scheme { tyvars = [], rowvars = [], body = ty }
 
 fn env_get(name : String, env : List(EnvEntry)) : Option(Scheme) =
   match env of
-    Nil => None
-    Cons(entry, rest) =>
+    [] => None
+    entry :: rest =>
       match entry of
         BValue(key, value) =>
           if key == name then
@@ -151,8 +152,8 @@ fn env_get(name : String, env : List(EnvEntry)) : Option(Scheme) =
 
 fn instance_get(name : String, env : List(EnvEntry)) : Option(InstanceInfo) =
   match env of
-    Nil => None
-    Cons(entry, rest) =>
+    [] => None
+    entry :: rest =>
       match entry of
         BValue(key, _value) =>
           if key == name then
@@ -192,8 +193,8 @@ fn env_put_operation(
 -- ordinary values and instances that reuse the same source spelling.
 fn operation_get(name : String, env : List(EnvEntry)) : Option(Scheme) =
   match env of
-    Nil => None
-    Cons(entry, rest) =>
+    [] => None
+    entry :: rest =>
       match entry of
         BOperation(key, scheme) =>
           if key == name then
@@ -210,8 +211,8 @@ fn env_put_frame(
 
 fn tyname_get(name : String, names : List((String, VTy))) : Option(VTy) =
   match names of
-    Nil => None
-    Cons((key, value), rest) =>
+    [] => None
+    (key, value) :: rest =>
       if key == name then
         Some(value)
       else
@@ -219,8 +220,8 @@ fn tyname_get(name : String, names : List((String, VTy))) : Option(VTy) =
 
 fn rowname_get(name : String, names : List((String, Tail))) : Option(Tail) =
   match names of
-    Nil => None
-    Cons((key, value), rest) =>
+    [] => None
+    (key, value) :: rest =>
       if key == name then
         Some(value)
       else
@@ -228,8 +229,8 @@ fn rowname_get(name : String, names : List((String, Tail))) : Option(Tail) =
 
 fn ctor_get(name : String, ctors : List(CtorInfo)) : Option(CtorInfo) =
   match ctors of
-    Nil => None
-    Cons(info, rest) =>
+    [] => None
+    info :: rest =>
       if ctor_name(info) == name then
         match ctor_refusal(info) of
           Some(_) => None
@@ -242,8 +243,8 @@ fn ctor_named_refusal(
   ctors : List(CtorInfo)
 ) : Option((String, String)) =
   match ctors of
-    Nil => None
-    Cons(info, rest) =>
+    [] => None
+    info :: rest =>
       if ctor_name(info) == name then
         ctor_refusal(info)
       else
@@ -251,8 +252,8 @@ fn ctor_named_refusal(
 
 fn resolved_get(name : String, fs : List(RFunction)) : Option(RFunction) =
   match fs of
-    Nil => None
-    Cons(f, rest) =>
+    [] => None
+    f :: rest =>
       if f.name == name then
         Some(f)
       else
@@ -260,8 +261,8 @@ fn resolved_get(name : String, fs : List(RFunction)) : Option(RFunction) =
 
 fn input_has(name : String, doc : TcInputDoc) : Bool =
   match doc.functions of
-    Nil => false
-    Cons(f, rest) =>
+    [] => false
+    f :: rest =>
       if f.name == name then
         true
       else
@@ -269,8 +270,8 @@ fn input_has(name : String, doc : TcInputDoc) : Bool =
 
 fn item_decls(items : List(Item)) : List(Decl) =
   match items of
-    Nil => []
-    Cons(item, rest) =>
+    [] => []
+    item :: rest =>
       match item of
         IDecl { decl = decl, .. } => Cons(decl, item_decls(rest))
         _ => item_decls(rest)
@@ -287,8 +288,8 @@ fn is_data_item(item : Item) : Bool =
 -- matching the Rust checker's normalization of every other shape to `Type`.
 fn row_kind_data_names(items : List(Item)) : List(String) =
   match items of
-    Nil => []
-    Cons(item, rest) =>
+    [] => []
+    item :: rest =>
       match item of
         IData { name = name, params = params, param_kinds = kinds, .. } =>
           if length(params) == length(kinds) && has_row_kind(kinds) then
@@ -299,14 +300,14 @@ fn row_kind_data_names(items : List(Item)) : List(String) =
 
 fn has_row_kind(kinds : List(Kind)) : Bool =
   match kinds of
-    Nil => false
-    Cons(KRow, _rest) => true
-    Cons(_kind, rest) => has_row_kind(rest)
+    [] => false
+    KRow :: _rest => true
+    _kind :: rest => has_row_kind(rest)
 
 fn row_kind_data_member(name : String, data : List(String)) : Bool =
   match data of
-    Nil => false
-    Cons(head, rest) => name == head || row_kind_data_member(name, rest)
+    [] => false
+    head :: rest => name == head || row_kind_data_member(name, rest)
 
 fn names_of_params(params : List(String)) : (List((String, VTy)), List(Binder(TyVarSpace))) ! {Fresh} =
   names_of_params_go(params, [], [])
@@ -320,8 +321,8 @@ fn names_of_params_go(
   binders : List(Binder(TyVarSpace))
 ) : (List((String, VTy)), List(Binder(TyVarSpace))) ! {Fresh} =
   match params of
-    Nil => (reverse(names), reverse(binders))
-    Cons(name, rest) =>
+    [] => (reverse(names), reverse(binders))
+    name :: rest =>
       let binder = fresh_binder(name)
       names_of_params_go(
           rest,
@@ -464,8 +465,8 @@ fn ctor_infos_go(
   row_data : List(String)
 ) : List(CtorInfo) ! {Fresh} =
   match items of
-    Nil => []
-    Cons(item, rest) =>
+    [] => []
+    item :: rest =>
       append(ctors_of_item(item, row_data), ctor_infos_go(rest, row_data))
 
 fn ctors_of_item(
@@ -484,8 +485,8 @@ fn ctors_of_item(
 
 fn refused_ctor_infos(parent : String, ctors : List(Ctor)) : List(CtorInfo) =
   match ctors of
-    Nil => []
-    Cons(ctor, rest) =>
+    [] => []
+    ctor :: rest =>
       let fields =
         match ctor.shape of
           CPositional(_args) => []
@@ -514,8 +515,8 @@ fn ctor_infos_of(
   row_data : List(String)
 ) : List(CtorInfo) =
   match ctors of
-    Nil => []
-    Cons(ctor, rest) =>
+    [] => []
+    ctor :: rest =>
       Cons(
           ctor_info(parent, names, binders, result, ctor, row_data),
           ctor_infos_of(parent, names, binders, result, rest, row_data),
@@ -579,8 +580,8 @@ fn ctor_info(
 
 fn ctor_env(ctors : List(CtorInfo), env : List(EnvEntry)) : List(EnvEntry) =
   match ctors of
-    Nil => env
-    Cons(info, rest) =>
+    [] => env
+    info :: rest =>
       match ctor_refusal(info) of
         Some(_) => ctor_env(rest, env)
         None => ctor_env(rest, env_put(ctor_name(info), ctor_scheme(info), env))
@@ -599,8 +600,8 @@ fn op_env(
   env : List(EnvEntry)
 ) : List(EnvEntry) ! {Fresh} =
   match items of
-    Nil => env
-    Cons(item, rest) =>
+    [] => env
+    item :: rest =>
       op_env(rest, row_data, put_entries(ops_of_item(item, row_data), env))
 
 fn put_entries(
@@ -640,8 +641,8 @@ fn op_entries(
   row_data : List(String)
 ) : List((String, Scheme)) =
   match ops of
-    Nil => []
-    Cons(op, rest) =>
+    [] => []
+    op :: rest =>
       append(
           op_entry(performed, names, binders, op, row_data),
           op_entries(performed, names, binders, rest, row_data),
@@ -686,8 +687,8 @@ fn op_is_ground(
 -- other operations belong to the same effect without reconstructing the AST.
 fn operation_table(items : List(Item)) : List((String, String)) =
   match items of
-    Nil => []
-    Cons(item, rest) =>
+    [] => []
+    item :: rest =>
       match item of
         IEffect { name = effect_name, ops = ops, .. } =>
           append(
@@ -701,13 +702,13 @@ fn operation_declared(
   operations : List((String, String))
 ) : Bool =
   match operations of
-    Nil => false
-    Cons((_effect, op), rest) => op == name || operation_declared(name, rest)
+    [] => false
+    (_effect, op) :: rest => op == name || operation_declared(name, rest)
 
 fn all_bound(vars : List(String), names : List((String, VTy))) : Bool =
   match vars of
-    Nil => true
-    Cons(v, rest) =>
+    [] => true
+    v :: rest =>
       match tyname_get(v, names) of
         Some(_found) => all_bound(rest, names)
         None => false
@@ -737,6 +738,7 @@ fn kind_of_expr(e : Expr) : String =
       "advanced"
     EOptChain(_, _) | ERange(_, _) | ECompose(_, _, _) | EReadPath(_, _) =>
       "surface-sugar"
+    ECons(_, _) | EPathJoin(_, _) => "surface-sugar"
     _ => "supported"
 
 fn first_unsupported(
@@ -828,8 +830,8 @@ fn first_unsupported_list(
   row_data : List(String)
 ) : Option((String, Span, String)) =
   match xs of
-    Nil => None
-    Cons(x, rest) =>
+    [] => None
+    x :: rest =>
       first_some(
           first_unsupported(x, row_data),
           first_unsupported_list(rest, row_data),
@@ -840,8 +842,8 @@ fn first_unsupported_named(
   row_data : List(String)
 ) : Option((String, Span, String)) =
   match xs of
-    Nil => None
-    Cons(x, rest) =>
+    [] => None
+    x :: rest =>
       first_some(
           first_unsupported(x.value, row_data),
           first_unsupported_named(rest, row_data),
@@ -857,8 +859,8 @@ fn unsupported_params(
 
 fn unsupported_param_shapes(params : List(Param)) : Option((String, Span, String)) =
   match params of
-    Nil => None
-    Cons(p, rest) =>
+    [] => None
+    p :: rest =>
       match (p.pat, p.dflt, p.is_borrow) of
         (Some(pat), _, _) =>
           Some(("pattern-parameter", pat.span, "pattern parameters are not T1"))
@@ -881,8 +883,8 @@ fn unsupported_param_types(
   row_data : List(String)
 ) : Option((String, Span, String)) =
   match params of
-    Nil => None
-    Cons(param, rest) =>
+    [] => None
+    param :: rest =>
       let own =
         match param.ty of
           None => None
@@ -909,8 +911,8 @@ fn label_refusal(
   row_data : List(String)
 ) : Option((String, String)) =
   match labels of
-    Nil => None
-    Cons(label, rest) =>
+    [] => None
+    label :: rest =>
       if not(is_upper(char_at(label.name, 0))) then
         -- A label position spelled in lower case is a row variable, not an
         -- effect: it stands for whatever the caller performs, so it needs the
@@ -976,8 +978,8 @@ fn tys_refusal(
   row_data : List(String)
 ) : Option((String, String)) =
   match tys of
-    Nil => None
-    Cons(ty, rest) =>
+    [] => None
+    ty :: rest =>
       first_some(ty_refusal(ty, row_data), tys_refusal(rest, row_data))
 
 -- Open tails are admitted only while judging a top-level declaration
@@ -993,8 +995,8 @@ fn decl_label_refusal(
   row_data : List(String)
 ) : Option((String, String)) =
   match labels of
-    Nil => None
-    Cons(label, rest) =>
+    [] => None
+    label :: rest =>
       if not(is_upper(char_at(label.name, 0))) then
         Some(("effect-row-open", "effect row variables are not T1"))
       else
@@ -1044,8 +1046,8 @@ fn decl_tys_refusal(
   row_data : List(String)
 ) : Option((String, String)) =
   match tys of
-    Nil => None
-    Cons(ty, rest) =>
+    [] => None
+    ty :: rest =>
       first_some(
           decl_ty_refusal(ty, row_data),
           decl_tys_refusal(rest, row_data),
@@ -1113,7 +1115,10 @@ fn unsupported_decl(
                 None => None
 
 fn unsupported_modifier(decl : Decl) : Bool =
-  if decl.is_replayable || decl.is_no_alloc then
+  if (decl.is_replayable
+      || decl.is_no_alloc
+      || decl.is_bounded_stack
+      || decl.is_linear) then
     true
   else
     match decl.fip_word of
@@ -1170,8 +1175,8 @@ fn unsupported_arms(
   row_data : List(String)
 ) : Option((String, Span, String)) =
   match arms of
-    Nil => None
-    Cons(arm, rest) =>
+    [] => None
+    arm :: rest =>
       match arm.guard of
         Some(g) => Some(("guard", g.span, "guarded patterns are not T1"))
         None =>
@@ -1188,8 +1193,8 @@ fn unsupported_handler_arms(
   row_data : List(String)
 ) : Option((String, Span, String)) =
   match arms of
-    Nil => None
-    Cons(arm, rest) =>
+    [] => None
+    arm :: rest =>
       first_some(
           unsupported_handler_arm(arm, row_data),
           unsupported_handler_arms(rest, row_data),
@@ -1207,6 +1212,7 @@ fn unsupported_handler_arm(
     HOnce(_op, _params, body) => first_unsupported(body, row_data)
     HVal(_op, init) => first_unsupported(init, row_data)
     HNever(_op, _params, body) => first_unsupported(body, row_data)
+    HFinally(body) => first_unsupported(body, row_data)
 
 fn unsupported_pat(sp : Sp(Pat)) : Option((String, Span, String)) =
   match sp.node of
@@ -1222,13 +1228,13 @@ fn unsupported_pat(sp : Sp(Pat)) : Option((String, Span, String)) =
 
 fn unsupported_pats(xs : List(Sp(Pat))) : Option((String, Span, String)) =
   match xs of
-    Nil => None
-    Cons(x, rest) => first_some(unsupported_pat(x), unsupported_pats(rest))
+    [] => None
+    x :: rest => first_some(unsupported_pat(x), unsupported_pats(rest))
 
 fn unsupported_pat_fields(xs : List(PatField)) : Option((String, Span, String)) =
   match xs of
-    Nil => None
-    Cons(x, rest) =>
+    [] => None
+    x :: rest =>
       first_some(unsupported_pat(x.pat), unsupported_pat_fields(rest))
 
 -- Classes owned by the surrounding scope cannot be generalized at a local
@@ -1248,8 +1254,8 @@ fn held_metas(
 
 fn env_metas(env : List(EnvEntry)) : (List(Int), List(Int)) ! {Solve(Sol)} =
   match env of
-    Nil => ([], [])
-    Cons(entry, rest) =>
+    [] => ([], [])
+    entry :: rest =>
       match env_metas(rest) of
         (rest_ty, rest_row) =>
           match entry of
@@ -1278,8 +1284,8 @@ fn append_metas(
 
 fn vtys_metas(tys : List(VTy)) : (List(Int), List(Int)) ! {Solve(Sol)} =
   match tys of
-    Nil => ([], [])
-    Cons(ty, rest) =>
+    [] => ([], [])
+    ty :: rest =>
       let zonked = zonk_v(ty)
       append_metas(
           (free_ty_metas_v(zonked), free_row_metas_v(zonked)),
@@ -1288,9 +1294,8 @@ fn vtys_metas(tys : List(VTy)) : (List(Int), List(Int)) ! {Solve(Sol)} =
 
 fn frame_metas(frame : List((String, List(VTy)))) : (List(Int), List(Int)) ! {Solve(Sol)} =
   match frame of
-    Nil => ([], [])
-    Cons((_effect, args), rest) =>
-      append_metas(vtys_metas(args), frame_metas(rest))
+    [] => ([], [])
+    (_effect, args) :: rest => append_metas(vtys_metas(args), frame_metas(rest))
 
 -- `ambient` is the row the enclosing computation may perform in. Only a call
 -- adds to it, and it adds by absorption rather than equality, so a pure callee
@@ -1388,7 +1393,7 @@ fn directed_call(
   env : List(EnvEntry)
 ) : Option((String, InstanceInfo, List(Sp(Expr)))) =
   match (callee.node, args) of
-    (EVar(op), Cons(receiver, rest)) =>
+    (EVar(op), receiver :: rest) =>
       match receiver.node of
         EVar(name) =>
           match instance_get(name, env) of
@@ -1427,8 +1432,8 @@ fn instance_op_get(
   ops : List((String, Scheme))
 ) : Option(Scheme) =
   match ops of
-    Nil => None
-    Cons((key, scheme), rest) =>
+    [] => None
+    (key, scheme) :: rest =>
       if key == name then
         Some(scheme)
       else
@@ -1439,8 +1444,8 @@ fn unify_arg_vectors(
   found : List(VTy)
 ) : Unit ! {Solve(Sol), TcFail} =
   match (wanted, found) of
-    (Nil, Nil) => ()
-    (Cons(w, wrest), Cons(f, frest)) =>
+    ([], []) => ()
+    (w :: wrest, f :: frest) =>
       unify_v(w, f)
       unify_arg_vectors(wrest, frest)
     _ => tc_fail(Mismatch("operation arity", "call arity"))
@@ -1460,8 +1465,8 @@ fn link_call_labels(
   env : List(EnvEntry)
 ) : Unit ! {Solve(Sol), TcFail} =
   match labels of
-    Nil => ()
-    Cons(label, rest) =>
+    [] => ()
+    label :: rest =>
       match frame_args(label.name, env) of
         Some(args) => unify_arg_vectors(args, label.args)
         None => ()
@@ -1469,8 +1474,8 @@ fn link_call_labels(
 
 fn frame_args(effect_name : String, env : List(EnvEntry)) : Option(List(VTy)) =
   match env of
-    Nil => None
-    Cons(entry, rest) =>
+    [] => None
+    entry :: rest =>
       match entry of
         BHandlerFrame(frame) =>
           match frame_get(effect_name, frame) of
@@ -1483,8 +1488,8 @@ fn frame_get(
   frame : List((String, List(VTy)))
 ) : Option(List(VTy)) =
   match frame of
-    Nil => None
-    Cons((name, args), rest) =>
+    [] => None
+    (name, args) :: rest =>
       if name == effect_name then
         Some(args)
       else
@@ -1503,8 +1508,8 @@ fn infer_exprs(
   names : List((String, VTy))
 ) : List(VTy) ! {Solve(Sol), TcFail, Fresh} =
   match items of
-    Nil => []
-    Cons(item, rest) =>
+    [] => []
+    item :: rest =>
       Cons(
           infer_expr(item, ambient, env, ctors, names),
           infer_exprs(rest, ambient, env, ctors, names),
@@ -1555,8 +1560,8 @@ fn infer_params_go(
   rev : List(VTy)
 ) : (List(VTy), List(EnvEntry)) ! {Solve(Sol)} =
   match params of
-    Nil => (reverse(rev), env)
-    Cons(param, rest) =>
+    [] => (reverse(rev), env)
+    param :: rest =>
       let ty =
         match param.ty of
           Some(t) => ty_of(t, names)
@@ -1588,8 +1593,8 @@ fn infer_annot_params_go(
   rev : List(VTy)
 ) : (List(VTy), List(EnvEntry)) ! {Solve(Sol), TcFail} =
   match params of
-    Nil => (reverse(rev), env)
-    Cons(param, rest) =>
+    [] => (reverse(rev), env)
+    param :: rest =>
       let ty =
         match param.ty of
           Some(t) => annot_ty_of(t, names, rows)
@@ -1615,8 +1620,8 @@ fn infer_arms(
   names : List((String, VTy))
 ) : Unit ! {Solve(Sol), TcFail, Fresh} =
   match arms of
-    Nil => ()
-    Cons(arm, rest) =>
+    [] => ()
+    arm :: rest =>
       let local = infer_pat(arm.pat, scrutinee, env, ctors, names)
       let body_ty = infer_expr(arm.body, ambient, local, ctors, names)
       unify_v(result, body_ty)
@@ -1652,16 +1657,16 @@ fn uses_all(effect_name : String) : OpUses =
 
 fn op_name_in(name : String, names : List(String)) : Bool =
   match names of
-    Nil => false
-    Cons(n, rest) => n == name || op_name_in(name, rest)
+    [] => false
+    n :: rest => n == name || op_name_in(name, rest)
 
 fn opset_get(
   effect_name : String,
   known : List((String, OpSet))
 ) : Option(OpSet) =
   match known of
-    Nil => None
-    Cons((name, ops), rest) =>
+    [] => None
+    (name, ops) :: rest =>
       if name == effect_name then
         Some(ops)
       else
@@ -1676,8 +1681,8 @@ fn opset_join(a : OpSet, b : OpSet) : OpSet =
 
 fn op_names_union(xs : List(String), ys : List(String)) : List(String) =
   match ys of
-    Nil => xs
-    Cons(y, rest) =>
+    [] => xs
+    y :: rest =>
       if op_name_in(y, xs) then
         op_names_union(xs, rest)
       else
@@ -1689,8 +1694,8 @@ fn opset_put(
   known : List((String, OpSet))
 ) : List((String, OpSet)) =
   match known of
-    Nil => [(effect_name, ops)]
-    Cons((name, prior), rest) =>
+    [] => [(effect_name, ops)]
+    (name, prior) :: rest =>
       if name == effect_name then
         Cons((name, opset_join(prior, ops)), rest)
       else
@@ -1701,8 +1706,8 @@ fn known_merge(
   b : List((String, OpSet))
 ) : List((String, OpSet)) =
   match b of
-    Nil => a
-    Cons((name, ops), rest) => known_merge(opset_put(name, ops, a), rest)
+    [] => a
+    (name, ops) :: rest => known_merge(opset_put(name, ops, a), rest)
 
 fn uses_merge(a : OpUses, b : OpUses) : OpUses =
   OpUses {
@@ -1721,8 +1726,8 @@ fn known_minus(
   discharged : List(String)
 ) : List((String, OpSet)) =
   match known of
-    Nil => []
-    Cons((name, ops), rest) =>
+    [] => []
+    (name, ops) :: rest =>
       if op_name_in(name, discharged) then
         known_minus(rest, discharged)
       else
@@ -1739,8 +1744,8 @@ fn row_uses_of(row : Tc.Row) : OpUses =
 
 fn row_labels_uses(labels : List(Label)) : OpUses =
   match labels of
-    Nil => uses_none
-    Cons(label, rest) => uses_merge(uses_all(label.name), row_labels_uses(rest))
+    [] => uses_none
+    label :: rest => uses_merge(uses_all(label.name), row_labels_uses(rest))
 
 -- A callee bound as an ordinary value contributes the row its entry declares.
 -- Zonking first lets a monomorphic binding solved during inference of the
@@ -1823,16 +1828,16 @@ fn exprs_op_uses(
   env : List(EnvEntry)
 ) : OpUses ! {Solve(Sol), TcFail} =
   match xs of
-    Nil => uses_none
-    Cons(x, rest) => uses_merge(body_op_uses(x, env), exprs_op_uses(rest, env))
+    [] => uses_none
+    x :: rest => uses_merge(body_op_uses(x, env), exprs_op_uses(rest, env))
 
 fn arms_op_uses(
   arms : List(Arm),
   env : List(EnvEntry)
 ) : OpUses ! {Solve(Sol), TcFail} =
   match arms of
-    Nil => uses_none
-    Cons(arm, rest) =>
+    [] => uses_none
+    arm :: rest =>
       let guarded =
         match arm.guard of
           Some(guard) => body_op_uses(guard, env)
@@ -1847,8 +1852,8 @@ fn fields_op_uses(
   env : List(EnvEntry)
 ) : OpUses ! {Solve(Sol), TcFail} =
   match fields of
-    Nil => uses_none
-    Cons(field, rest) =>
+    [] => uses_none
+    field :: rest =>
       uses_merge(body_op_uses(field.value, env), fields_op_uses(rest, env))
 
 fn handler_arms_op_uses(
@@ -1856,8 +1861,8 @@ fn handler_arms_op_uses(
   env : List(EnvEntry)
 ) : OpUses ! {Solve(Sol), TcFail} =
   match arms of
-    Nil => uses_none
-    Cons(arm, rest) =>
+    [] => uses_none
+    arm :: rest =>
       let own =
         match arm of
           HReturn(_name, body) => body_op_uses(body, env)
@@ -1865,6 +1870,7 @@ fn handler_arms_op_uses(
           HOnce(_op, _params, body) => body_op_uses(body, env)
           HVal(_op, init) => body_op_uses(init, env)
           HNever(_op, _params, body) => body_op_uses(body, env)
+          HFinally(body) => body_op_uses(body, env)
       uses_merge(own, handler_arms_op_uses(rest, env))
 
 -- The effects a partial handler discharges: none when the evidence is open,
@@ -1885,8 +1891,8 @@ fn covered_by_effect(
   env : List(EnvEntry)
 ) : List((String, List(String))) ! {TcFail} =
   match arms of
-    Nil => []
-    Cons(arm, rest) =>
+    [] => []
+    arm :: rest =>
       let prior = covered_by_effect(rest, env)
       match arm_op(arm) of
         None => prior
@@ -1900,8 +1906,8 @@ fn covered_add(
   table : List((String, List(String)))
 ) : List((String, List(String))) =
   match table of
-    Nil => [(effect_name, [op])]
-    Cons((name, ops), rest) =>
+    [] => [(effect_name, [op])]
+    (name, ops) :: rest =>
       if name == effect_name then
         Cons((name, Cons(op, ops)), rest)
       else
@@ -1912,8 +1918,8 @@ fn covered_discharged(
   known : List((String, OpSet))
 ) : List(String) =
   match covered of
-    Nil => []
-    Cons((name, ops), rest) =>
+    [] => []
+    (name, ops) :: rest =>
       match opset_get(name, known) of
         None => Cons(name, covered_discharged(rest, known))
         Some(OKnown(used)) =>
@@ -1925,8 +1931,8 @@ fn covered_discharged(
 
 fn ops_subset(used : List(String), covered : List(String)) : Bool =
   match used of
-    Nil => true
-    Cons(op, rest) => op_name_in(op, covered) && ops_subset(rest, covered)
+    [] => true
+    op :: rest => op_name_in(op, covered) && ops_subset(rest, covered)
 
 -- A handler's clauses name the operations it covers, so the effects it
 -- discharges are the effects those operations belong to. The handled body is
@@ -2001,8 +2007,8 @@ fn infer_named_handle(
 
 fn has_return_arm(arms : List(HandlerArm)) : Bool =
   match arms of
-    Nil => false
-    Cons(arm, rest) =>
+    [] => false
+    arm :: rest =>
       match arm of
         HReturn(_name, _body) => true
         _ => has_return_arm(rest)
@@ -2014,11 +2020,12 @@ fn arm_op(arm : HandlerArm) : Option(String) =
     HOnce(op, _params, _body) => Some(op)
     HVal(op, _init) => Some(op)
     HNever(op, _params, _body) => Some(op)
+    HFinally(_body) => None
 
 fn arm_ops(arms : List(HandlerArm)) : List(String) =
   match arms of
-    Nil => []
-    Cons(arm, rest) =>
+    [] => []
+    arm :: rest =>
       match arm_op(arm) of
         Some(op) => Cons(op, arm_ops(rest))
         None => arm_ops(rest)
@@ -2035,8 +2042,8 @@ fn handler_frame_go(
   frame : List((String, List(VTy)))
 ) : List((String, List(VTy))) ! {Solve(Sol), TcFail} =
   match arms of
-    Nil => frame
-    Cons(arm, rest) =>
+    [] => frame
+    arm :: rest =>
       match arm_op(arm) of
         None => handler_frame_go(rest, env, frame)
         Some(op) =>
@@ -2051,8 +2058,8 @@ fn handler_frame_go(
 
 fn fresh_effect_args(args : List(VTy)) : List(VTy) ! {Solve(Sol)} =
   match args of
-    Nil => []
-    Cons(_arg, rest) => Cons(fresh_ty_meta(), fresh_effect_args(rest))
+    [] => []
+    _arg :: rest => Cons(fresh_ty_meta(), fresh_effect_args(rest))
 
 fn named_instance_info(
   arms : List(HandlerArm),
@@ -2060,9 +2067,9 @@ fn named_instance_info(
 ) : InstanceInfo ! {Solve(Sol), TcFail, Fresh} =
   let op_names = arm_ops(arms)
   match op_names of
-    Nil =>
+    [] =>
       tc_fail(Mismatch(want_t1_operation, "named handler without operations"))
-    Cons(first, rest) =>
+    first :: rest =>
       match op_scheme_label(first, env) of
         (_scheme, label) =>
           require_same_effect(rest, label.name, env)
@@ -2078,8 +2085,8 @@ fn capture_op_schemes(
   env : List(EnvEntry)
 ) : List((String, Scheme)) ! {TcFail} =
   match names of
-    Nil => []
-    Cons(name, rest) =>
+    [] => []
+    name :: rest =>
       match op_scheme_label(name, env) of
         (scheme, _label) => Cons((name, scheme), capture_op_schemes(rest, env))
 
@@ -2089,8 +2096,8 @@ fn require_same_effect(
   env : List(EnvEntry)
 ) : Unit ! {TcFail} =
   match ops of
-    Nil => ()
-    Cons(op, rest) =>
+    [] => ()
+    op :: rest =>
       match op_scheme_label(op, env) of
         (_scheme, label) =>
           if label.name == effect_name then
@@ -2103,8 +2110,8 @@ fn handled_effects(
   env : List(EnvEntry)
 ) : List(String) ! {TcFail} =
   match arms of
-    Nil => []
-    Cons(arm, rest) =>
+    [] => []
+    arm :: rest =>
       match arm_op(arm) of
         None => handled_effects(rest, env)
         Some(op) =>
@@ -2141,7 +2148,7 @@ fn op_parts_with(
   match op_scheme_label_of(name, scheme) of
     label =>
       match label.args of
-        Nil => op_parts_of(name, instantiate(scheme))
+        [] => op_parts_of(name, instantiate(scheme))
         _ =>
           match frame_get(label.name, frame) of
             Some(args) => op_parts_of(name, instantiate_effect(scheme, args))
@@ -2154,7 +2161,7 @@ fn op_label_of(scheme : Scheme) : Option(Label) =
   match scheme.body of
     VThunk(CFun(_params, CRet(_ret, row))) =>
       match row.labels of
-        Cons(label, Nil) => Some(label)
+        [label] => Some(label)
         _ => None
     _ => None
 
@@ -2173,8 +2180,8 @@ fn instantiate_effect_go(
   body : VTy
 ) : VTy ! {TcFail} =
   match (binders, args) of
-    (Nil, Nil) => apply_v(subst, body)
-    (Cons(binder, brest), Cons(arg, arest)) =>
+    ([], []) => apply_v(subst, body)
+    (binder :: brest, arg :: arest) =>
       instantiate_effect_go(
           brest,
           arest,
@@ -2187,7 +2194,7 @@ fn op_parts_of(name : String, ty : VTy) : (List(VTy), VTy, String) ! {TcFail} =
   match ty of
     VThunk(CFun(params, CRet(ret, row))) =>
       match row.labels of
-        Cons(label, Nil) => (params, ret, label.name)
+        [label] => (params, ret, label.name)
         _ => tc_fail(Mismatch(want_t1_operation, name))
     _ => tc_fail(Mismatch(want_t1_operation, name))
 
@@ -2203,8 +2210,8 @@ fn infer_handler_arms(
   names : List((String, VTy))
 ) : Unit ! {Solve(Sol), TcFail, Fresh} =
   match arms of
-    Nil => ()
-    Cons(arm, rest) =>
+    [] => ()
+    arm :: rest =>
       infer_handler_arm(
           arm,
           handled_ty,
@@ -2268,6 +2275,10 @@ fn infer_handler_arm(
         (param_tys, _ret, _effect_name) =>
           let bound = bind_op_params(params, param_tys, env)
           unify_v(result, infer_expr(body, ambient, bound, ctors, names))
+    -- The cleanup runs after the handler is left: no clause binder is in scope
+    -- and its answer, discarded, is unit.
+    HFinally(body) =>
+      unify_v(VUnit, infer_expr(body, ambient, env, ctors, names))
 
 fn bind_op_params(
   params : List(String),
@@ -2275,8 +2286,8 @@ fn bind_op_params(
   env : List(EnvEntry)
 ) : List(EnvEntry) ! {TcFail} =
   match (params, tys) of
-    (Nil, Nil) => env
-    (Cons(param, prest), Cons(ty, trest)) =>
+    ([], []) => env
+    (param :: prest, ty :: trest) =>
       bind_op_params(prest, trest, env_put(param, mono(ty), env))
     _ => tc_fail(Mismatch("operation arity", "clause arity"))
 
@@ -2315,8 +2326,8 @@ fn infer_pat(
 -- the same reason as `infer_exprs`.
 fn fresh_ty_metas(pats : List(Sp(Pat))) : List(VTy) ! {Solve(Sol)} =
   match pats of
-    Nil => []
-    Cons(_pat, rest) => Cons(fresh_ty_meta(), fresh_ty_metas(rest))
+    [] => []
+    _pat :: rest => Cons(fresh_ty_meta(), fresh_ty_metas(rest))
 
 fn infer_pats(
   pats : List(Sp(Pat)),
@@ -2326,8 +2337,8 @@ fn infer_pats(
   names : List((String, VTy))
 ) : List(EnvEntry) ! {Solve(Sol), TcFail} =
   match (pats, tys) of
-    (Nil, Nil) => env
-    (Cons(pat, prest), Cons(ty, trest)) =>
+    ([], []) => env
+    (pat :: prest, ty :: trest) =>
       infer_pats(
           prest,
           trest,
@@ -2392,8 +2403,8 @@ fn infer_record(
 
 fn named_get(name : String, fields : List(NamedExpr)) : Option(Sp(Expr)) =
   match fields of
-    Nil => None
-    Cons(field, rest) =>
+    [] => None
+    field :: rest =>
       if field.name == name then
         Some(field.value)
       else
@@ -2412,8 +2423,8 @@ fn infer_record_fields(
   names : List((String, VTy))
 ) : Unit ! {Solve(Sol), TcFail, Fresh} =
   match (labels, tys) of
-    (Nil, Nil) => ()
-    (Cons(label, lrest), Cons(ty, trest)) =>
+    ([], []) => ()
+    (label :: lrest, ty :: trest) =>
       match named_get(label, fields) of
         None => tc_fail(Mismatch("record field", label))
         Some(value) =>
@@ -2449,8 +2460,8 @@ fn infer_record_pat(
 
 fn pat_field_get(name : String, fields : List(PatField)) : Option(Sp(Pat)) =
   match fields of
-    Nil => None
-    Cons(field, rest) =>
+    [] => None
+    field :: rest =>
       if field.name == name then
         Some(field.pat)
       else
@@ -2468,8 +2479,8 @@ fn infer_record_pat_fields(
   names : List((String, VTy))
 ) : List(EnvEntry) ! {Solve(Sol), TcFail} =
   match (labels, tys) of
-    (Nil, Nil) => env
-    (Cons(label, lrest), Cons(ty, trest)) =>
+    ([], []) => env
+    (label :: lrest, ty :: trest) =>
       match pat_field_get(label, fields) of
         None => infer_record_pat_fields(lrest, trest, fields, env, ctors, names)
         Some(pat) =>
@@ -2508,9 +2519,8 @@ fn annotation_names(decl : Decl) : AnnotationNames ! {Fresh, Solve(Sol)} =
 
 fn row_names_of_params(params : List(String)) : List((String, Tail)) ! {Solve(Sol)} =
   match params of
-    Nil => []
-    Cons(name, rest) =>
-      Cons((name, fresh_row_meta()), row_names_of_params(rest))
+    [] => []
+    name :: rest => Cons((name, fresh_row_meta()), row_names_of_params(rest))
 
 fn param_tyvars(param : Param) : List(String) =
   match param.ty of
@@ -2647,8 +2657,8 @@ fn v_has_name(ty : VTy, wanted : Int) : Bool =
 
 fn any_v_has_name(tys : List(VTy), wanted : Int) : Bool =
   match tys of
-    Nil => false
-    Cons(ty, rest) => v_has_name(ty, wanted) || any_v_has_name(rest, wanted)
+    [] => false
+    ty :: rest => v_has_name(ty, wanted) || any_v_has_name(rest, wanted)
 
 fn c_has_name(ty : CTy, wanted : Int) : Bool =
   match ty of
@@ -2661,19 +2671,19 @@ fn row_has_name(row : Tc.Row, wanted : Int) : Bool =
 
 fn any_label_has_name(labels : List(Label), wanted : Int) : Bool =
   match labels of
-    Nil => false
-    Cons(label, rest) =>
+    [] => false
+    label :: rest =>
       any_v_has_name(label.args, wanted) || any_label_has_name(rest, wanted)
 
 fn string_member(x : String, xs : List(String)) : Bool =
   match xs of
-    Nil => false
-    Cons(y, rest) => x == y || string_member(x, rest)
+    [] => false
+    y :: rest => x == y || string_member(x, rest)
 
 fn int_member(x : Int, xs : List(Int)) : Bool =
   match xs of
-    Nil => false
-    Cons(y, rest) => x == y || int_member(x, rest)
+    [] => false
+    y :: rest => x == y || int_member(x, rest)
 
 -- A written seed can solve to labels over a newer residual. Preserve that
 -- terminal residual, not the obsolete seed ID, and deduplicate converged names
@@ -2687,8 +2697,8 @@ fn written_row_residuals_go(
   seen : List(Int)
 ) : List(Int) ! {Solve(Sol)} =
   match rows of
-    Nil => reverse(seen)
-    Cons((_name, seed), rest) =>
+    [] => reverse(seen)
+    (_name, seed) :: rest =>
       match zonk_row(row_open([], seed)).tail of
         TailMeta(residual) =>
           if int_member(residual, seen) then
@@ -2763,8 +2773,8 @@ fn binder_index(
   i : Int
 ) : Option(Int) =
   match binders of
-    Nil => None
-    Cons(b, rest) =>
+    [] => None
+    b :: rest =>
       if name_id(bound_name(b)) == name then
         Some(i)
       else
@@ -2776,8 +2786,8 @@ fn row_binder_index(
   i : Int
 ) : Option(Int) =
   match binders of
-    Nil => None
-    Cons(b, rest) =>
+    [] => None
+    b :: rest =>
       if name_id(bound_name(b)) == name then
         Some(i)
       else
@@ -2796,8 +2806,8 @@ fn row_occurrences_v(ty : VTy, wanted : Int) : Int =
 
 fn row_occurrences_vs(tys : List(VTy), wanted : Int) : Int =
   match tys of
-    Nil => 0
-    Cons(ty, rest) =>
+    [] => 0
+    ty :: rest =>
       row_occurrences_v(ty, wanted) + row_occurrences_vs(rest, wanted)
 
 fn row_occurrences_c(c : CTy, wanted : Int) : Int =
@@ -2819,8 +2829,8 @@ fn row_occurrences_row(row : Tc.Row, wanted : Int) : Int =
 
 fn row_occurrences_labels(labels : List(Label), wanted : Int) : Int =
   match labels of
-    Nil => 0
-    Cons(label, rest) =>
+    [] => 0
+    label :: rest =>
       row_occurrences_vs(label.args, wanted)
         + row_occurrences_labels(rest, wanted)
 
@@ -2854,7 +2864,7 @@ fn canon_v(
     VBool => "Bool"
     VUnit => "Unit"
     VString => "String"
-    VCon(name, Nil) => name
+    VCon(name, []) => name
     VCon(name, args) => "{name}({canon_join(args, binders, rows, phantom)})"
     VTuple(items) => "({canon_join(items, binders, rows, phantom)})"
     VThunk(c) => canon_c(c, binders, rows, phantom)
@@ -2871,9 +2881,9 @@ fn canon_join(
   phantom : List(Binder(RowVarSpace))
 ) : String =
   match tys of
-    Nil => ""
-    Cons(ty, Nil) => canon_v(ty, binders, rows, phantom)
-    Cons(ty, rest) =>
+    [] => ""
+    [ty] => canon_v(ty, binders, rows, phantom)
+    ty :: rest =>
       "{canon_v(ty, binders, rows, phantom)}, {canon_join(rest, binders, rows, phantom)}"
 
 fn canon_c(
@@ -2939,9 +2949,9 @@ fn canon_labels(
   phantom : List(Binder(RowVarSpace))
 ) : String =
   match ls of
-    Nil => ""
-    Cons(l, Nil) => canon_label(l, binders, rows, phantom)
-    Cons(l, rest) =>
+    [] => ""
+    [l] => canon_label(l, binders, rows, phantom)
+    l :: rest =>
       "{canon_label(l, binders, rows, phantom)}, {canon_labels(rest, binders, rows, phantom)}"
 
 fn canon_label(
@@ -2951,7 +2961,7 @@ fn canon_label(
   phantom : List(Binder(RowVarSpace))
 ) : String =
   match l.args of
-    Nil => l.name
+    [] => l.name
     args => "{l.name}({canon_join(args, binders, rows, phantom)})"
 
 -- The version of the canonical scheme spelling this checker emits. The Rust
@@ -3006,8 +3016,8 @@ fn check_decls(
   total_nodes : Int
 ) : (List(ShadowFact), List(Unsupported), Int, Int) ! {Fresh} =
   match decls of
-    Nil => (reverse(facts), reverse(unsupported), supported_nodes, total_nodes)
-    Cons(decl, rest) =>
+    [] => (reverse(facts), reverse(unsupported), supported_nodes, total_nodes)
+    decl :: rest =>
       match resolved_get(decl.name, resolved.functions) of
         None =>
           check_decls(
@@ -3197,8 +3207,8 @@ fn build_workbench(
 
 fn print_unsupported(rows : List(Unsupported)) : Unit ! {IO} =
   match rows of
-    Nil => ()
-    Cons(row, rest) =>
+    [] => ()
+    row :: rest =>
       println(
           "UNSUPPORTED\t{row.function_name}\t{row.kind}\t{row.span.lo}\t{row.span.hi}\t{row.nodes}\t{row.reason}",
         )
@@ -3206,8 +3216,8 @@ fn print_unsupported(rows : List(Unsupported)) : Unit ! {IO} =
 
 fn print_facts(facts : List(ShadowFact)) : Unit ! {IO} =
   match facts of
-    Nil => ()
-    Cons(fact, rest) =>
+    [] => ()
+    fact :: rest =>
       println("FACT\t{fact.name}\t{fact.scheme}")
       print_facts(rest)
 
@@ -3224,11 +3234,7 @@ fn print_diff(first : Option(Divergence(String))) : Unit ! {IO} =
 test fn named_dispatch_reuses_effect_arguments() =
   let outcome = run_fresh(\() -> run_tc(\() -> contradictory_named_dispatch()))
   match outcome of
-    Err(Mismatch(left, right)) =>
-      if left == "Int" && right == "String" then
-        ()
-      else
-        fail()
+    Err(Mismatch(left, right)) => expect_equal(("Int", "String"), (left, right))
     _ => fail()
 
 fn contradictory_named_dispatch() : Unit ! {Solve(Sol), TcFail, Fresh} =

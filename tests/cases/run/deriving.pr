@@ -8,8 +8,8 @@ type Shape(a)
 
 fn print_all(xs : List(Color)) =
   match xs of
-    Nil => ()
-    Cons(x, rest) =>
+    [] => ()
+    x :: rest =>
       println(show(x))
       print_all(rest)
 

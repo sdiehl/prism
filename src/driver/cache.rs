@@ -284,7 +284,9 @@ impl NativeArtifactCache {
         field(&mut hasher, compiler_binary_fingerprint()?.as_bytes());
         field(
             &mut hasher,
-            cfg.artifact_identity_for("llvm").fingerprint().as_bytes(),
+            cfg.artifact_identity_for(crate::driver::ArtifactBackend::Llvm)
+                .fingerprint()
+                .as_bytes(),
         );
         field(&mut hasher, name.as_bytes());
         if let Some(profile) = profile {
@@ -404,7 +406,9 @@ fn semantic_query_hasher(
     field(&mut h, compiler_binary_fingerprint()?.as_bytes());
     field(
         &mut h,
-        cfg.artifact_identity_for("llvm").fingerprint().as_bytes(),
+        cfg.artifact_identity_for(crate::driver::ArtifactBackend::Llvm)
+            .fingerprint()
+            .as_bytes(),
     );
     for stage in [PassStage::PreLowering, PassStage::Late] {
         field(
@@ -475,7 +479,7 @@ impl CheckVerdictCache {
         field(&mut h, compiler_binary_fingerprint()?.as_bytes());
         field(
             &mut h,
-            cfg.artifact_identity_for("frontend")
+            cfg.artifact_identity_for(crate::driver::ArtifactBackend::Frontend)
                 .fingerprint()
                 .as_bytes(),
         );
@@ -537,7 +541,9 @@ fn linked_native_raw_key(src: &str, roots: &[Root], cfg: &Config) -> Result<Stri
     field(&mut h, compiler_binary_fingerprint()?.as_bytes());
     field(
         &mut h,
-        cfg.artifact_identity_for("llvm").fingerprint().as_bytes(),
+        cfg.artifact_identity_for(crate::driver::ArtifactBackend::Llvm)
+            .fingerprint()
+            .as_bytes(),
     );
     field(
         &mut h,
@@ -595,7 +601,7 @@ impl SummaryCache {
         field(&mut h, compiler_binary_fingerprint()?.as_bytes());
         field(
             &mut h,
-            cfg.artifact_identity_for("frontend")
+            cfg.artifact_identity_for(crate::driver::ArtifactBackend::Frontend)
                 .fingerprint()
                 .as_bytes(),
         );

@@ -4,13 +4,13 @@
 
 fn rev_onto(xs, acc) =
   match xs of
-    Nil => acc
-    Cons(h, t) => rev_onto(t, Cons(h, acc))
+    [] => acc
+    h :: t => rev_onto(t, Cons(h, acc))
 
 fn bump(xs) =
   match xs of
-    Nil => Nil
-    Cons(h, t) => Cons(h + 1, bump(t))
+    [] => Nil
+    h :: t => Cons(h + 1, bump(t))
 
 type Tree = Leaf | Node(Tree, Int, Tree)
 

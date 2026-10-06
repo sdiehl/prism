@@ -360,8 +360,8 @@ pub fn next_transition(z : Zone, w : Wall) : Option(Wall) =
 
 fn earliest_after(t : Int, candidates : List(Int)) : Option(Int) =
   match candidates of
-    Nil => None
-    Cons(c, rest) =>
+    [] => None
+    c :: rest =>
       match earliest_after(t, rest) of
         None =>
           if c > t then
@@ -612,8 +612,8 @@ pub fn find_zone(name : String) : Option(Zone) = find_named(zones(), name)
 
 fn find_named(zs : List(Zone), name : String) : Option(Zone) =
   match zs of
-    Nil => None
-    Cons(z, rest) =>
+    [] => None
+    z :: rest =>
       if zone_name(z) == name then
         Some(z)
       else
@@ -624,5 +624,5 @@ pub fn zone_names() : List(String) = names_of(zones())
 
 fn names_of(zs : List(Zone)) : List(String) =
   match zs of
-    Nil => Nil
-    Cons(z, rest) => Cons(zone_name(z), names_of(rest))
+    [] => Nil
+    z :: rest => Cons(zone_name(z), names_of(rest))

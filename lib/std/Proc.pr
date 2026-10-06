@@ -1,0 +1,617 @@
+-- | Proc: child processes, as an ordinary algebraic effect.
+--
+-- The capability is `Proc`. Its operation `collect` runs a `Command` to
+-- completion: the host spawns the child, feeds it its input, drains both of its
+-- output streams, reaps it, and answers an `Outcome`. `collect_pipeline` does the
+-- same for a `Pipeline`, a chain of commands each reading the one before it.
+-- Nothing outlives either operation. There is no handle to a running child, no
+-- pipe to forget to close, and no zombie for a program to leak, because every
+-- child's whole life is inside one step. `run_proc` is the default handler over the host; a test installs
+-- its own with `with_fake_proc` and the program under it is unchanged.
+--
+-- ```prism,no_run
+-- run_proc(\() -> check(exec("git", ["rev-parse", "HEAD"])))
+-- ```
+--
+-- A `Command` says exactly what the child gets, and nothing reaches it that the
+-- command does not name:
+--
+-- - The program is found on the parent's `PATH`, never the child's, so editing
+--   the child's environment cannot change which binary runs. A `PATH` entry that
+--   is not absolute is skipped. A name containing `/` is not searched for: it is
+--   used as written, relative to the child's directory.
+-- - The environment is the parent's with edits applied in order (`Inherit`), or
+--   only the variables the command sets (`Clean`).
+-- - Standard input is empty (`NoInput`) or the given bytes (`Feed`). Standard
+--   output and standard error are each discarded or captured up to a byte limit;
+--   a child that writes past its limit is killed and the outcome is
+--   `OutputLimit`. The default limit is 1 MiB and no limit may exceed 256 MiB.
+-- - An optional deadline in milliseconds bounds the whole exchange. A child still
+--   running when it passes is killed and the outcome is `DeadlineExceeded`.
+--
+-- A child the host had to kill, for its output or its deadline, answers with
+-- both captured streams empty: what it had written by then depends on
+-- scheduling, and an answer that differs from run to run is not one a program
+-- can rely on.
+--
+-- What the host kills is the direct child. A process that child started and
+-- left running in the background is not tracked, on any platform; a command
+-- that must not outlive its deadline should not detach work of its own.
+--
+-- Recorded runs hold each exchange as one observation that commits to a digest
+-- of the request, so a replay serves the recorded outcome only to the same
+-- command. `Proc` is not in the replayable set all the same: a recorded outcome
+-- does not reproduce what the child did to the world.
+
+import Path (Path, path_str)
+
+-- | Why a child did not run, or why the host gave up on it. A closed,
+-- platform-independent classification, mapped once from the host's error codes,
+-- so the same failure is the same value on every host.
+pub type ProcError
+  = NotFound
+  | PermissionDenied
+  | BadCommand
+  | ResourceLimit
+  | HostError
+  deriving (Eq, Show)
+
+-- | One of the child's two output streams.
+pub type StdStream = Stdout | Stderr deriving (Eq, Show)
+
+-- | How a child's run ended. `Exited` carries the exit code and `Signaled` the
+-- host's raw signal number. `SpawnFailed` is a child that never started;
+-- `Aborted` is one the host lost track of after it did.
+pub type ExitStatus
+  = Exited(Int)
+  | Signaled(Int)
+  | SpawnFailed(ProcError)
+  | OutputLimit(StdStream)
+  | DeadlineExceeded
+  | Aborted(ProcError)
+  deriving (Eq, Show)
+
+-- | Where the child's environment starts.
+pub type EnvBase = Inherit | Clean deriving (Eq, Show)
+
+-- | One change to the child's environment, applied in order.
+pub type EnvEdit = SetVar(String, String) | UnsetVar(String) deriving (Eq, Show)
+
+-- | The child's standard input.
+-- lint: allow(L0203)
+pub type Input = NoInput | Feed(Buf)
+
+-- | What happens to one of the child's output streams.
+pub type Output = Discard | Capture(Int) deriving (Eq, Show)
+
+-- | Everything the child gets. Build one with `command` and adjust it with a
+-- record update.
+-- lint: allow(L0203)
+pub type Command = Command {
+  program: String,
+  arguments: List(String),
+  directory: Option(Path),
+  base_env: EnvBase,
+  env_edits: List(EnvEdit),
+  input: Input,
+  stdout_policy: Output,
+  stderr_policy: Output,
+  deadline_ms: Option(Int)
+}
+
+-- | What a run produced: how it ended, and the captured bytes of each stream.
+-- lint: allow(L0203)
+pub type Outcome = Outcome { status: ExitStatus, out: Buf, err: Buf }
+
+-- | A chain of commands, each reading the standard output of the one before it,
+-- under one deadline. Build one with `pipeline`.
+--
+-- The pipes between stages belong to the host, so three fields of a stage
+-- `Command` are decided by its place in the chain. The first stage's `input` is
+-- the pipeline's input, and every later stage must have `NoInput`, since it
+-- reads the stage before it. The last stage's `stdout_policy` is the pipeline's
+-- output, and every earlier stage's is the pipe. No stage carries a deadline of
+-- its own; the pipeline's bounds the whole run. A stage that breaks these rules
+-- makes the pipeline a `BadCommand`. Each stage's `stderr_policy` is its own.
+-- lint: allow(L0203)
+pub type Pipeline = Pipeline { stages: List(Command), deadline_ms: Option(Int) }
+
+-- | What a pipeline produced: every stage's status in order, the last stage's
+-- captured output, and every stage's captured error stream in order.
+--
+-- A stage that could not start answers `SpawnFailed`, and its neighbours run
+-- anyway, as they would in a shell: the stage after it reads an empty input and
+-- the stage before it finds its output closed. Every status is kept, so whether
+-- a failure counts is decided afterwards with `check_last`, `check_all`, or
+-- `check_pipefail`.
+--
+-- When the host stops the run, every stage that had started answers why, and
+-- every stream is empty, for the reason a single command's are. Past the
+-- deadline, that is `DeadlineExceeded` for every stage. When one stream goes over
+-- its limit, its stage answers `OutputLimit` and every other stage that had
+-- started answers `Aborted(ResourceLimit)`.
+-- lint: allow(L0203)
+pub type PipelineResult = PipelineResult {
+  statuses: List(ExitStatus),
+  out: Buf,
+  errs: List(Buf)
+}
+
+-- | The stage, counted from 0, whose status failed a check, and that status.
+pub type StageFailure = StageFailure {
+  stage: Int,
+  status: ExitStatus
+} deriving (Eq, Show)
+
+-- | The process capability. `collect` runs a command to completion, and
+-- `collect_pipeline` a pipeline.
+pub effect Proc
+  collect(Command) : Outcome
+  collect_pipeline(Pipeline) : PipelineResult
+
+let proc_code_not_found : Int = 1
+
+let proc_code_denied : Int = 2
+
+let proc_code_invalid : Int = 3
+
+let proc_code_limit : Int = 4
+
+let kib : Int = 1024
+
+let mib : Int = kib * kib
+
+let max_capture_mib : Int = 256
+
+-- | The capture limit a `command` starts with, in bytes.
+pub let default_capture : Int = mib
+
+-- | The largest capture limit a command may ask for, in bytes.
+pub let max_capture : Int = max_capture_mib * mib
+
+let proc_codec_version : Int = 1
+
+-- A varint carries seven bits per byte; a byte at or above this is continued.
+let proc_varint_base : Int = 128
+
+-- | `program` with `arguments`, inheriting the environment, with no input, both
+-- streams captured up to `default_capture`, and no deadline.
+pub fn command(program : String, arguments : List(String)) : Command =
+  Command {
+    program = program,
+    arguments = arguments,
+    directory = None,
+    base_env = Inherit,
+    env_edits = Nil,
+    input = NoInput,
+    stdout_policy = Capture(default_capture),
+    stderr_policy = Capture(default_capture),
+    deadline_ms = None
+  }
+
+-- | Run `program` with `arguments` under the defaults of `command`.
+pub fn exec(program : String, arguments : List(String)) : Outcome ! {Proc} =
+  collect(command(program, arguments))
+
+-- | The captured standard output of a run that exited with code 0, or the status
+-- of one that did not.
+pub fn check(o : Outcome) : Result(Buf, ExitStatus) =
+  match o.status of
+    Exited(0) => Ok(o.out)
+    s => Err(s)
+
+-- | `stages` as a pipeline with no deadline.
+pub fn pipeline(stages : List(Command)) : Pipeline =
+  Pipeline { stages = stages, deadline_ms = None }
+
+-- | The output of a pipeline whose last stage exited with code 0, whatever the
+-- earlier stages did. This is a shell's default.
+pub fn check_last(r : PipelineResult) : Result(Buf, StageFailure) =
+  let f = proc_last_status(
+      r.statuses,
+      0,
+      StageFailure { stage = 0, status = SpawnFailed(BadCommand) },
+    )
+  match f.status of
+    Exited(0) => Ok(r.out)
+    _ => Err(f)
+
+-- | The output of a pipeline every stage of which exited with code 0, or the
+-- first stage that did not.
+pub fn check_all(r : PipelineResult) : Result(Buf, StageFailure) =
+  match proc_first_failure(r.statuses, 0) of
+    None => Ok(r.out)
+    Some(f) => Err(f)
+
+-- | The output of a pipeline every stage of which exited with code 0, or the
+-- last stage that did not. This is a shell's `pipefail`: the same runs fail as
+-- under `check_all`, and the failure named is the one a shell would report.
+pub fn check_pipefail(r : PipelineResult) : Result(Buf, StageFailure) =
+  match proc_last_failure(r.statuses, 0, None) of
+    None => Ok(r.out)
+    Some(f) => Err(f)
+
+-- | Captured bytes as text, when they are valid UTF-8.
+pub fn text(b : Buf) : Option(String) =
+  if buf_utf8_valid(b) then
+    Some(string_of_buf(b))
+  else
+    None
+
+-- | Run `action` against the host. Each command is checked here and then handed
+-- to the runtime in one call that returns only once the child is reaped.
+--
+-- ```prism,no_run
+-- run_proc(\() -> exec("true", []).status)
+-- ```
+pub fn run_proc(action : () -> a ! {Proc | e}) : a =
+  handle action() with
+    collect(c) resume k =>
+      if proc_well_formed(c) then
+        k(proc_decode(prim_proc_collect(proc_encode(c))))
+      else
+        k(proc_refused(BadCommand))
+    collect_pipeline(p) resume k =>
+      if proc_pipeline_well_formed(p) then
+        k(
+            proc_decode_pipeline(
+                p.stages,
+                prim_proc_pipeline(proc_encode_pipeline(p)),
+              ),
+          )
+      else
+        k(proc_pipeline_refused(p.stages, SpawnFailed(BadCommand)))
+    return r => r
+
+-- | Run `action` with every command answered by `answer` and no child spawned.
+-- A pipeline is answered stage by stage, in order, each stage fed the output
+-- the one before it was answered with.
+--
+-- ```prism
+-- with_fake_proc(
+--   \(c) -> Outcome { status = Exited(0), out = buf_of_string(c.program), err = buf_empty() },
+--   \() -> text(exec("echo", []).out),
+-- )
+-- ```
+-- ```output
+-- Some(echo)
+-- ```
+--
+-- ```prism
+-- fn shout(c : Command) : Outcome =
+--   let heard =
+--     match c.input of
+--       Feed(b) => string_of_buf(b)
+--       NoInput => ""
+--   Outcome { status = Exited(0), out = buf_of_string("{heard}{c.program}"), err = buf_empty() }
+--
+-- fn main() : Unit ! {IO} =
+--   let r = with_fake_proc(shout, \() -> collect_pipeline(pipeline([command("a", []), command("b", [])])))
+--   println(string_of_buf(r.out))
+-- ```
+-- ```output
+-- ab
+-- ```
+pub fn with_fake_proc(
+  answer : (Command) -> Outcome,
+  action : () -> a ! {Proc | e}
+) : a =
+  handle action() with
+    collect(c) resume k => k(answer(c))
+    collect_pipeline(p) resume k => k(proc_fake_pipeline(answer, p.stages))
+    return r => r
+
+fn proc_fake_pipeline(
+  answer : (Command) -> Outcome,
+  stages : List(Command)
+) : PipelineResult =
+  match stages of
+    [] => proc_pipeline_refused(Nil, SpawnFailed(BadCommand))
+    first :: rest => proc_fake_go(answer, rest, answer(first), Nil, Nil)
+
+fn proc_fake_go(
+  answer : (Command) -> Outcome,
+  stages : List(Command),
+  o : Outcome,
+  statuses : List(ExitStatus),
+  errs : List(Buf)
+) : PipelineResult =
+  match stages of
+    [] =>
+      PipelineResult {
+        statuses = proc_rev(Cons(o.status, statuses), Nil),
+        out = o.out,
+        errs = proc_rev(Cons(o.err, errs), Nil)
+      }
+    c :: rest =>
+      proc_fake_go(
+          answer,
+          rest,
+          answer({ c | input = Feed(o.out) }),
+          Cons(o.status, statuses),
+          Cons(o.err, errs),
+        )
+
+fn proc_rev(xs : List(a), acc : List(a)) : List(a) =
+  match xs of
+    [] => acc
+    x :: rest => proc_rev(rest, Cons(x, acc))
+
+fn proc_last_status(
+  xs : List(ExitStatus),
+  i : Int,
+  last : StageFailure
+) : StageFailure =
+  match xs of
+    [] => last
+    s :: rest =>
+      proc_last_status(rest, i + 1, StageFailure { stage = i, status = s })
+
+fn proc_first_failure(xs : List(ExitStatus), i : Int) : Option(StageFailure) =
+  match xs of
+    [] => None
+    Exited(0) :: rest => proc_first_failure(rest, i + 1)
+    s :: _ => Some(StageFailure { stage = i, status = s })
+
+fn proc_last_failure(
+  xs : List(ExitStatus),
+  i : Int,
+  found : Option(StageFailure)
+) : Option(StageFailure) =
+  match xs of
+    [] => found
+    Exited(0) :: rest => proc_last_failure(rest, i + 1, found)
+    s :: rest =>
+      proc_last_failure(
+          rest,
+          i + 1,
+          Some(StageFailure { stage = i, status = s }),
+        )
+
+fn proc_refused(e : ProcError) : Outcome =
+  Outcome { status = SpawnFailed(e), out = buf_empty(), err = buf_empty() }
+
+fn proc_output_ok(o : Output) : Bool =
+  match o of
+    Discard => true
+    Capture(n) => n >= 0 && n <= max_capture
+
+fn proc_deadline_ok(d : Option(Int)) : Bool =
+  match d of
+    None => true
+    Some(ms) => ms >= 0
+
+fn proc_well_formed(c : Command) : Bool =
+  proc_output_ok(c.stdout_policy)
+    && proc_output_ok(c.stderr_policy)
+    && proc_deadline_ok(c.deadline_ms)
+
+fn proc_pipeline_well_formed(p : Pipeline) : Bool =
+  match p.stages of
+    [] => false
+    first :: rest =>
+      proc_deadline_ok(p.deadline_ms)
+        && proc_stage_ok(first)
+        && proc_later_stages_ok(rest)
+
+fn proc_stage_ok(c : Command) : Bool =
+  match c.deadline_ms of
+    None => proc_well_formed(c)
+    Some(_) => false
+
+fn proc_later_stages_ok(cs : List(Command)) : Bool =
+  match cs of
+    [] => true
+    c :: rest =>
+      match c.input of
+        NoInput => proc_stage_ok(c) && proc_later_stages_ok(rest)
+        Feed(_) => false
+
+-- A refused pipeline answers `s` for every stage, or once when it has none.
+fn proc_pipeline_refused(
+  stages : List(Command),
+  s : ExitStatus
+) : PipelineResult =
+  let n = proc_count(stages)
+  let k =
+    if n == 0 then
+      1
+    else
+      n
+  PipelineResult {
+    statuses = proc_repeat(s, k),
+    out = buf_empty(),
+    errs = proc_repeat(buf_empty(), k)
+  }
+
+fn proc_repeat(x : a, n : Int) : List(a) =
+  if n <= 0 then
+    Nil
+  else
+    Cons(x, proc_repeat(x, n - 1))
+
+-- The request codec. Every integer is an unsigned LEB128 varint and every string
+-- or byte run is its length followed by its bytes; the layout is private to this
+-- module and the two hosts, and its first field is a version.
+fn proc_uv(b : Buf, n : Int) : Buf =
+  if n < proc_varint_base then
+    buf_push(b, n)
+  else
+    proc_uv(
+        buf_push(b, n % proc_varint_base + proc_varint_base),
+        n / proc_varint_base,
+      )
+
+fn proc_str(b : Buf, s : String) : Buf =
+  buf_append_str(proc_uv(b, byte_len(s)), s)
+
+fn proc_strs(b : Buf, xs : List(String)) : Buf =
+  match xs of
+    [] => b
+    x :: rest => proc_strs(proc_str(b, x), rest)
+
+fn proc_count(xs : List(a)) : Int =
+  match xs of
+    [] => 0
+    _ :: rest => 1 + proc_count(rest)
+
+fn proc_edits(b : Buf, es : List(EnvEdit)) : Buf =
+  match es of
+    [] => b
+    SetVar(k, v) :: rest =>
+      proc_edits(proc_str(proc_str(proc_uv(b, 0), k), v), rest)
+    UnsetVar(k) :: rest => proc_edits(proc_str(proc_uv(b, 1), k), rest)
+
+fn proc_output(b : Buf, o : Output) : Buf =
+  match o of
+    Discard => proc_uv(b, 0)
+    Capture(n) => proc_uv(proc_uv(b, 1), n)
+
+fn proc_encode(c : Command) : Buf =
+  proc_deadline(
+      proc_stage(proc_uv(buf_empty(), proc_codec_version), c),
+      c.deadline_ms,
+    )
+
+-- A pipeline is its stage count and every stage as a command is laid out, with
+-- the one deadline at the end.
+fn proc_encode_pipeline(p : Pipeline) : Buf =
+  let b =
+    proc_uv(proc_uv(buf_empty(), proc_codec_version), proc_count(p.stages))
+  proc_deadline(proc_stages(b, p.stages), p.deadline_ms)
+
+fn proc_stages(b : Buf, cs : List(Command)) : Buf =
+  match cs of
+    [] => b
+    c :: rest => proc_stages(proc_stage(b, c), rest)
+
+fn proc_deadline(b : Buf, d : Option(Int)) : Buf =
+  match d of
+    None => proc_uv(b, 0)
+    Some(ms) => proc_uv(b, ms + 1)
+
+fn proc_stage(b : Buf, c : Command) : Buf =
+  let b0 = proc_str(b, c.program)
+  let b1 = proc_strs(proc_uv(b0, proc_count(c.arguments)), c.arguments)
+  let b2 =
+    match c.directory of
+      None => proc_uv(b1, 0)
+      Some(p) => proc_str(proc_uv(b1, 1), path_str(p))
+  let b3 =
+    match c.base_env of
+      Inherit => proc_uv(b2, 0)
+      Clean => proc_uv(b2, 1)
+  let b4 = proc_edits(proc_uv(b3, proc_count(c.env_edits)), c.env_edits)
+  let b5 =
+    match c.input of
+      NoInput => proc_uv(b4, 0)
+      Feed(bs) => buf_cat(proc_uv(proc_uv(b4, 1), buf_len(bs)), bs)
+  proc_output(proc_output(b5, c.stdout_policy), c.stderr_policy)
+
+-- The response codec reads with a cursor. A read past the end answers -1 as the
+-- cursor, and every step after it keeps it there, so a short response decodes
+-- to `Aborted(HostError)` rather than to a value made of missing bytes.
+fn proc_get_uv(b : Buf, i : Int) : (Int, Int) = proc_get_uv_go(b, i, 1, 0)
+
+fn proc_get_uv_go(b : Buf, i : Int, scale : Int, acc : Int) : (Int, Int) =
+  if i < 0 || i >= buf_len(b) then
+    (0, -1)
+  else
+    let byte = buf_get(b, i)
+    if byte < proc_varint_base then
+      (acc + byte * scale, i + 1)
+    else
+      proc_get_uv_go(
+          b,
+          i + 1,
+          scale * proc_varint_base,
+          acc + (byte - proc_varint_base) * scale,
+        )
+
+fn proc_get_buf(b : Buf, i : Int) : (Buf, Int) =
+  let (n, j) = proc_get_uv(b, i)
+  if j < 0 || j + n > buf_len(b) then
+    (buf_empty(), -1)
+  else
+    (buf_slice(b, j, n), j + n)
+
+fn proc_error(code : Int) : ProcError =
+  if code == proc_code_not_found then
+    NotFound
+  elif code == proc_code_denied then
+    PermissionDenied
+  elif code == proc_code_invalid then
+    BadCommand
+  elif code == proc_code_limit then
+    ResourceLimit
+  else
+    HostError
+
+fn proc_status(tag : Int, n : Int) : ExitStatus =
+  match tag of
+    0 => Exited(n)
+    1 => Signaled(n)
+    2 => SpawnFailed(proc_error(n))
+    3 =>
+      if n == 0 then
+        OutputLimit(Stdout)
+      else
+        OutputLimit(Stderr)
+    4 => DeadlineExceeded
+    _ => Aborted(proc_error(n))
+
+fn proc_decode(b : Buf) : Outcome =
+  let (version, i0) = proc_get_uv(b, 0)
+  let (tag, i1) = proc_get_uv(b, i0)
+  let (n, i2) = proc_get_uv(b, i1)
+  let (out, i3) = proc_get_buf(b, i2)
+  let (err, i4) = proc_get_buf(b, i3)
+  if not(version == proc_codec_version) || i4 < 0 then
+    proc_aborted()
+  else
+    Outcome { status = proc_status(tag, n), out = out, err = err }
+
+-- A pipeline response is the stage count, every stage's status, the output, and
+-- every stage's error stream. One whose count is not the request's is the
+-- host refusing the request whole, and every stage answers its one status.
+fn proc_decode_pipeline(stages : List(Command), b : Buf) : PipelineResult =
+  let (version, i0) = proc_get_uv(b, 0)
+  let (n, i1) = proc_get_uv(b, i0)
+  if not(version == proc_codec_version) || i1 < 0 || n < 1 then
+    proc_pipeline_refused(stages, Aborted(HostError))
+  else
+    proc_decode_stages(stages, b, i1, n)
+
+fn proc_decode_stages(
+  stages : List(Command),
+  b : Buf,
+  i : Int,
+  n : Int
+) : PipelineResult =
+  let (statuses, j) = proc_get_statuses(b, i, n)
+  let (out, k) = proc_get_buf(b, j)
+  let (errs, m) = proc_get_bufs(b, k, n)
+  match statuses of
+    _ if m < 0 => proc_pipeline_refused(stages, Aborted(HostError))
+    s :: _ if not(n == proc_count(stages)) => proc_pipeline_refused(stages, s)
+    _ => PipelineResult { statuses = statuses, out = out, errs = errs }
+
+fn proc_get_statuses(b : Buf, i : Int, n : Int) : (List(ExitStatus), Int) =
+  if n <= 0 || i < 0 then
+    (Nil, i)
+  else
+    let (tag, j) = proc_get_uv(b, i)
+    let (code, k) = proc_get_uv(b, j)
+    let (rest, m) = proc_get_statuses(b, k, n - 1)
+    (Cons(proc_status(tag, code), rest), m)
+
+fn proc_get_bufs(b : Buf, i : Int, n : Int) : (List(Buf), Int) =
+  if n <= 0 || i < 0 then
+    (Nil, i)
+  else
+    let (x, j) = proc_get_buf(b, i)
+    let (rest, k) = proc_get_bufs(b, j, n - 1)
+    (Cons(x, rest), k)
+
+fn proc_aborted() : Outcome =
+  Outcome { status = Aborted(HostError), out = buf_empty(), err = buf_empty() }

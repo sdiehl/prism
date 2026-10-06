@@ -115,6 +115,7 @@ fn latent(comp: &Comp, functions: &Latent) -> BTreeSet<MaskedOp> {
                 Comp::Handle {
                     body,
                     return_body,
+                    finally_body,
                     ops,
                     ..
                 } => {
@@ -124,6 +125,9 @@ fn latent(comp: &Comp, functions: &Latent) -> BTreeSet<MaskedOp> {
                     });
                     for clause in ops.iter().rev() {
                         frames.push(Frame::Enter(clause_effect_body(clause)));
+                    }
+                    if let Some(finally_body) = finally_body {
+                        frames.push(Frame::Enter(finally_body));
                     }
                     if let Some(return_body) = return_body {
                         frames.push(Frame::Enter(return_body));
@@ -263,6 +267,7 @@ mod tests {
                         body: Box::new(body),
                         return_var: Some(Sym::new("returned")),
                         return_body: Some(Box::new(Comp::Do(return_operation, Vec::new()))),
+                        finally_body: None,
                         ops: handler.clone(),
                     };
                     body = Comp::Bind(

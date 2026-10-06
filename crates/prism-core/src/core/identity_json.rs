@@ -20,6 +20,7 @@
 //! as a string, so a consumer splices the same bytes the hasher writes rather
 //! than round-tripping through a JSON number.
 
+use prism_common::format::FormatTag;
 use serde_json::{json, Map, Value as J};
 
 use super::cbpv::{Comp, CoreFn, CorePat, HandleOp, Value};
@@ -28,7 +29,7 @@ use prism_common::sym::Sym;
 use prism_syntax::names::{parse_var_get, parse_var_set};
 
 /// The versioned schema tag of the identity export.
-pub const IDENTITY_SCHEMA: &str = "prism-core-identity-v1";
+pub const IDENTITY_SCHEMA: FormatTag = FormatTag::new("prism-core-identity-v1");
 
 /// The two generated-`var` verbs, the canonical spelling the hasher renumbers.
 const VAR_VERB_GET: &str = "get";
@@ -156,6 +157,7 @@ fn comp(c: &Comp) -> J {
             body,
             return_var,
             return_body,
+            finally_body,
             ops,
         } => {
             let mut m = Map::new();
@@ -166,6 +168,9 @@ fn comp(c: &Comp) -> J {
             }
             if let Some(rb) = return_body {
                 m.insert("retBody".into(), comp(rb));
+            }
+            if let Some(fb) = finally_body {
+                m.insert("finBody".into(), comp(fb));
             }
             m.insert("ops".into(), J::Array(ops.iter().map(handle_op).collect()));
             J::Object(m)

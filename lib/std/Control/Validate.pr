@@ -43,7 +43,7 @@ fn capture_validate(action : () -> a ! {Validate(e) | r}) : (Option(a), List(e))
 -- ```
 pub fn run_validate(action : () -> a ! {Validate(e) | r}) : Validation(e, a) =
   match capture_validate(action) of
-    (Some(value), Nil) => Valid(value)
+    (Some(value), []) => Valid(value)
     (Some(_value), errs) => Invalid(errs)
     (None, errs) => Invalid(errs)
 
@@ -56,8 +56,8 @@ pub fn exec_validate(action : () -> a ! {Validate(e) | r}) : List(e) =
 -- | Raise each error as a non-fatal dispute, in list order.
 pub fn disputes(errs : List(e)) : Unit ! {Validate(e)} =
   match errs of
-    Nil => ()
-    Cons(err, rest) =>
+    [] => ()
+    err :: rest =>
       dispute(err)
       disputes(rest)
 

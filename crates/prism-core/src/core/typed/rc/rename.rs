@@ -102,6 +102,7 @@ fn push_comp<'a>(nodes: &mut Vec<Node<'a>>, comp: &'a mut TypedComp, renames: Re
             body,
             return_binder,
             return_body,
+            finally_body,
             ops,
         } => {
             for arm in ops.arms.iter_mut().rev() {
@@ -121,6 +122,9 @@ fn push_comp<'a>(nodes: &mut Vec<Node<'a>>, comp: &'a mut TypedComp, renames: Re
                     return_body,
                     scoped(&renames, return_binder.iter().map(|binder| binder.name)),
                 ));
+            }
+            if let Some(finally_body) = finally_body {
+                nodes.push(Node::Comp(finally_body, Rc::clone(&renames)));
             }
             nodes.push(Node::Comp(body, renames));
         }

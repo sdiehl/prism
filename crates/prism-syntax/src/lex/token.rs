@@ -590,6 +590,12 @@ pub enum Token {
     Comma,
     #[token(":=")]
     ColonEq,
+    // List cons, `x :: xs`, in both expressions and patterns.
+    #[token("::")]
+    ColonColon,
+    // Path join, `dir </> name`.
+    #[token("</>")]
+    PathJoin,
     #[token(":")]
     Colon,
     #[token("!")]
@@ -844,6 +850,8 @@ fixed_token_table! {
     RBracket => RBRACKET,
     Comma => COMMA,
     ColonEq => COLON_EQ,
+    ColonColon => COLON_COLON,
+    PathJoin => PATH_JOIN,
     Colon => COLON,
     Bang => BANG,
     At => AT,
@@ -1190,13 +1198,13 @@ mod tests {
         std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {path}: {e}"))
     }
 
-    // The four keyword highlighters (this lexer's `tok_class`, the REPL
-    // categorizer, the mdbook JS grammar, and the nvim syntax file) must agree on
-    // the keyword vocabulary. `tok_class` and the REPL categorizer are exhaustive
-    // `match`es, so the Rust compiler already pins those two: a new keyword token
-    // that is not classified fails to compile. This test pins the two external
-    // files, which the compiler cannot see: every fixed token the lexer paints as
-    // a keyword, builtin type name, or boolean literal must also appear in each.
+    // The keyword highlighters (this lexer's `tok_class`, which the REPL
+    // categorizer derives from, the mdbook JS grammar, and the nvim syntax file)
+    // must agree on the keyword vocabulary. `tok_class` is an exhaustive `match`,
+    // so a new keyword token that is not classified fails to compile. This test
+    // pins the two external files, which the compiler cannot see: every fixed
+    // token the lexer paints as a keyword, builtin type name, or boolean literal
+    // must also appear in each.
     //
     // The relation is subset, not equality: the external files may list contextual
     // keywords the lexer treats as ordinary identifiers (`total`, `assume`, the

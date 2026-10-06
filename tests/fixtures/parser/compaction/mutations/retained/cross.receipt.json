@@ -1,6 +1,6 @@
 {
   "schema": "prism-parser-compaction-bounded-mutation-run-v1",
-  "oracle_commit": "46886c1fa7064e4809020c1b788b3ee3531d6a63",
+  "oracle_tree": "cd110efef00d124b955cb6648724887e8e5517f4",
   "oracle_executable_path": "/Users/sdiehl/Git/prism/target/debug/prism",
   "handwritten_harness_path": "/Users/sdiehl/Git/prism/target/parser-compaction-check",
   "draw_cap_per_mutator": 16,

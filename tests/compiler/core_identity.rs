@@ -14,6 +14,7 @@
 // the encoder spells specially appears at least once. Programs stay small
 // because the reader parses JSON in Prism.
 
+use prism::DumpPhase;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -23,8 +24,8 @@ use prism::{default_roots, dump_on, interpret_io_on_with_args, with_prelude, Con
 const FIXTURE_DIR: &str = "tests/fixtures/syntax";
 const HARNESS: &str = "consumers/core_identity_hash.pr";
 
-const IDENTITY_PHASE: &str = "core-identity";
-const HASH_PHASE: &str = "core-hash";
+const IDENTITY_PHASE: DumpPhase = DumpPhase::CoreIdentity;
+const HASH_PHASE: DumpPhase = DumpPhase::CoreHash;
 
 // A `dump core-hash` line is an abbreviated hash, two spaces, then the name.
 const HASH_LINE_SEP: &str = "  ";
@@ -192,7 +193,7 @@ fn roots() -> Vec<Root> {
     default_roots(manifest())
 }
 
-fn phase(name: &str, src: &str) -> Result<String, Error> {
+fn phase(name: DumpPhase, src: &str) -> Result<String, Error> {
     dump_on(name, &with_prelude(src), &roots(), &Config::default())
 }
 

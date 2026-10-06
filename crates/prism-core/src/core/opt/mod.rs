@@ -196,6 +196,28 @@ pub struct PassPipeline {
     late: Vec<CorePass>,
 }
 
+/// Why a pass pipeline was refused.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum PipelineError {
+    #[error("pre pipeline contains a late-stage pass")]
+    LateInPre,
+    #[error("late pipeline contains a pre-lowering pass")]
+    PreInLate,
+    #[error("EraseNewtypes must precede Specialize")]
+    SpecializeBeforeErase,
+    #[error("Specialize must precede HoSpecialize")]
+    HoSpecializeBeforeSpecialize,
+    #[error("pass specification is empty")]
+    Empty,
+    #[error("unknown pass `{name}`{}", .nearest.as_ref().map_or_else(String::new, |n| format!(" (did you mean `{n}`?)")))]
+    Unknown {
+        name: String,
+        nearest: Option<String>,
+    },
+    #[error("{} runs in the {} stage", .0.name(), .0.stage().label())]
+    WrongStage(CorePass),
+}
+
 /// Compatibility name for the original public API. Construction remains
 /// validated because the alias exposes no fields.
 pub type PassSpec = PassPipeline;
@@ -205,31 +227,31 @@ impl PassPipeline {
     ///
     /// # Errors
     /// An empty pipeline, an off-stage pass, or an illegal specialization order.
-    pub fn try_new(pre: Vec<CorePass>, late: Vec<CorePass>) -> Result<Self, String> {
+    pub fn try_new(pre: Vec<CorePass>, late: Vec<CorePass>) -> Result<Self, PipelineError> {
         if pre
             .iter()
             .any(|pass| pass.stage() != PassStage::PreLowering)
         {
-            return Err("pre pipeline contains a late-stage pass".into());
+            return Err(PipelineError::LateInPre);
         }
         if late.iter().any(|pass| pass.stage() != PassStage::Late) {
-            return Err("late pipeline contains a pre-lowering pass".into());
+            return Err(PipelineError::PreInLate);
         }
         let erase = pre.iter().position(|p| *p == CorePass::EraseNewtypes);
         let specialize = pre.iter().position(|p| *p == CorePass::Specialize);
         if let (Some(e), Some(s)) = (erase, specialize) {
             if s < e {
-                return Err("EraseNewtypes must precede Specialize".into());
+                return Err(PipelineError::SpecializeBeforeErase);
             }
         }
         let higher_order = pre.iter().position(|p| *p == CorePass::HoSpecialize);
         if let (Some(s), Some(h)) = (specialize, higher_order) {
             if h < s {
-                return Err("Specialize must precede HoSpecialize".into());
+                return Err(PipelineError::HoSpecializeBeforeSpecialize);
             }
         }
         if pre.is_empty() && late.is_empty() {
-            return Err("pass specification is empty".into());
+            return Err(PipelineError::Empty);
         }
         Ok(Self { pre, late })
     }
@@ -244,7 +266,7 @@ impl PassPipeline {
     /// Returns a human-readable message when a name is unknown, a pass is placed
     /// in the wrong stage, the pre section orders `Specialize` before
     /// `EraseNewtypes`, or both sections are empty.
-    pub fn parse(spec: &str) -> Result<Self, String> {
+    pub fn parse(spec: &str) -> Result<Self, PipelineError> {
         let mut pre = Vec::new();
         let mut late = Vec::new();
         for segment in spec.split(';').map(str::trim).filter(|s| !s.is_empty()) {
@@ -256,11 +278,7 @@ impl PassPipeline {
             for name in names.split(',').map(str::trim).filter(|s| !s.is_empty()) {
                 let pass = CorePass::from_name(name).ok_or_else(|| unknown_pass(name))?;
                 if pass.stage() != stage {
-                    return Err(format!(
-                        "{} runs in the {} stage",
-                        pass.name(),
-                        pass.stage().label()
-                    ));
+                    return Err(PipelineError::WrongStage(pass));
                 }
                 target.push(pass);
             }
@@ -289,7 +307,7 @@ impl PassPipeline {
         &self.late
     }
 
-    fn without(&self, disabled: CorePass) -> Result<Self, String> {
+    fn without(&self, disabled: CorePass) -> Result<Self, PipelineError> {
         Self::try_new(
             self.pre
                 .iter()
@@ -373,7 +391,7 @@ impl OptimizationPlan {
     /// # Errors
     /// Returns an error when disabling the pass would leave an explicit
     /// pipeline empty.
-    pub fn disable(&mut self, pass: CorePass) -> Result<(), String> {
+    pub fn disable(&mut self, pass: CorePass) -> Result<(), PipelineError> {
         match self {
             Self::Level { disabled, .. } => {
                 disabled.insert(pass);
@@ -450,12 +468,13 @@ fn split_section(segment: &str) -> (PassStage, &str) {
     (PassStage::PreLowering, segment)
 }
 
-// An "unknown pass" message, suggesting the closest known name when one is near.
-fn unknown_pass(name: &str) -> String {
-    suggest::did_you_mean(name, CorePass::ALL.into_iter().map(CorePass::name)).map_or_else(
-        || format!("unknown pass `{name}`"),
-        |n| format!("unknown pass `{name}` (did you mean `{n}`?)"),
-    )
+// An unknown pass, carrying the closest known name when one is near.
+fn unknown_pass(name: &str) -> PipelineError {
+    PipelineError::Unknown {
+        name: name.to_string(),
+        nearest: suggest::did_you_mean(name, CorePass::ALL.into_iter().map(CorePass::name))
+            .map(str::to_string),
+    }
 }
 
 /// Per-pass tick counts (rewrites fired), in run order. Dumped under

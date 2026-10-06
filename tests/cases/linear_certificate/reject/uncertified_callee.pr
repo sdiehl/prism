@@ -5,7 +5,7 @@ type List = Nil | Cons(Int, List)
 
 fn consume(xs : List) : Int =
   match xs of
-    Nil => 0
-    Cons(_, _) => 1
+    [] => 0
+    _ :: _ => 1
 
 fn top(xs : List) : Int @ linear = consume(xs)

@@ -283,6 +283,10 @@ pub enum SuspendError {
     /// (the fingerprint of an unserializable capture or a cycle); the string names
     /// where the encoder gave up.
     NonSerializable(String),
+    /// The machine still owes a handler's cleanup clause: a frame waiting to
+    /// run one, or a continuation whose clause has not yet taken it. The
+    /// obligation belongs to this process, so it never crosses.
+    PendingCleanup,
 }
 
 impl std::fmt::Display for SuspendError {
@@ -294,6 +298,10 @@ impl std::fmt::Display for SuspendError {
                     "cannot suspend: {what} cannot cross the suspend boundary"
                 )
             }
+            Self::PendingCleanup => write!(
+                f,
+                "cannot suspend: a pending handler cleanup cannot cross the suspend boundary"
+            ),
         }
     }
 }
@@ -398,6 +406,10 @@ enum Tag {
     // Environment and handler record.
     EnvMap,
     HInfo,
+    // A handler record that carries a cleanup clause: the `HInfo` layout, then
+    // the clause. A distinct tag rather than a new field, so a record without
+    // the clause keeps its bytes.
+    HInfoFinally,
 }
 
 const TAGS: &[Tag] = &[
@@ -456,6 +468,7 @@ const TAGS: &[Tag] = &[
     Tag::FMask,
     Tag::EnvMap,
     Tag::HInfo,
+    Tag::HInfoFinally,
 ];
 
 impl Tag {
@@ -635,7 +648,13 @@ impl Encoder {
                     "effect-lowered local reference".into(),
                 ));
             }
-            Rv::Resume(frames) => {
+            // A continuation whose clause body still owes cleanups is live
+            // machine state; one already taken, or captured across no cleanup,
+            // is plain frames.
+            Rv::Resume(frames, armed) => {
+                if armed.as_ref().is_some_and(|armed| armed.get()) {
+                    return Err(SuspendError::PendingCleanup);
+                }
                 let idxs = self.frames(frames)?;
                 put_tag(&mut out, Tag::VResume);
                 put_indices(&mut out, &idxs);
@@ -873,6 +892,12 @@ impl Encoder {
     // process-local), the body, and the optional return clause.
     fn handle(&mut self, hi: &HandleInfo) -> Result<u32, SuspendError> {
         self.enter("handler")?;
+        // The clause is code like the others; what cannot move is a cleanup
+        // already owed, which lives in the frames and the continuations.
+        let fbi = match &hi.finally_body {
+            Some(fb) => Some(self.comp(fb)?),
+            None => None,
+        };
         let bi = self.comp(&hi.body)?;
         let rbi = match &hi.return_body {
             Some(rb) => Some(self.comp(rb)?),
@@ -885,7 +910,14 @@ impl Encoder {
             .map(|(name, (params, resume, body))| Ok((*name, params, *resume, self.comp(body)?)))
             .collect::<Result<Vec<_>, SuspendError>>()?;
         let mut out = Vec::new();
-        put_tag(&mut out, Tag::HInfo);
+        put_tag(
+            &mut out,
+            if fbi.is_some() {
+                Tag::HInfoFinally
+            } else {
+                Tag::HInfo
+            },
+        );
         put_uvarint(&mut out, u64::from(bi));
         match hi.return_var {
             Some(rv) => {
@@ -910,6 +942,9 @@ impl Encoder {
             }
             put_sym(&mut out, resume);
             put_uvarint(&mut out, u64::from(bidx));
+        }
+        if let Some(fi) = fbi {
+            put_uvarint(&mut out, u64::from(fi));
         }
         self.leave();
         Ok(self.push(out))
@@ -951,6 +986,11 @@ impl Encoder {
                 for o in ops.iter() {
                     put_sym(&mut out, *o);
                 }
+            }
+            // Cleanup bookkeeping is live machine state: a handler owing a
+            // cleanup does not cross a serialized boundary.
+            Frame::Unwind(..) | Frame::Trigger(..) | Frame::Held(..) => {
+                return Err(SuspendError::PendingCleanup);
             }
         }
         self.leave();
@@ -1159,6 +1199,7 @@ enum Raw {
         ret_var: Option<String>,
         ret_body: Option<u32>,
         ops: Vec<RawHandleOp>,
+        finally_body: Option<u32>,
     },
 }
 
@@ -1193,7 +1234,8 @@ fn parse_node(r: &mut Reader<'_>, index: u32) -> Result<Raw, CodecError> {
         let n = r.bounded_len()?;
         (0..n).map(|_| r.string()).collect()
     };
-    Ok(match Tag::from_u64(r.uvarint()?)? {
+    let tag = Tag::from_u64(r.uvarint()?)?;
+    Ok(match tag {
         Tag::VInt => Raw::VInt(r.svarint()?),
         Tag::VI64 => Raw::VI64(r.svarint()?),
         Tag::VU64 => Raw::VU64(r.uvarint()?),
@@ -1309,7 +1351,7 @@ fn parse_node(r: &mut Reader<'_>, index: u32) -> Result<Raw, CodecError> {
                 .collect::<Result<Vec<_>, CodecError>>()?;
             Raw::EnvMap(kvs)
         }
-        Tag::HInfo => {
+        Tag::HInfo | Tag::HInfoFinally => {
             let body = r.node_ref(index)?;
             let ret_var = if r.bool()? { Some(r.string()?) } else { None };
             let ret_body = if r.bool()? {
@@ -1333,11 +1375,17 @@ fn parse_node(r: &mut Reader<'_>, index: u32) -> Result<Raw, CodecError> {
                     })
                 })
                 .collect::<Result<Vec<_>, CodecError>>()?;
+            let finally_body = if tag == Tag::HInfoFinally {
+                Some(r.node_ref(index)?)
+            } else {
+                None
+            };
             Raw::HInfo {
                 body,
                 ret_var,
                 ret_body,
                 ops,
+                finally_body,
             }
         }
     })
@@ -1397,7 +1445,7 @@ impl Builder<'_> {
             Raw::VTuple(args) => Rv::Tuple(self.values_at(&args)?.into()),
             Raw::VArray(args) => Rv::Array(self.values_at(&args)?.into()),
             Raw::VBuf(bytes) => Rv::Buf(Rc::new(bytes)),
-            Raw::VResume(frames) => Rv::Resume(self.frames_at(&frames)?.into()),
+            Raw::VResume(frames) => Rv::Resume(self.frames_at(&frames)?.into(), None),
             _ => return Err(CodecError::Malformed),
         };
         self.depth -= 1;
@@ -1519,9 +1567,14 @@ impl Builder<'_> {
             ret_var,
             ret_body,
             ops,
+            finally_body,
         } = self.at(i)?.clone()
         else {
             return Err(CodecError::Malformed);
+        };
+        let finally_body = match finally_body {
+            Some(fb) => Some(self.comp_at(fb)?),
+            None => None,
         };
         let body = self.comp_at(body)?;
         let return_body = match ret_body {
@@ -1541,6 +1594,7 @@ impl Builder<'_> {
             ops: op_map,
             return_var: ret_var.as_deref().map(Sym::new),
             return_body,
+            finally_body,
         })
     }
 
@@ -1691,6 +1745,7 @@ pub fn decode_kont(bytes: &[u8]) -> Result<Kont, CodecError> {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
     use std::collections::BTreeMap;
     use std::rc::Rc;
 
@@ -1751,6 +1806,7 @@ mod tests {
             ]),
             return_var: Some(Sym::new("r")),
             return_body: Some(cmp(Node::Return(Atom::Var(Sym::new("r"))))),
+            finally_body: None,
         };
         let big_body = cmp(Node::Bind(
             cmp(Node::Return(Atom::Int(1))),
@@ -1801,10 +1857,13 @@ mod tests {
             ]
             .into(),
         );
-        let resume = Rv::Resume(Rc::from([
-            Frame::Restore(Sym::new("caller")),
-            Frame::Mask(Rc::from([Sym::new("ask")])),
-        ]));
+        let resume = Rv::Resume(
+            Rc::from([
+                Frame::Restore(Sym::new("caller")),
+                Frame::Mask(Rc::from([Sym::new("ask")])),
+            ]),
+            None,
+        );
         let base_env = env(vec![
             ("i64", Rv::I64(-5)),
             ("u64", Rv::U64(42)),
@@ -2094,6 +2153,62 @@ mod tests {
             }
             other => panic!("expected a refusal, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_frame_owing_a_cleanup_is_refused_by_name() {
+        // A handler that still owes its cleanup clause is live machine state,
+        // so the frame it stands on never crosses a serialized boundary.
+        let k = Kont {
+            stack: vec![Frame::Unwind(cmp(Node::Return(Atom::Unit)), env(vec![]))],
+            ..kitchen_sink()
+        };
+        match encode_kont(&k) {
+            Err(SuspendError::PendingCleanup) => {}
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_handler_record_carrying_a_cleanup_clause_roundtrips() {
+        // The clause is code: a handler installed with one moves like any
+        // other, and only a cleanup already owed is refused.
+        let handler = HandleInfo {
+            body: cmp(Node::Return(Atom::Int(1))),
+            ops: BTreeMap::new(),
+            return_var: None,
+            return_body: None,
+            finally_body: Some(cmp(Node::Return(Atom::Unit))),
+        };
+        let k = Kont {
+            stack: vec![Frame::Handle(Rc::new(handler), env(vec![]))],
+            ..kitchen_sink()
+        };
+        let bytes = encode_kont(&k).expect("a handler with a cleanup clause encodes");
+        let back = decode_kont(&bytes).unwrap();
+        let [Frame::Handle(hi, _)] = back.stack.as_slice() else {
+            panic!("expected one handler frame");
+        };
+        assert!(hi.finally_body.is_some(), "the clause survives the wire");
+        assert_eq!(encode_kont(&back).unwrap(), bytes);
+    }
+
+    #[test]
+    fn a_continuation_still_owing_cleanups_is_refused_until_taken() {
+        let frames: Rc<[Frame]> = Rc::from([Frame::Restore(Sym::new("caller"))]);
+        let armed = Rc::new(Cell::new(true));
+        let k = Kont {
+            state: KontState::Ret(Rv::Resume(frames, Some(Rc::clone(&armed)))),
+            ..kitchen_sink()
+        };
+        match encode_kont(&k) {
+            Err(SuspendError::PendingCleanup) => {}
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+        // Once taken, the same continuation is plain frames again.
+        armed.set(false);
+        let back = decode_kont(&encode_kont(&k).unwrap()).unwrap();
+        assert!(matches!(back.state, KontState::Ret(Rv::Resume(_, None))));
     }
 
     #[test]

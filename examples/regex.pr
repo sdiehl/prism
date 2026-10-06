@@ -39,8 +39,8 @@ fn matchr(re, cs, k) : Bool =
     REps => k(cs)
     RChr(c) =>
       match cs of
-        Nil => false
-        Cons(h, t) =>
+        [] => false
+        h :: t =>
           if h == c then
             k(t)
           else
@@ -60,8 +60,8 @@ fn lit(s) : Regex = lit_chars(chars(s))
 
 fn lit_chars(cs) : Regex =
   match cs of
-    Nil => REps
-    Cons(c, rest) => RSeq(RChr(c), lit_chars(rest))
+    [] => REps
+    c :: rest => RSeq(RChr(c), lit_chars(rest))
 
 fn report(desc : String, re, subject) =
   let ok = fullmatch(re, subject)

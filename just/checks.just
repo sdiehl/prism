@@ -115,10 +115,14 @@ fmt-examples: build-release
 package-world: build-release
     ./target/release/prism pkg check-world packages --strict
 
-# Judge the stdlib and packages against the house style rules.
+# Judge the stdlib and packages against the house style rules, then report the
+# examples advisory-only (their count, never a failure).
 [group('quality')]
 lint: build-release
+    #!/usr/bin/env bash
+    set -euo pipefail
     ./target/release/prism lint lib/std packages
+    ./target/release/prism lint --advisory examples | tail -n 1
 
 # Mirror the complete CI check set locally.
 [group('gates')]

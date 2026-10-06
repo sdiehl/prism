@@ -42,7 +42,7 @@ pub struct BuildLineageInput<'a> {
     pub source: &'a str,
     pub roots: &'a [Root],
     pub cfg: &'a Config,
-    pub backend: &'a str,
+    pub backend: crate::driver::ArtifactBackend,
     pub artifacts: Vec<(&'a str, PathBuf)>,
     pub cache: Option<CommitStats>,
     pub diagnostics: Vec<String>,
@@ -323,8 +323,10 @@ pub fn read_lineage(file: &Path) -> Result<LineageGraph, Error> {
     let value =
         serde_json::from_str::<Value>(&text).map_err(|e| Error::ResolveLineage(e.to_string()))?;
     match value.get("format").and_then(Value::as_str) {
-        Some(LINEAGE_GRAPH_FORMAT) => serde_json::from_str::<LineageGraph>(&text)
-            .map_err(|e| Error::ResolveLineage(format!("{}: {e}", path.display()))),
+        Some(format) if LINEAGE_GRAPH_FORMAT.expect(format).is_ok() => {
+            serde_json::from_str::<LineageGraph>(&text)
+                .map_err(|e| Error::ResolveLineage(format!("{}: {e}", path.display())))
+        }
         other => Err(Error::ResolveLineage(format!(
             "{} is not a lineage graph (format {})",
             path.display(),

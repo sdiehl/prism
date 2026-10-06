@@ -44,12 +44,14 @@ pub(super) fn rw_var_decl(
                 // tail position (`get(u,k) => \s -> k(s)(s)`), so both ops are
                 // grade One.
                 grade: Grade::Once,
+                span: Span::default(),
             },
             EffOp {
                 name: put.clone(),
                 params: vec![st],
                 ret: Ty::Unit,
                 grade: Grade::Once,
+                span: Span::default(),
             },
         ],
         span,

@@ -1,3 +1,4 @@
+use prism::DumpPhase;
 use std::fs;
 use std::path::Path;
 
@@ -10,7 +11,7 @@ fn repo(path: &str) -> std::path::PathBuf {
 
 fn extract(source: &str) -> prism::TypeSpans {
     let full = prism::with_prelude(source);
-    let json = prism::dump("typespans", &full).expect("dump typespans");
+    let json = prism::dump(DumpPhase::Typespans, &full).expect("dump typespans");
     prism::TypeSpans::from_json(&json).expect("valid shared schema")
 }
 
@@ -33,7 +34,7 @@ fn span_at<'a>(
 fn typespans_fixture_is_canonical_and_semantic() {
     let source = fs::read_to_string(repo(SOURCE)).expect("read typespans source");
     let full = prism::with_prelude(&source);
-    let actual = prism::dump("typespans", &full).expect("dump typespans");
+    let actual = prism::dump(DumpPhase::Typespans, &full).expect("dump typespans");
     let expected = fs::read_to_string(repo(GOLDEN)).expect("read typespans golden");
     assert_eq!(format!("{actual}\n"), expected);
 
@@ -64,7 +65,7 @@ fn typespans_fixture_is_canonical_and_semantic() {
         .windows(2)
         .any(|pair| { pair[0].start <= pair[1].start && pair[0].end >= pair[1].end }));
 
-    let again = prism::dump("typespans", &full).expect("second typespans dump");
+    let again = prism::dump(DumpPhase::Typespans, &full).expect("second typespans dump");
     assert_eq!(again, actual, "typespans extraction must be byte-stable");
 }
 
@@ -72,7 +73,7 @@ fn typespans_fixture_is_canonical_and_semantic() {
 fn typespans_decoder_refuses_crossing_ranges() {
     let crossing = r#"{"format":"prism-typespans-v1","spans":[{"start":0,"end":4,"type":"Int ! {}"},{"start":2,"end":6,"type":"Int ! {}"}]}"#;
     let error = prism::TypeSpans::from_json(crossing).expect_err("crossing ranges must fail");
-    assert!(error.contains("crossing typespans"));
+    assert!(error.to_string().contains("crossing typespans"), "{error}");
 }
 
 #[test]

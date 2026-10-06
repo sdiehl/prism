@@ -1,9 +1,9 @@
 // A dedicated worker for the chaos counter's batches. Each batch recompiles the
 // swarm kernel in wasm (~1s) and runs `count` schedules; doing that off the main
 // thread keeps the interleaving animation smooth while the counter climbs. The
-// protocol is a bare {start, count} request answered with the raw `chaos_run`
+// protocol is a bare {start, count} request answered with the raw `batch_report`
 // transcript (or an `error:` line).
-import init, { chaos_run } from "../pkg/prism.js";
+import init, { resident_run } from "../pkg/prism.js";
 
 interface Req {
   start: number;
@@ -27,6 +27,8 @@ const ensureReady = (): Promise<unknown> => {
 ctx.onmessage = (e) => {
   const { start, count } = e.data;
   ensureReady()
-    .then(() => ctx.postMessage(chaos_run(start, count)))
+    .then(() =>
+      ctx.postMessage(resident_run("chaos", `batch_report(${start}, ${count}, n_workers)`)),
+    )
     .catch((err) => ctx.postMessage(`error: ${err}`));
 };

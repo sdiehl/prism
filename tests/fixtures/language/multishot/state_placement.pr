@@ -1,0 +1,28 @@
+effect Choose
+  choose() : Bool
+
+-- The cell outlives the delimiter, so both resumptions share it: the second
+-- branch sees the write the first one made.
+fn outside() : List(Int) =
+  var x := 1
+  handle let _ = if choose() then x := 2 else () in [x] with
+    choose() resume k => append(k(true), k(false))
+    return r => r
+
+-- The same mutation with the cell allocated under the delimiter.
+fn scoped() : List(Int) ! {Choose} =
+  var x := 1
+  if choose() then
+    x := 2
+  [x]
+
+-- The captured continuation owns the cell, so each resumption restarts from its
+-- value at the capture point.
+fn inside() : List(Int) =
+  handle scoped() with
+    choose() resume k => append(k(true), k(false))
+    return r => r
+
+fn main() =
+  println(outside())
+  println(inside())

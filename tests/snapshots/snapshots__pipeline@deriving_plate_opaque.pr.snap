@@ -20,6 +20,7 @@ Program {
                         Int,
                     ],
                     fields: None,
+                    span: 99..103,
                 },
                 Ctor {
                     name: "Thunk",
@@ -36,6 +37,7 @@ Program {
                         ),
                     ],
                     fields: None,
+                    span: 111..116,
                 },
             ],
             deriving: [
@@ -57,9 +59,9 @@ Program {
             param: "a",
             supers: [],
             methods: [
-                (
-                    "children",
-                    Fun(
+                ClassMethod {
+                    name: "children",
+                    ty: Fun(
                         [
                             Var(
                                 "a",
@@ -75,10 +77,11 @@ Program {
                             ],
                         ),
                     ),
-                ),
-                (
-                    "rebuild",
-                    Fun(
+                    span: 17..25,
+                },
+                ClassMethod {
+                    name: "rebuild",
+                    ty: Fun(
                         [
                             Var(
                                 "a",
@@ -107,7 +110,8 @@ Program {
                             "a",
                         ),
                     ),
-                ),
+                    span: 45..52,
+                },
             ],
             span: 0..85,
         },

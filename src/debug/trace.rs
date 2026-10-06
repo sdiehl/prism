@@ -27,6 +27,21 @@ const TAG_BOOL: char = 'B';
 const TAG_OUT: char = 'O';
 const DELIM: char = ':';
 
+/// A malformed `.replay` frame, located by its character offset.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum TraceError {
+    #[error("replay trace: no '{DELIM}' after tag at {0}")]
+    MissingDelimiter(usize),
+    #[error("replay trace: bad length at {0}")]
+    BadLength(usize),
+    #[error("replay trace: payload at {0} runs past end")]
+    PastEnd(usize),
+    #[error("replay trace: bad int payload {0:?}")]
+    BadInt(String),
+    #[error("replay trace: unknown tag {0:?}")]
+    UnknownTag(char),
+}
+
 // The tag character and payload string of one observation.
 fn tag_payload(o: &Obs) -> (char, String) {
     match o {
@@ -69,7 +84,7 @@ pub fn encode(frames: &[Obs]) -> String {
 /// # Errors
 /// Fails on a malformed frame: a truncated header, a missing delimiter, a
 /// non-numeric length, or a payload that runs past the end of the input.
-pub fn decode(s: &str) -> Result<Vec<Obs>, String> {
+pub fn decode(s: &str) -> Result<Vec<Obs>, TraceError> {
     let chars: Vec<char> = s.chars().collect();
     let mut i = 0;
     let mut out = Vec::new();
@@ -80,16 +95,16 @@ pub fn decode(s: &str) -> Result<Vec<Obs>, String> {
             .iter()
             .position(|&c| c == DELIM)
             .map(|p| i + 1 + p)
-            .ok_or_else(|| format!("replay trace: no '{DELIM}' after tag at {i}"))?;
+            .ok_or(TraceError::MissingDelimiter(i))?;
         let len: usize = chars[(i + 1)..colon]
             .iter()
             .collect::<String>()
             .parse()
-            .map_err(|_| format!("replay trace: bad length at {i}"))?;
+            .map_err(|_| TraceError::BadLength(i))?;
         let start = colon + 1;
         let end = start + len;
         if end > chars.len() {
-            return Err(format!("replay trace: payload at {start} runs past end"));
+            return Err(TraceError::PastEnd(start));
         }
         let payload: String = chars[start..end].iter().collect();
         out.push(decode_one(tag, &payload)?);
@@ -98,16 +113,16 @@ pub fn decode(s: &str) -> Result<Vec<Obs>, String> {
     Ok(out)
 }
 
-fn decode_one(tag: char, payload: &str) -> Result<Obs, String> {
+fn decode_one(tag: char, payload: &str) -> Result<Obs, TraceError> {
     match tag {
         TAG_INT => payload
             .parse()
             .map(Obs::Int)
-            .map_err(|_| format!("replay trace: bad int payload {payload:?}")),
+            .map_err(|_| TraceError::BadInt(payload.to_string())),
         TAG_BOOL => Ok(Obs::Bool(payload == "1")),
         TAG_OUT => Ok(Obs::Out),
         TAG_STR => Ok(Obs::Str(payload.to_string())),
-        other => Err(format!("replay trace: unknown tag {other:?}")),
+        other => Err(TraceError::UnknownTag(other)),
     }
 }
 

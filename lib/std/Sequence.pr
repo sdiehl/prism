@@ -120,7 +120,7 @@ pub fn range(lo : Int, hi : Int) : (Unit) -> Step(Int) =
 -- [1, 2, 3]
 -- ```
 pub fn from_list(xs : List(a)) : (Unit) -> Step(a) =
-  \(u) -> match xs of { Nil => SDone, Cons(x, rest) => SMore(x, from_list(rest)) }
+  \(u) -> match xs of { [] => SDone, x :: rest => SMore(x, from_list(rest)) }
 
 -- | The infinite sequence `x, f(x), f(f(x)), ...`. Bound it with `take`.
 --
@@ -441,8 +441,8 @@ fn window_slide(buf, rest) =
 -- | Local list append (`append` names the sequence combinator above).
 fn app_list(xs, ys) =
   match xs of
-    Nil => ys
-    Cons(x, r) => Cons(x, app_list(r, ys))
+    [] => ys
+    x :: r => Cons(x, app_list(r, ys))
 
 -- ============================================================================
 -- Consumers (drive the producer, folding elements into a value)

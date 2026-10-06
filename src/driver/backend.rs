@@ -12,6 +12,7 @@ use crate::lineage::{FactOutcome, QueryKind};
 use crate::store::disk::Store;
 use crate::sym::Sym;
 use crate::types::CtorInfo;
+use prism_common::format::FormatTag;
 use prism_native::{
     emit_llvm_closure_plan_shard_bc, emit_llvm_native_kont_plan_bc, emit_llvm_scc_bc,
     llvm_scc_closure_summary, native_kont_state_map, plan_llvm_closures_from_summaries,
@@ -28,9 +29,9 @@ const LLVM_SCC_QUERY: &str = "llvm-scc-bitcode";
 // The `-v2` is a cache-bust counter, not a compat version: hashed into the query
 // key so a format change misses stale entries. No old version is read back.
 const LLVM_SCC_QUERY_SCHEMA: &[u8] = b"prism-llvm-scc-bitcode-query-v2";
-const LLVM_SCC_OBJECT_FORMAT: &str = "prism-llvm-scc-bitcode-v1";
+const LLVM_SCC_OBJECT_FORMAT: FormatTag = FormatTag::new("prism-llvm-scc-bitcode-v1");
 const CLOSURE_SUMMARY_QUERY: &str = "llvm-scc-closure-summary";
-const CLOSURE_SUMMARY_FORMAT: &str = "prism-llvm-scc-closure-summary-v1";
+const CLOSURE_SUMMARY_FORMAT: FormatTag = FormatTag::new("prism-llvm-scc-closure-summary-v1");
 const MEBIBYTE: usize = 1024 * 1024;
 const MAX_LLVM_SCC_BYTES: usize = 64 * MEBIBYTE;
 const MAX_CLOSURE_SUMMARY_BYTES: usize = MEBIBYTE;
@@ -309,7 +310,7 @@ fn scc_key(
     field(&mut hasher, compiler_binary_fingerprint()?.as_bytes());
     field(
         &mut hasher,
-        cfg.artifact_identity_for("llvm-scc")
+        cfg.artifact_identity_for(crate::driver::ArtifactBackend::LlvmScc)
             .fingerprint()
             .as_bytes(),
     );
@@ -394,7 +395,7 @@ fn native_kont_plan_key(
     field(&mut hasher, compiler_binary_fingerprint()?.as_bytes());
     field(
         &mut hasher,
-        cfg.artifact_identity_for("llvm-scc")
+        cfg.artifact_identity_for(crate::driver::ArtifactBackend::LlvmScc)
             .fingerprint()
             .as_bytes(),
     );
@@ -402,7 +403,9 @@ fn native_kont_plan_key(
     field(&mut hasher, native_kont_table.as_bytes());
     field(
         &mut hasher,
-        native_kont_state_map(core, native_kont_table).as_bytes(),
+        native_kont_state_map(core, native_kont_table)
+            .map_err(Error::CodegenBackend)?
+            .as_bytes(),
     );
     Ok(hasher.finalize().to_hex().to_string())
 }
@@ -413,7 +416,7 @@ fn global_plan_key(kind: &str, fingerprint: &str, cfg: &Config) -> Result<String
     field(&mut hasher, compiler_binary_fingerprint()?.as_bytes());
     field(
         &mut hasher,
-        cfg.artifact_identity_for("llvm-scc")
+        cfg.artifact_identity_for(crate::driver::ArtifactBackend::LlvmScc)
             .fingerprint()
             .as_bytes(),
     );

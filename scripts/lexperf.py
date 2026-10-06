@@ -40,7 +40,9 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-PARSER_ORACLE_COMMIT = "46886c1fa7064e4809020c1b788b3ee3531d6a63"
+# The frozen parser oracle, named by its tree so a history squash cannot orphan
+# it the way it orphans a commit.
+PARSER_ORACLE_TREE = "cd110efef00d124b955cb6648724887e8e5517f4"
 # Exact Ledger-B parser boundary from scripts/parser_baseline.py. Keep paths
 # explicit: directory expansion would let a receipt silently omit a moved file.
 PARSER_SOURCE_PATHS = (
@@ -130,7 +132,7 @@ def frozen_corpus():
     Returning named units lets the module workload preserve file boundaries
     while every candidate sees byte-identical inputs.
     """
-    result = run(["git", "ls-tree", "-r", "--name-only", PARSER_ORACLE_COMMIT])
+    result = run(["git", "ls-tree", "-r", "--name-only", PARSER_ORACLE_TREE])
     if result.returncode:
         sys.exit(result.stderr.strip() or "cannot enumerate parser oracle tree")
     paths = result.stdout.splitlines()
@@ -145,8 +147,8 @@ def frozen_corpus():
     )
     if not stdlib_paths or not example_paths:
         sys.exit("frozen syntax benchmark corpus is empty")
-    stdlib = [(p, git_text(PARSER_ORACLE_COMMIT, p)) for p in stdlib_paths]
-    examples = [(p, git_text(PARSER_ORACLE_COMMIT, p)) for p in example_paths]
+    stdlib = [(p, git_text(PARSER_ORACLE_TREE, p)) for p in stdlib_paths]
+    examples = [(p, git_text(PARSER_ORACLE_TREE, p)) for p in example_paths]
     return stdlib, examples
 
 
@@ -723,7 +725,7 @@ def main():
                 "git", "status", "--short", "--untracked-files=normal",
             ]).stdout.splitlines()
             oracle_changes = run([
-                "git", "diff", "--name-only", PARSER_ORACLE_COMMIT, "--",
+                "git", "diff", "--name-only", PARSER_ORACLE_TREE, "--",
                 *PARSER_SOURCE_PATHS,
             ]).stdout.splitlines()
             receipt = {
@@ -734,7 +736,7 @@ def main():
                 "commit": run(["git", "rev-parse", "HEAD"]).stdout.strip(),
                 "tree": run(["git", "rev-parse", "HEAD^{tree}"]).stdout.strip(),
                 "worktree_changes": status,
-                "parser_oracle_commit": PARSER_ORACLE_COMMIT,
+                "parser_oracle_tree": PARSER_ORACLE_TREE,
                 "parser_source_changes_from_oracle": oracle_changes,
                 "host": host_identity(),
                 "build_profile": "release",
@@ -764,7 +766,7 @@ def main():
                 "repetitions": args.reps,
                 "budget_seconds": args.budget,
                 "corpus": {
-                    "commit": PARSER_ORACLE_COMMIT,
+                    "tree": PARSER_ORACLE_TREE,
                     "stdlib": module_inputs,
                     "examples": [
                         bytes_identity(text.encode("utf-8"), rel)

@@ -14,20 +14,21 @@ The envelope is a continuation, not a closure: it carries the machine state a su
 
 ### `MoveError`
 
-```prism,def,h-cabc667a276d6d4407dfef3a83726adcff4a7649ad1a4176c2dc969eaa241580
+```prism,def,h-a576e236d8eda7aae8109c28ede5f396a66b42c5600baf41df6e3734e9e663e5
 type MoveError
   = Unportable
   | Malformed
   | Foreign
   | Unsupported
   | Uncertified
+  | Bracketed
   | Undelivered
   deriving (Eq, Show)
 ```
 
 Why a computation could not be placed.
 
-`Unportable` is a capture that cannot cross the boundary, refused while sealing rather than after the bytes have travelled. `Malformed` is an envelope that is not one, which includes one whose certificate no longer matches the captures it travelled with. `Foreign` is a well-formed envelope from other code: a continuation resolves its references by name against the definitions it was compiled with, so landing it against a different bundle is refused rather than silently resolved. `Uncertified` is a well-formed envelope from this very bundle that nothing proved portable, which is what a suspended run is: it carries the machine state a step budget stopped at, not a computation the compiler checked may travel. `Unsupported` is a host that cannot land continuations at all, which is every native binary.
+`Unportable` is a capture that cannot cross the boundary, refused while sealing rather than after the bytes have travelled. `Malformed` is an envelope that is not one, which includes one whose certificate no longer matches the captures it travelled with. `Foreign` is a well-formed envelope from other code: a continuation resolves its references by name against the definitions it was compiled with, so landing it against a different bundle is refused rather than silently resolved. `Uncertified` is a well-formed envelope from this very bundle that nothing proved portable, which is what a suspended run is: it carries the machine state a step budget stopped at, not a computation the compiler checked may travel. `Unsupported` is a host that cannot land continuations at all, which is every native binary. `Bracketed` is a computation that still owes a handler's `finally` clause: the cleanup is an obligation of the process that installed the handler, so it never travels.
 
 `Undelivered` is the one refusal no runtime raises: it is a transport saying the envelope never reached the far side. It carries no reason because the reasons belong to the transport's own vocabulary (a socket has a `NetError`, a queue has something else), and a mobility answer that named one of them would bind this module to that transport. A handler that wants the detail reports it itself; what it answers here is that placement did not happen.
 
@@ -50,7 +51,7 @@ A handler answers for delivery, not for the computation: `Ok(())` means the enve
 
 ### `seal`
 
-```prism,sig,h-90c8be60ac9d6dc4b532d810f9d7d1490070bcd8122b5e5d715458a499affd64
+```prism,sig,h-bc0b294cb4555d5cdce33db6064e3d48b6d33ce98c9ef5022cc88076d97f8974
 seal : forall a. ((() -> a ! {IO}) @ {once, portable}) -> Result(Wire.Bytes, Teleport.MoveError) ! {IO}
 ```
 
@@ -71,7 +72,7 @@ fn main() : Unit ! {IO} =
 
 ### `land`
 
-```prism,sig,h-945c4d2120fa2d7f5a6b5f43b4af18f9f383c0e6b2c66bfdc91096ee0039c619
+```prism,sig,h-8418e09fb9083ff50ae49c9a41ffa034fd0d9166f1f7e3938d31af9ca3277c97
 land : (Wire.Bytes) -> Result(Unit, Teleport.MoveError) ! {IO}
 ```
 
@@ -95,7 +96,7 @@ fn main() : Unit ! {IO} =
 
 ### `teleport`
 
-```prism,sig,h-52c4e71c697eee7446d6ff706f694bdac277a7c07b46f35d478c0ad4836381fc
+```prism,sig,h-e820821e42bb65593b3afd1e84095375bfa3c9dbf8480ab13c4da7fc233e141e
 teleport : forall a. ((() -> a ! {IO}) @ {once, portable}) -> Result(Unit, Teleport.MoveError) ! {IO, Teleport.Placement}
 ```
 
@@ -105,16 +106,17 @@ The result reports delivery. It is `Unit` on success and not the closure's value
 
 A closure over top-level code and portable parameters satisfies the contract; `run_here` below shows one running end to end.
 
-Capturing a local binding is refused at compile time: a local does not travel, so the closure could not move to a fresh runtime:
+Capturing a local closure is refused at compile time: it is bound to the runtime that built it, so the closure could not move to a fresh one (a local whose value has a portable type, such as an `Int` read at runtime, may be captured):
 
 ```prism,compile_fail,mod=Teleport
-let n = 6
-teleport(\() -> n * 7)
+let n = read_int()
+let scale = \(x) -> x * n
+teleport(\() -> scale(7))
 ```
 
 ### `run_here`
 
-```prism,sig,h-3e64a9ab625f76a0350cdaf34376a8f8e175cdf6d8d44ce539c3030e650f55c9
+```prism,sig,h-aebc9109f9611ed2ec35d34730ce62fec1b4dc911959439f3e2e50a4087350f4
 run_here : forall e0 a. (() -> a ! {IO, Teleport.Placement, e0}) -> a ! {IO, e0}
 ```
 

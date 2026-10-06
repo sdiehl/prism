@@ -20,6 +20,7 @@ use std::convert::Infallible;
 pub mod abi;
 pub mod analysis;
 pub mod arena;
+mod bracket;
 mod checks;
 mod convention;
 pub mod decline;
@@ -42,7 +43,8 @@ pub mod trampoline;
 pub mod walk;
 
 use crate::core::effect_abi::{
-    add_synthetic_ctor, EBIND, EBOUNCE, EOP, EPURE, ERESUME, QAPPLY, SDONE, SMORE, TQCONS, TQNIL,
+    add_synthetic_ctor, EBIND, EBOUNCE, EOP, EPURE, ERESUME, PEND, QAPPLY, SDONE, SMORE, TQCONS,
+    TQNIL,
 };
 use crate::core::{EffectStrategy, LoweredCore, OpGrades};
 use crate::flags::{DynFlags, EffectLowerOptions};
@@ -618,6 +620,11 @@ fn prepare_on_core_stack(
     } else {
         (fns, false)
     };
+    // A handler that catches nothing and owes no cleanup is plain sequencing,
+    // and a program whose only remaining handlers are brackets around code that
+    // performs nothing sequences them too, so it classifies pure.
+    let fns = bracket::sequence_transparent(&fns);
+    let fns = bracket::sequence_pure(&fns).unwrap_or(fns);
     // The `SMore`/`SDone` constructors a `return` erasure threads must be on
     // the tables for every path below, the verifier's included.
     let ctors = if used_step {
@@ -1380,6 +1387,10 @@ fn install_monadic_runtime(
     }
     if include_bounce {
         assert!(add_synthetic_ctor(&mut lowered_ctors, EBOUNCE));
+    }
+    if functions_use_constructor(functions, PEND) {
+        abi::insert_pending(&mut lowered_env);
+        assert!(add_synthetic_ctor(&mut lowered_ctors, PEND));
     }
     install_step_runtime(functions, &mut lowered_env, &mut lowered_ctors);
     (lowered_env, lowered_ctors)

@@ -191,8 +191,8 @@ fn rl_ctrl_depth(e : Sp(Expr)) : Int =
 
 fn rl_max_over(xs : List(Int)) : Int =
   match xs of
-    Nil => 0
-    Cons(x, rest) => max(x, rl_max_over(rest))
+    [] => 0
+    x :: rest => max(x, rl_max_over(rest))
 
 fn rl_size(decl : Decl) : List(Finding) =
   let nodes = an_size(decl.body)
@@ -284,7 +284,7 @@ fn rl_codepoint_walk(n : Sp(Expr)) : Bool =
 
 fn rl_computed_index(args : List(Sp(Expr))) : Bool =
   match args of
-    Cons(_, Cons(idx, _)) => not(rl_is_int_lit(idx))
+    _ :: idx :: _ => not(rl_is_int_lit(idx))
     _ => false
 
 fn rl_is_int_lit(e : Sp(Expr)) : Bool =
@@ -374,8 +374,8 @@ fn rl_vocab_prefixed(dotted : String) : Bool =
 
 fn rl_any_prefix(prefixes : List(String), dotted : String) : Bool =
   match prefixes of
-    Nil => false
-    Cons(p, rest) => starts_with(p, dotted) || rl_any_prefix(rest, dotted)
+    [] => false
+    p :: rest => starts_with(p, dotted) || rl_any_prefix(rest, dotted)
 
 fn rl_unused_import(
   path : List(String),
@@ -450,7 +450,7 @@ fn rl_underived(
     let derived = map(rl_deriv_name, derivs)
     let missing = filter(\(want) -> not(elem(want, derived)), ["Eq", "Show"])
     match missing of
-      Nil => []
+      [] => []
       wanted =>
         let listed = str_join(", ", wanted)
         [
@@ -467,8 +467,8 @@ fn rl_deriv_name(dv : Deriving) : String = dv.name
 -- than condemned to an allow.
 fn rl_ctors_have_fun(ctors : List(Ctor)) : Bool =
   match ctors of
-    Nil => false
-    Cons(c, rest) => rl_shape_has_fun(c.shape) || rl_ctors_have_fun(rest)
+    [] => false
+    c :: rest => rl_shape_has_fun(c.shape) || rl_ctors_have_fun(rest)
 
 fn rl_shape_has_fun(shape : CtorShape) : Bool =
   match shape of
@@ -479,8 +479,8 @@ fn rl_cfield_ty(f : CField) : Ty = f.ty
 
 fn rl_any_fun(tys : List(Ty)) : Bool =
   match tys of
-    Nil => false
-    Cons(t, rest) => rl_ty_has_fun(t) || rl_any_fun(rest)
+    [] => false
+    t :: rest => rl_ty_has_fun(t) || rl_any_fun(rest)
 
 fn rl_ty_has_fun(t : Ty) : Bool =
   match t of
@@ -554,13 +554,13 @@ fn rl_best_prefix(
   best_count : Int
 ) : Option(String) =
   match cands of
-    Nil =>
+    [] =>
       if (best_count >= lm_family_min
           && best_count * lm_family_den >= total * lm_family_num) then
         best
       else
         None
-    Cons(cand, rest) =>
+    cand :: rest =>
       let count = length(filter(\(p) -> p == cand, all))
       if count > best_count then
         rl_best_prefix(rest, all, total, Some(cand), count)
@@ -569,8 +569,8 @@ fn rl_best_prefix(
 
 fn rl_dedup(xs : List(String), seen : List(String)) : List(String) =
   match xs of
-    Nil => Nil
-    Cons(x, rest) =>
+    [] => Nil
+    x :: rest =>
       if elem(x, seen) then
         rl_dedup(rest, seen)
       else
@@ -708,6 +708,7 @@ fn rl_arm_op(h : HandlerArm) : List(String) =
     HOnce(op, _, _) => [op]
     HVal(op, _) => [op]
     HNever(op, _, _) => [op]
+    HFinally(_) => []
 
 fn rl_catch_name(c : CatchArm) : String = c.name
 

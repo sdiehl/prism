@@ -12,6 +12,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use prism_common::sym::Sym;
+use prism_syntax::names;
 
 use crate::core::cbpv::{Comp, Core, CoreOp, Value};
 use crate::core::fv;
@@ -245,7 +246,7 @@ fn rebind(m: Comp, x: Sym, n: Comp) -> Comp {
     loop {
         match head {
             Comp::Bind(first, binder, rest)
-                if binder.as_str() == "_"
+                if binder.as_str() == names::WILD
                     || (binder != x
                         && !free_in_rest
                             .get_or_insert_with(|| fv::comp(&n))
@@ -534,7 +535,7 @@ fn rebind_view(
     } = &nodes[first]
     {
         let (inner, inner_binder, inner_rest) = (*inner, *inner_binder, *inner_rest);
-        let safe = inner_binder.as_str() == "_"
+        let safe = inner_binder.as_str() == names::WILD
             || (inner_binder != binder
                 && !free_in_rest
                     .get_or_insert_with(|| fv::comp(rest_source))
@@ -684,7 +685,7 @@ mod tests {
                 for _ in 0..DEEP_BIND_COUNT {
                     head = Comp::Bind(
                         Box::new(Comp::Return(Value::Int(0))),
-                        Sym::new("_"),
+                        Sym::new(names::WILD),
                         Box::new(head),
                     );
                 }

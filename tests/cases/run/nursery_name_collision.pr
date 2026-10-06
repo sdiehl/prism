@@ -15,7 +15,7 @@ fn worker(n : Int) : Int ! {Async(Int), Trace} =
 
 fn tasks() : Int ! {Async(Int), Trace} =
   match scope([\() -> worker(1), \() -> worker(2), \() -> worker(3)]) of
-    Cons(a, Cons(b, Cons(c, Nil))) => a + b + c
+    [a, b, c] => a + b + c
     _ => 0
 
 fn go() : Int ! {Trace, Fail} = run_async(tasks)

@@ -14,8 +14,8 @@ fn double(x) =
 
 fn pipe(fs, x) =
   match fs of
-    Nil => x
-    Cons(f, rest) => pipe(rest, f(x))
+    [] => x
+    f :: rest => pipe(rest, f(x))
 
 fn main() =
   println(handle pipe(Cons(shout, Cons(double, Cons(shout, Nil))), 5) with {

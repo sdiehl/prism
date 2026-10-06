@@ -48,8 +48,8 @@ fn lex(input : String) : List(String) =
 
 fn print_each(toks : List(String)) : Unit ! {IO} =
   match toks of
-    Nil => ()
-    Cons(t, rest) =>
+    [] => ()
+    t :: rest =>
       println(t)
       print_each(rest)
 

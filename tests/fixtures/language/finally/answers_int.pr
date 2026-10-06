@@ -1,0 +1,10 @@
+effect Ask
+  ask() : Int
+
+fn go() =
+  handle ask() + 1 with
+    return x => x
+    ask() resume k => k(41)
+    finally => 41
+
+fn main() = println(go())

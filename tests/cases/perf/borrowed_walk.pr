@@ -7,8 +7,8 @@
 
 fn sum_walk(xs, acc) =
   match xs of
-    Nil => acc
-    Cons(h, t) => sum_walk(t, acc + h)
+    [] => acc
+    h :: t => sum_walk(t, acc + h)
 
 fn walk_rounds(k, xs, acc) =
   if k == 0 then

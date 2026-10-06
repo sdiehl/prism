@@ -50,7 +50,7 @@ fn print_resolved_ids(d : ResolvedDoc) =
 
 fn print_ids(ids : List(Int)) : Unit ! {IO} =
   match ids of
-    Nil => ()
-    Cons(i, rest) =>
+    [] => ()
+    i :: rest =>
       println("{i}")
       print_ids(rest)

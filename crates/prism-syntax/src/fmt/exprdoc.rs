@@ -155,7 +155,7 @@ impl Fmt<'_> {
                 Some(seq_block(lparen(), rparen(), false, items))
             }
             Expr::FieldAccess(recv, field) => Some(concat([
-                self.expr_doc(recv, base)?,
+                paren_doc(dot_recv_parens(&recv.node), self.expr_doc(recv, base)?),
                 text(format!(".{field}")),
             ])),
             Expr::Index(recv, key) => {

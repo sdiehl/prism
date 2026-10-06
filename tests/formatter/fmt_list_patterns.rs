@@ -1,19 +1,9 @@
-// Known limitation, pinned deliberately so it cannot change unnoticed.
-//
-// `[]` and `[x, y]` are list *pattern* sugar that the grammar expands into
-// `Nil`/`Cons` while building the surface tree. `Pattern` has no `List`
-// variant, so by the time the printer runs the sugar is gone and there is
-// nothing to print it back from. Expression position is unaffected: `Expr` does
-// have a `List` variant, so `[1, 2]` survives a format there.
-//
-// The result is that formatting rewrites list patterns into constructor
-// patterns. That reparses and means the same thing, so it does not break the
-// round-trip law the formatter is held to, but it is a source rewrite rather
-// than a layout change: a file cannot both be `prism fmt --check` clean and
-// spell a list pattern. That is why the parser corpus no longer carries one.
-//
-// These tests pin that source rewrite so a change to the surface tree cannot
-// silently alter formatter behavior.
+// List patterns print as list sugar. The grammar expands `[]`, `[x, y]`, and
+// `h :: t` into `Nil`/`Cons` while building the surface tree, so the printer
+// recovers the sugar from the constructor spine: `Nil` prints as `[]`, a spine
+// ending in `Nil` prints in brackets, and any other spine prints with `::`.
+// Patterns have no grouping parens, so a cons cell whose operand would need
+// them keeps the explicit constructor rather than change meaning.
 
 fn formatted(src: &str) -> String {
     let once = prism::format(src).expect("input must parse");
@@ -22,30 +12,51 @@ fn formatted(src: &str) -> String {
     once
 }
 
-#[test]
-fn list_patterns_are_rewritten_into_constructor_patterns() {
-    let out = formatted("fn f(v) =\n  match v of\n    [] => 0\n    [x, y] => 1\n    _ => 2\n");
-    assert!(
-        out.contains("Nil => 0"),
-        "expected the empty-list pattern to print as `Nil`:\n{out}"
-    );
-    assert!(
-        out.contains("Cons(x, Cons(y, Nil)) => 1"),
-        "expected the list pattern to print as nested `Cons`:\n{out}"
-    );
-    assert!(
-        !out.contains("[]") && !out.contains("[x, y]"),
-        "list pattern sugar unexpectedly survived formatting:\n{out}"
-    );
+fn arms(pats: &[&str]) -> String {
+    use std::fmt::Write;
+    let mut src = String::from("fn f(v) =\n  match v of\n");
+    for (i, p) in pats.iter().enumerate() {
+        let _ = writeln!(src, "    {p} => {i}");
+    }
+    src
 }
 
-// The counterpart that must keep working: list *expressions* have a surface
-// representation, so formatting leaves them spelled as written.
 #[test]
-fn list_expressions_keep_their_sugar() {
-    let out = formatted("fn f() = [1, 2, 3]\n");
+fn list_constructor_patterns_print_as_sugar() {
+    let out = formatted(&arms(&[
+        "Nil",
+        "Cons(x, Nil)",
+        "Cons(x, Cons(y, rest))",
+        "Cons(Cons(a, Nil), _)",
+    ]));
+    for want in [
+        "[] => 0",
+        "[x] => 1",
+        "x :: y :: rest => 2",
+        "[a] :: _ => 3",
+    ] {
+        assert!(out.contains(want), "missing `{want}`:\n{out}");
+    }
+}
+
+#[test]
+fn cells_that_would_need_parens_keep_the_constructor() {
+    let out = formatted(&arms(&["Cons(a :: _, r)", "Cons(x, A | B)", "[1 | 2]"]));
+    for want in [
+        "Cons(a :: _, r) => 0",
+        "Cons(x, A | B) => 1",
+        "[1 | 2] => 2",
+    ] {
+        assert!(out.contains(want), "missing `{want}`:\n{out}");
+    }
+}
+
+// List expressions keep the author's spelling; only patterns canonicalize.
+#[test]
+fn list_expressions_keep_their_spelling() {
+    let out = formatted("fn f(xs) = (Cons(1, xs), 1 :: xs, [1, 2, 3])\n");
     assert!(
-        out.contains("[1, 2, 3]"),
-        "list expression sugar was lost:\n{out}"
+        out.contains("(Cons(1, xs), 1 :: xs, [1, 2, 3])"),
+        "list expression spelling was changed:\n{out}"
     );
 }

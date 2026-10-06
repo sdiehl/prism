@@ -103,5 +103,5 @@ pub fn vhead(v : Vec(a, n)) : a =
   match v of
     MkVec(xs) =>
       match xs of
-        Cons(x, _) => x
-        Nil => fail()
+        x :: _ => x
+        [] => fail()

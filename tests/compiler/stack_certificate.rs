@@ -4,6 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use prism::DumpPhase;
 use rstest::rstest;
 
 #[rstest]
@@ -11,7 +12,7 @@ fn stack_certificate_accepts_expected_programs(
     #[files("tests/cases/stack_certificate/accept/*.pr")] path: PathBuf,
 ) {
     let src = fs::read_to_string(&path).unwrap();
-    let got = prism::dump("core", &src);
+    let got = prism::dump(DumpPhase::Core, &src);
     assert!(
         got.is_ok(),
         "bounded-stack certificate unexpectedly rejected `{}`:\n{got:?}",
@@ -24,7 +25,7 @@ fn stack_certificate_rejects_expected_programs(
     #[files("tests/cases/stack_certificate/reject/*.pr")] path: PathBuf,
 ) {
     let src = fs::read_to_string(&path).unwrap();
-    let got = prism::dump("core", &src);
+    let got = prism::dump(DumpPhase::Core, &src);
     assert!(
         got.is_err(),
         "bounded-stack certificate unexpectedly accepted `{}`",
@@ -46,7 +47,8 @@ fn stack_certificate_diagnostics_are_snapshotted() {
         writeln!(
             out,
             "{}",
-            prism::dump("core", &src).expect_err("case must fail the bounded-stack certificate")
+            prism::dump(DumpPhase::Core, &src)
+                .expect_err("case must fail the bounded-stack certificate")
         )
         .unwrap();
     }

@@ -1,0 +1,19 @@
+{"event":"suite_started","schema":"prism-test-events-v1","selected":8}
+{"event":"test_started","id":"assertions::bare_fail"}
+{"event":"test_failed","id":"assertions::bare_fail","kind":"fail","message":"test failed"}
+{"event":"test_started","id":"assertions::equal_fails"}
+{"event":"test_failed","id":"assertions::equal_fails","kind":"fail","message":"values differ","expected":"[1, 2]","actual":"[1, 3]"}
+{"event":"test_started","id":"assertions::equal_passes"}
+{"event":"test_passed","id":"assertions::equal_passes"}
+{"event":"test_started","id":"assertions::expect_fails"}
+{"event":"test_failed","id":"assertions::expect_fails","kind":"fail","message":"one is not above two"}
+{"event":"test_started","id":"assertions::fail_with_fails"}
+{"event":"test_failed","id":"assertions::fail_with_fails","kind":"fail","message":"custom reason"}
+{"event":"test_started","id":"assertions::skipped"}
+{"event":"test_skipped","id":"assertions::skipped","reason":"waiting on the network lane"}
+{"event":"test_started","id":"assertions::tagged"}
+{"event":"test_passed","id":"assertions::tagged"}
+{"event":"test_started","id":"assertions::text_fails"}
+{"event":"test_output","id":"assertions::text_fails","stream":"stdout","bytes":"before the assertion\n"}
+{"event":"test_failed","id":"assertions::text_fails","kind":"fail","message":"values differ","expected":"a\nb","actual":"a\nc","diff":"  a\n- b\n+ c"}
+{"event":"suite_finished","passed":2,"failed":5,"skipped":1,"infrastructure_failed":0}

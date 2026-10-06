@@ -8,7 +8,9 @@
 pub mod binary;
 pub mod digest;
 pub mod fixpoint;
+pub mod format;
 pub mod fresh;
+pub mod record;
 pub mod scc;
 pub mod sym;
 

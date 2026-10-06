@@ -1,0 +1,22 @@
+-- A handler with neither operation clauses nor a cleanup clause catches
+-- nothing, so it is its body followed by its `return` clause: the `ask` below
+-- passes through it to the outer handler and resumes back inside it.
+effect Ask
+  ask() : Int
+
+fn body() : Int ! {Ask} = ask() + 1
+
+fn doubled() : Int ! {Ask} =
+  handle body() with
+    return r => r * 2
+
+fn untouched() : Int ! {Ask} =
+  handle body() with
+    return r => r
+
+fn main() : Unit ! {IO} =
+  let v =
+    handle doubled() + untouched() with
+      ask() resume k => k(20)
+      return r => r
+  println(show(v))

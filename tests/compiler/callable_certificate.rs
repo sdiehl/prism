@@ -1,3 +1,4 @@
+use prism::DumpPhase;
 use std::fmt::Write;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -9,7 +10,7 @@ fn callable_certificate_accepts_expected_programs(
     #[files("tests/cases/callable_certificate/accept/*.pr")] path: PathBuf,
 ) {
     let src = fs::read_to_string(&path).unwrap();
-    let got = prism::dump("core", &src);
+    let got = prism::dump(DumpPhase::Core, &src);
     assert!(
         got.is_ok(),
         "callable certificate unexpectedly rejected `{}`:\n{got:?}",
@@ -22,7 +23,7 @@ fn callable_certificate_rejects_expected_programs(
     #[files("tests/cases/callable_certificate/reject/*.pr")] path: PathBuf,
 ) {
     let src = fs::read_to_string(&path).unwrap();
-    let got = prism::dump("core", &src);
+    let got = prism::dump(DumpPhase::Core, &src);
     assert!(
         got.is_err(),
         "callable certificate unexpectedly accepted `{}`",
@@ -44,7 +45,8 @@ fn callable_certificate_diagnostics_are_snapshotted() {
         writeln!(
             out,
             "{}",
-            prism::dump("core", &src).expect_err("case must fail the callable certificate")
+            prism::dump(DumpPhase::Core, &src)
+                .expect_err("case must fail the callable certificate")
         )
         .unwrap();
     }
@@ -64,8 +66,8 @@ fn callable_demand_erases_from_executable_core() {
     let plain = annotated.replace("((Int) -> Int) @ noalloc", "(Int) -> Int");
     assert_ne!(annotated, plain, "the twin must actually drop the demand");
     assert_eq!(
-        prism::dump("lowered", &annotated).unwrap(),
-        prism::dump("lowered", &plain).unwrap(),
+        prism::dump(DumpPhase::Lowered, &annotated).unwrap(),
+        prism::dump(DumpPhase::Lowered, &plain).unwrap(),
         "an accepted demand must erase before executable Core"
     );
 }

@@ -22,15 +22,18 @@ impl<I: Isa> Cg<'_, I> {
     // `target_fvs` captured free vars) to `n` arguments: a lambda of arity m-n
     // capturing target_fvs+n values. Allocated on first request and memoized so
     // planning and emission resolve the same tag.
-    fn curry_adapter(&mut self, target: usize, target_fvs: usize, n: usize) -> usize {
+    fn curry_adapter(
+        &mut self,
+        target: usize,
+        target_fvs: usize,
+        n: usize,
+    ) -> Result<usize, String> {
         if let Some(&tag) = self.adapters.get(&(target, n)) {
-            return tag;
+            return Ok(tag);
         }
         let index = self.lams.len();
         let owner = self.lams[target].owner;
-        let tag = self
-            .mint_closure_tag(owner)
-            .expect("curry adapter closure tag is unique");
+        let tag = self.mint_closure_tag(owner)?;
         let m = self.lams[target].params.len();
         let free_vars = (0..target_fvs + n)
             .map(|i| Sym::new(&closure_cap(i)))
@@ -44,7 +47,7 @@ impl<I: Isa> Cg<'_, I> {
             body: LamBody::Curry { target },
         });
         self.adapters.insert((target, n), index);
-        index
+        Ok(index)
     }
 
     // Register (without emitting) the curry adapters and follow-on apply arities
@@ -63,16 +66,16 @@ impl<I: Isa> Cg<'_, I> {
         a
     }
 
-    pub(crate) fn plan_dispatch(&mut self, n: usize) {
+    pub(crate) fn plan_dispatch(&mut self, n: usize) -> Result<(), String> {
         if n == 0 {
-            return;
+            return Ok(());
         }
         for tag in 0..self.lams.len() {
             let m = self.lams[tag].params.len();
             let fvs = self.lams[tag].free_vars.len();
             match m.cmp(&n) {
                 Ordering::Greater => {
-                    self.curry_adapter(tag, fvs, n);
+                    self.curry_adapter(tag, fvs, n)?;
                 }
                 Ordering::Less => {
                     self.used_apply.insert(n - m);
@@ -80,6 +83,7 @@ impl<I: Isa> Cg<'_, I> {
                 Ordering::Equal => {}
             }
         }
+        Ok(())
     }
 
     // One `prismap_n` dispatcher, total over every lambda tag, dispatching
@@ -91,7 +95,7 @@ impl<I: Isa> Cg<'_, I> {
     // only emitted functions. Applying zero arguments only ever lands on an
     // arity-0 thunk, so for n == 0 the sole reachable case is m == 0;
     // positive-arity tags route to `_dead` like any non-applicable value.
-    pub(crate) fn apply_dispatch(&mut self, n: usize) -> String {
+    pub(crate) fn apply_dispatch(&mut self, n: usize) -> Result<String, String> {
         let lams: Vec<(usize, LamInfo)> = self
             .lams
             .iter()
@@ -113,7 +117,7 @@ impl<I: Isa> Cg<'_, I> {
         if lams.is_empty() {
             self.isa.call_void(&mut b, rt::APPLY_ERROR, &[]);
             self.isa.unreachable(&mut b);
-            return format!("{header}{}{}", b.body, self.isa.fn_close());
+            return Ok(format!("{header}{}{}", b.body, self.isa.fn_close()));
         }
 
         let cases: Vec<(i64, String)> = lams
@@ -156,7 +160,7 @@ impl<I: Isa> Cg<'_, I> {
                     // closure expecting the remaining m-n. The fvs are still owned
                     // by `%_clos` (the caller drops it after this apply), so dup
                     // them; the args were handed to us and move in.
-                    let adapter = self.curry_adapter(*index, fvs, n);
+                    let adapter = self.curry_adapter(*index, fvs, n)?;
                     let mut fields = captured;
                     for fv in &fields {
                         self.isa.call_void(&mut b, rt::RC_INC, slice::from_ref(fv));
@@ -196,11 +200,11 @@ impl<I: Isa> Cg<'_, I> {
         // Every arm may have trapped (each lambda's arity below n): the merge
         // block then has no predecessors and must not be emitted.
         if preds.is_empty() {
-            return format!("{header}{}{}", b.body, self.isa.fn_close());
+            return Ok(format!("{header}{}{}", b.body, self.isa.fn_close()));
         }
         self.isa.open_merge(&mut b, "_merge", "%_result", &preds);
         self.isa.ret(&mut b, "%_result");
-        format!("{header}{}{}", b.body, self.isa.fn_close())
+        Ok(format!("{header}{}{}", b.body, self.isa.fn_close()))
     }
 }
 

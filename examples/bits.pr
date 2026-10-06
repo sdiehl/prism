@@ -19,8 +19,8 @@ fn xorshift(h : U64) : U64 =
 -- Fold a list of byte values into a 64-bit hash, mixing after each.
 fn hash_ints(xs : List(Int)) : U64 =
   match xs of
-    Nil => to_u64(1469598103934665603)
-    Cons(b, rest) => xorshift(u64_xor(hash_ints(rest), to_u64(b)))
+    [] => to_u64(1469598103934665603)
+    b :: rest => xorshift(u64_xor(hash_ints(rest), to_u64(b)))
 
 fn main() : Unit ! {IO} =
   let a = to_i64(12)

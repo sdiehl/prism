@@ -6,7 +6,7 @@ Net: TCP stream sockets, as an ordinary algebraic effect.
 
 The capability is `Net` and `run_net` is its default Unix handler: each operation is served by a `prim_net_*` builtin that reaches the runtime's socket boundary. Nothing about `Net` is privileged in the compiler, so a test or a transport can install its own handler over the same operations (a pair of in-memory queues, a recording proxy, a fault injector) and the program under it is unchanged. That is the reason the transport is an effect and not a set of special primitives: there is one IO path, and who serves it is a choice made at the handler rather than in the language.
 
-A socket is reached only through a bracket. `with_tcp_listener`, `with_tcp_accept`, and `with_tcp_connection` each open one socket, pass it to a body, and close it when the body returns. There is no public `close` and no way to name a socket that was not handed to you, so the lifetime is the bracket's rather than the caller's bookkeeping. Each body takes its socket `@ noescape`, so a body that returns its socket, stores it in returned data, or captures it under another closure is rejected before it runs. Written with `with`, a bracket reads as a sequence rather than as nesting:
+A socket is reached only through a bracket. `with_tcp_listener`, `with_tcp_accept`, and `with_tcp_connection` each open one socket, pass it to a body, and close it when the body is left. There is no public `close` and no way to name a socket that was not handed to you, so the lifetime is the bracket's rather than the caller's bookkeeping. Each body takes its socket `@ noescape`, so a body that returns its socket, stores it in returned data, or captures it under another closure is rejected before it runs. Written with `with`, a bracket reads as a sequence rather than as nesting:
 
 ```prism,no_run,mod=Net
 run_net(\() -> with_tcp_connection("127.0.0.1:8080", \(s) -> receive(s, 1024)))
@@ -14,7 +14,7 @@ run_net(\() -> with_tcp_connection("127.0.0.1:8080", \(s) -> receive(s, 1024)))
 
 Reads answer `Chunk(Bytes)` or `End`: a chunk is whatever has arrived, up to the size asked for, and `End` is the peer's orderly close. Writes report how many bytes the kernel took, because a short write is an ordinary outcome and not a failure; `send_all` is the loop over that. Every operation answers a `Result` whose error side is the small closed `NetError` below, never a platform `errno`: the same failure has to be the same Prism value on every host, so a program that branches on an error is branching on what happened rather than on which libc it was built against.
 
-Ownership is lexical, not collected. The bracket closes when the body returns, whether it returns `Ok` or `Err`. A body that leaves some other way, by performing `fail()` or by being cancelled, abandons the continuation, so the close does not run and the socket is released at process exit; put the bracket inside `Concurrent.on_cancel` when a cancelled fiber has to close promptly. Closing unconditionally would mean intercepting those effects here, which puts them in the row of every program that touches the network to serve one rare shape.
+Ownership is lexical, not collected. The close is each bracket's `finally` clause, so it runs on return and on abandonment: a body that answers `Ok` or `Err`, and one that leaves by performing `fail()` or by being cancelled, whose continuation a handler outside drops, both release the socket before the run goes on. The bracket intercepts none of those effects to do it, so they stay out of the row of a program that touches the network.
 
 A handle outliving its bracket is not a hazard even where the escape check cannot see it, only a mistake with a deterministic answer: closing retires the handle for good and the counter never reissues it, so a stale `Stream` reports `Closed` rather than reaching whatever socket the OS opened next. An operation offered a live handle of the wrong kind (accepting on a stream, reading from a listener) reports `Closed` for the same reason, in both tiers.
 
@@ -111,11 +111,11 @@ Split an address into its host and port. The spelling is the one every address q
 
 ### `with_tcp_listener`
 
-```prism,sig,h-144f09e92af768e4247c28ac6e4be761f575c82238de5e8b5f1e471b6735c5fb
+```prism,sig,h-fb6ee46bcd3f8f78516709079e5b19380b6e786b609a52d32ffc4379c913bb5f
 with_tcp_listener : forall e0 a. (String, Int, (Net.Listener @ noescape) -> a ! {Net.Net, e0}) -> Result(a, Net.NetError) ! {Net.Net, e0}
 ```
 
-Bind `address`, listen with the given accept-queue depth, and run `body` with the listener; close it when `body` returns. The result is `body`'s answer, or the reason the socket could not be opened.
+Bind `address`, listen with the given accept-queue depth, and run `body` with the listener; close it when `body` is left, on return and on abandonment. The result is `body`'s answer, or the reason the socket could not be opened.
 
 `backlog` is a request, not a guarantee: the host clamps it into the range it supports and may pick another depth entirely. Nothing a program can observe depends on it, since which connections are accepted and in what order is the same however deep the queue behind them was.
 
@@ -127,19 +127,19 @@ run_net(\() -> with_tcp_listener("127.0.0.1:0", 16, listener_address))
 
 ### `with_tcp_accept`
 
-```prism,sig,h-564964d3d17e0af893a44982e9fd3b5f8f881db20b27179c78f0b7dec580dbc3
+```prism,sig,h-1dd39110a57524ecca4cbe8801a3571f9c28321269dc1a3df3eb7fdf77ae68b1
 with_tcp_accept : forall e0 a. (Net.Listener, (Net.Stream @ noescape) -> a ! {Net.Net, e0}) -> Result(a, Net.NetError) ! {Net.Net, e0}
 ```
 
-Wait for the next connection on `l` and run `body` with it, closing it when `body` returns. One connection: call it again for the next, which leaves the accept loop the caller's to write and to bound.
+Wait for the next connection on `l` and run `body` with it, closing it when `body` is left, on return and on abandonment. One connection: call it again for the next, which leaves the accept loop the caller's to write and to bound.
 
 ### `with_tcp_connection`
 
-```prism,sig,h-0c6465a0122af29f662119fbeabfc4cd3df55d5da5a2e357891e870649ea0f01
+```prism,sig,h-7ce8d31d2d414ea5d52a517b47f8563c86868c5e8f8509cd5447c87b848c1c44
 with_tcp_connection : forall e0 a. (String, (Net.Stream @ noescape) -> a ! {Net.Net, e0}) -> Result(a, Net.NetError) ! {Net.Net, e0}
 ```
 
-Connect to `address` and run `body` with the connection, closing it when `body` returns.
+Connect to `address` and run `body` with the connection, closing it when `body` is left, on return and on abandonment.
 
 ### `receive`
 

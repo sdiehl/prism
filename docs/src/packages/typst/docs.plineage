@@ -47,7 +47,7 @@
       }
     },
     {
-      "id": "prism-core-hash-v2:063723238fa5b419da7f9896ea864f2449d244c36663737a11f3fbb9031099e1",
+      "id": "prism-core-hash-v2:26df7b6f3f4a1a0e448d8b63f2ccb1760b5e32346c832435226885a3b987c5bc",
       "kind": "source-root",
       "payload": {
         "role": "source",
@@ -55,11 +55,11 @@
         "origin": null,
         "artifact_kind": "namespace",
         "scheme": "prism-core-hash-v2",
-        "root": "063723238fa5b419da7f9896ea864f2449d244c36663737a11f3fbb9031099e1"
+        "root": "26df7b6f3f4a1a0e448d8b63f2ccb1760b5e32346c832435226885a3b987c5bc"
       }
     },
     {
-      "id": "prism-core-hash-v2:3e1bf0d4e6fb194b93b5cf9e087b431bb3217008bf27d9d4c96001f25c9caf02",
+      "id": "prism-core-hash-v2:72a01927a559833c587ce287356c2c56aab1765d809840876ef61ffed2751146",
       "kind": "stdlib-root",
       "payload": {
         "role": "stdlib",
@@ -67,7 +67,7 @@
         "origin": null,
         "artifact_kind": "embedded-stdlib",
         "scheme": "prism-core-hash-v2",
-        "root": "3e1bf0d4e6fb194b93b5cf9e087b431bb3217008bf27d9d4c96001f25c9caf02"
+        "root": "72a01927a559833c587ce287356c2c56aab1765d809840876ef61ffed2751146"
       }
     },
     {
@@ -132,14 +132,14 @@
       }
     },
     {
-      "id": "sha256:dcccd5e6f1acf9d63807703e29074a7c4d641711892f11a8ab6bf27271ca13cb",
+      "id": "sha256:f857cd9d9014736fbb173eb24fab88f0e6f3c8376067c66c4470deb36aa0e3f7",
       "kind": "compiler-identity",
       "payload": {
-        "fingerprint": "compiler=0.23.0;hash-scheme=prism-core-hash-v2;target=aarch64-apple-darwin;backend=docs;source-root=prism-core-hash-v2:063723238fa5b419da7f9896ea864f2449d244c36663737a11f3fbb9031099e1;stdlib-root=prism-core-hash-v2:3e1bf0d4e6fb194b93b5cf9e087b431bb3217008bf27d9d4c96001f25c9caf02;opt=O1;passes=level-default;disabled=none;backend-opt=2;scheduler=cooperative;effect-tier=auto;reify=true;erasures=true;native-effects=true;trampoline=true;fuse=false;borrow-infer=true;rt-checks=false;native-kont-frames=false;",
+        "fingerprint": "compiler=0.24.0;hash-scheme=prism-core-hash-v2;target=aarch64-apple-darwin;backend=docs;source-root=prism-core-hash-v2:26df7b6f3f4a1a0e448d8b63f2ccb1760b5e32346c832435226885a3b987c5bc;stdlib-root=prism-core-hash-v2:72a01927a559833c587ce287356c2c56aab1765d809840876ef61ffed2751146;opt=O1;passes=level-default;disabled=none;backend-opt=2;scheduler=cooperative;effect-tier=auto;reify=true;erasures=true;native-effects=true;trampoline=true;fuse=false;borrow-infer=true;rt-checks=false;native-kont-frames=false;",
         "rows": [
           {
             "key": "compiler",
-            "value": "0.23.0"
+            "value": "0.24.0"
           },
           {
             "key": "hash-scheme",
@@ -155,11 +155,11 @@
           },
           {
             "key": "source-root",
-            "value": "prism-core-hash-v2:063723238fa5b419da7f9896ea864f2449d244c36663737a11f3fbb9031099e1"
+            "value": "prism-core-hash-v2:26df7b6f3f4a1a0e448d8b63f2ccb1760b5e32346c832435226885a3b987c5bc"
           },
           {
             "key": "stdlib-root",
-            "value": "prism-core-hash-v2:3e1bf0d4e6fb194b93b5cf9e087b431bb3217008bf27d9d4c96001f25c9caf02"
+            "value": "prism-core-hash-v2:72a01927a559833c587ce287356c2c56aab1765d809840876ef61ffed2751146"
           },
           {
             "key": "opt",
@@ -244,12 +244,12 @@
     },
     {
       "from": "sha256:828c4ec20ae71e6cc9569ad89492c00da250bd37858852f34b32e1339c410d8f",
-      "to": "prism-core-hash-v2:063723238fa5b419da7f9896ea864f2449d244c36663737a11f3fbb9031099e1",
+      "to": "prism-core-hash-v2:26df7b6f3f4a1a0e448d8b63f2ccb1760b5e32346c832435226885a3b987c5bc",
       "kind": "input"
     },
     {
       "from": "sha256:828c4ec20ae71e6cc9569ad89492c00da250bd37858852f34b32e1339c410d8f",
-      "to": "prism-core-hash-v2:3e1bf0d4e6fb194b93b5cf9e087b431bb3217008bf27d9d4c96001f25c9caf02",
+      "to": "prism-core-hash-v2:72a01927a559833c587ce287356c2c56aab1765d809840876ef61ffed2751146",
       "kind": "input"
     },
     {
@@ -284,7 +284,7 @@
     },
     {
       "from": "sha256:828c4ec20ae71e6cc9569ad89492c00da250bd37858852f34b32e1339c410d8f",
-      "to": "sha256:dcccd5e6f1acf9d63807703e29074a7c4d641711892f11a8ab6bf27271ca13cb",
+      "to": "sha256:f857cd9d9014736fbb173eb24fab88f0e6f3c8376067c66c4470deb36aa0e3f7",
       "kind": "identified-by"
     }
   ]

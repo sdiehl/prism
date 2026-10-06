@@ -115,8 +115,8 @@ fn parse_constraint(c : Cursor, depth : Int) : Parsed(Constraint) =
 
 fn constraint_names(cs : List(Constraint)) : List(String) =
   match cs of
-    Nil => Nil
-    Cons(c, rest) => Cons(c.cls, constraint_names(rest))
+    [] => Nil
+    c :: rest => Cons(c.cls, constraint_names(rest))
 
 -- -------------------------------------------------------------------------
 -- Effect declarations
@@ -208,7 +208,16 @@ fn parse_effect_op_named(
   let PTook(_, c4) = p4 else parsed_refused(p4)
   let p5 = parse_type(c4, depth)
   let PTook(ret, c5) = p5 else parsed_refused(p5)
-  PTook(EffOp { name = name, params = params, ret = ret, grade = grade }, c5)
+  PTook(
+      EffOp {
+        name = name,
+        params = params,
+        ret = ret,
+        grade = grade,
+        span = cursor_since(c, c1)
+      },
+      c5,
+    )
 
 -- lint: allow(L0105)
 fn parse_effect_params(
@@ -403,7 +412,7 @@ fn parse_class_methods(
     parse_class_methods(
         skip_sep(c3),
         depth,
-        Cons(Method { name = name, ty = ty }, rev),
+        Cons(Method { name = name, ty = ty, span = cursor_since(c, c1) }, rev),
       )
 
 -- -------------------------------------------------------------------------
@@ -586,7 +595,7 @@ fn parse_method_after_params(
   let p1 = parse_return_ann(c, depth)
   let PTook(ann, c1) = p1 else parsed_refused(p1)
   match ann of
-    (ret0, eff, no_alloc) =>
+    (ret0, eff, claims) =>
       let p2 = parse_given_clause(c1, depth)
       let PTook(constraints, c2) = p2 else parsed_refused(p2)
       let p3 = parse_requires(c2, depth, Nil)
@@ -617,7 +626,9 @@ fn parse_method_after_params(
             totality = totality,
             fip_word = fip_word,
             is_replayable = is_replayable,
-            is_no_alloc = no_alloc,
+            is_no_alloc = claims.no_alloc,
+            is_bounded_stack = claims.bounded_stack,
+            is_linear = claims.linear,
             span = cursor_since(saved, c8)
           },
           c8,
@@ -711,9 +722,9 @@ fn parse_optional_default(c : Cursor, depth : Int) : Parsed(Option(Sp(Expr))) =
 fn parse_return_ann(
   c : Cursor,
   depth : Int
-) : Parsed((Option(Ty), Option(Row), Bool)) =
+) : Parsed((Option(Ty), Option(Row), DeclClaims)) =
   if not(at_fixed(c, ":")) then
-    PTook((None, None, false), c)
+    PTook((None, None, no_claims()), c)
   elif at_fixed(cursor_advance(c), "!") then
     PFault(
         refuse(
@@ -727,8 +738,8 @@ fn parse_return_ann(
       None =>
         let p1 = parse_type(start, depth)
         let PTook(ty, c1) = p1 else parsed_refused(p1)
-        match lift_noalloc(ty) of
-          (ret, no_alloc) => PTook((Some(ret), None, no_alloc), c1)
+        match lift_decl_claims(ty) of
+          (ret, claims) => PTook((Some(ret), None, claims), c1)
       Some(stop) =>
         let capped = cap_cursor(start, stop)
         let p2 = parse_type(capped, depth)
@@ -741,20 +752,50 @@ fn parse_return_ann(
           let PTook(row, c3) = p3 else parsed_refused(p3)
           match attach_decl_effect(ty, row) of
             (ret, eff) =>
-              match lift_noalloc(ret) of
-                (ret2, no_alloc) => PTook((Some(ret2), eff, no_alloc), c3)
+              match lift_decl_claims(ret) of
+                (ret2, claims) => PTook((Some(ret2), eff, claims), c3)
 
-fn lift_noalloc(ty : Ty) : (Ty, Bool) =
+-- | The declaration claims a `fn` return annotation may carry at its root,
+-- lifted off the type at parse. Each flag is one claim, and they compose.
+pub type DeclClaims = DeclClaims {
+  no_alloc: Bool,
+  bounded_stack: Bool,
+  linear: Bool
+} deriving (Eq, Show)
+
+-- | A declaration that claims nothing.
+pub fn no_claims() : DeclClaims =
+  DeclClaims { no_alloc = false, bounded_stack = false, linear = false }
+
+-- | Lift a root usage row made only of declaration claims (`@ noalloc`,
+-- `@ bounded_stack`, `@ linear`, or their composition) off a return type onto
+-- the claim flags. Any other row stays on the type, so the checker rejects it
+-- at its own span.
+pub fn lift_decl_claims(ty : Ty) : (Ty, DeclClaims) =
   match ty of
     TyUsage(inner, facts) =>
-      match facts of
-        Cons(fact, Nil) =>
-          if fact == "noalloc" then
-            (inner, true)
-          else
-            (ty, false)
-        _ => (ty, false)
-    _ => (ty, false)
+      if claim_facts_only(facts) then
+        (
+            inner,
+            DeclClaims {
+              no_alloc = has_claim("noalloc", facts),
+              bounded_stack = has_claim("bounded_stack", facts),
+              linear = has_claim("linear", facts)
+            },
+          )
+      else
+        (ty, no_claims())
+    _ => (ty, no_claims())
+
+fn claim_facts_only(facts : List(String)) : Bool =
+  match facts of
+    [] => true
+    f :: rest =>
+      (f == "noalloc" || f == "bounded_stack" || f == "linear")
+        && claim_facts_only(rest)
+
+fn has_claim(fact : String, facts : List(String)) : Bool =
+  count(\(f) -> f == fact, facts) > 0
 
 fn attach_decl_effect(ty : Ty, row : Row) : (Ty, Option(Row)) =
   match ty of

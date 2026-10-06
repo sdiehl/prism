@@ -30,6 +30,7 @@ const RUNTIME_HEADERS: &[&str] = &[
     "prism_kont.h",
     "prism_io.h",
     "prism_net.h",
+    "prism_proc.h",
     "prism_mobility.h",
 ];
 const RUNTIME_SOURCES: &[&str] = &[
@@ -48,6 +49,7 @@ const RUNTIME_SOURCES: &[&str] = &[
     "prism_kont.c",
     "prism_io.c",
     "prism_net.c",
+    "prism_proc.c",
     "prism_mobility.c",
 ];
 const RUNTIME_DIR: &str = "../../runtime";
@@ -330,8 +332,9 @@ fn main() {
 
     // Emit the embedded-runtime manifest for src/codegen/rt.rs. Generated for every
     // target (including wasm, which compiles rt.rs but not the C) so the include!
-    // always resolves; the include_str! paths are absolute so they resolve from
-    // OUT_DIR. Headers are flagged so the native-compile path can write them beside
+    // always resolves. Each include_str! path is rooted at `env!("CARGO_MANIFEST_DIR")`,
+    // expanded when the lib compiles rather than baked in here, so a cached OUT_DIR
+    // written from another checkout cannot point the lib at that checkout. Headers are flagged so the native-compile path can write them beside
     // the sources without handing them to the compiler as translation units.
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
     let mut manifest = String::from("pub static RUNTIME_FILES: &[(&str, &str, bool)] = &[\n");
@@ -353,10 +356,10 @@ fn main() {
                 .map(|name| ((*name).to_string(), false)),
         );
     for (name, is_header) in entries {
-        let abs = format!("{manifest_dir}/{RUNTIME_DIR}/{name}");
+        let rel = format!("/{RUNTIME_DIR}/{name}");
         writeln!(
             manifest,
-            "    ({name:?}, include_str!({abs:?}), {is_header}),"
+            "    ({name:?}, include_str!(concat!(env!(\"CARGO_MANIFEST_DIR\"), {rel:?})), {is_header}),"
         )
         .unwrap();
         println!("cargo:rerun-if-changed={RUNTIME_DIR}/{name}");

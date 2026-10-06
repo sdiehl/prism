@@ -130,8 +130,8 @@ fn split_comment(
   doc : List(String)
 ) : (List(String), List(String)) =
   match lines of
-    Nil => (reverse(doc), Nil)
-    Cons(line, rest) =>
+    [] => (reverse(doc), Nil)
+    line :: rest =>
       if starts_with(comment_bare, line) then
         split_comment(rest, Cons(line, doc))
       else
@@ -141,8 +141,8 @@ fn split_comment(
 -- recently pushed.
 fn with_output(text : String, acc : List(Example)) : List(Example) =
   match acc of
-    Nil => Nil
-    Cons(e, rest) => Cons(Example { code = e.code, output = text }, rest)
+    [] => Nil
+    e :: rest => Cons(Example { code = e.code, output = text }, rest)
 
 -- Where to resume after a code fence closes: inside the output block when one
 -- opens on the very next line, in prose otherwise.
@@ -152,12 +152,12 @@ fn after_code(
   acc : List(Example)
 ) : (List(String), List(Example)) =
   match rest of
-    Cons(next, tail) =>
+    next :: tail =>
       if starts_with(output_fence, next) then
         walk(tail, InOutput, Nil, prose, acc)
       else
         walk(rest, InProse, Nil, prose, acc)
-    Nil => (reverse(prose), reverse(acc))
+    [] => (reverse(prose), reverse(acc))
 
 -- Prose and examples are both accumulated in reverse and turned once at the
 -- end, so each comes back in the order the docstring wrote it.
@@ -170,8 +170,8 @@ fn walk(
   acc : List(Example)
 ) : (List(String), List(Example)) =
   match lines of
-    Nil => (reverse(prose), reverse(acc))
-    Cons(line, rest) =>
+    [] => (reverse(prose), reverse(acc))
+    line :: rest =>
       match region of
         InProse =>
           match region_of(line) of
@@ -256,7 +256,7 @@ test fn a_docstring_yields_its_example_and_output() =
     """
   let doc = read_doc(src)
   match doc.examples of
-    Cons(e, Nil) =>
+    [e] =>
       if (e.code == "double(21)" && e.output == "42" && doc.prose == "Twice.") then
         ()
       else
@@ -274,7 +274,7 @@ test fn a_hidden_line_stays_out_of_the_shown_example() =
     """
   let doc = read_doc(src)
   match doc.examples of
-    Cons(e, Nil) =>
+    [e] =>
       if e.code == "double(n)" && e.output == "" then
         ()
       else
@@ -308,7 +308,7 @@ test fn a_detached_output_block_is_not_attached() =
     """
   let doc = read_doc(src)
   match doc.examples of
-    Cons(e, Nil) =>
+    [e] =>
       if e.output == "" && not(contains("99", doc.prose)) then
         ()
       else
@@ -317,5 +317,5 @@ test fn a_detached_output_block_is_not_attached() =
 
 test fn a_declaration_with_no_docstring_has_no_examples() =
   match read_doc("type Light = Red | Amber | Green").examples of
-    Nil => ()
+    [] => ()
     _ => fail()

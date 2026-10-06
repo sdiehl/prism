@@ -20,6 +20,7 @@
 //    resolution), so
 //    an accepted-but-hollow golden cannot silently drop a fact family.
 
+use prism::DumpPhase;
 use std::collections::BTreeSet;
 use std::env;
 use std::fs;
@@ -43,7 +44,7 @@ const HIR_FIXTURE_ACCEPT: &str = "PRISM_ACCEPT_HIR_FIXTURES";
 // is checked against.
 const HIR_FIXTURE_SCHEMA: &str = "prism-hir-fixture-v2";
 // The dump phase that renders the fixture.
-const HIR_PHASE: &str = "hir";
+const HIR_PHASE: DumpPhase = DumpPhase::Hir;
 
 const SRC: &str = indoc! {"
     type Point = Point { x: Int, y: Int }

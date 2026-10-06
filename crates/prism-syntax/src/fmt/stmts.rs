@@ -26,6 +26,21 @@ impl Fmt<'_> {
         self.fmt_expr_break(e, indent, Mode::Layout)
     }
 
+    // `\(params) ->`, the head a block-bodied lambda opens its body under.
+    pub(super) fn fmt_lam_head(&self, ps: &[crate::ast::Param]) -> String {
+        let ps: Vec<_> = ps.iter().map(|p| self.fmt_param(p)).collect();
+        format!("{}({}) {}", kw::LAMBDA, ps.join(", "), kw::ARROW)
+    }
+
+    // A lambda body that only lays out offside. Other bodies keep their
+    // flat or source form, since a lambda body cannot be a statement block.
+    pub(super) const fn offside_body(body: &S<Expr>) -> bool {
+        matches!(
+            body.node,
+            Expr::Handle(..) | Expr::Sugar(Sugar::TryCatch(..))
+        )
+    }
+
     pub(super) fn fmt_let_line(
         &self,
         name: &str,
@@ -59,6 +74,17 @@ impl Fmt<'_> {
                     kw::LET,
                     self.fmt_block(value, indent + 1, from)
                 );
+            }
+            // A lambda over one of those keeps its head on the binding line and
+            // lays its body out offside, one level below the binding.
+            if let Expr::Lam(ps, body) = &value.node {
+                if !value.synth && Self::offside_body(body) {
+                    return format!(
+                        "{head}{}\n{}",
+                        self.fmt_lam_head(ps),
+                        self.fmt_block(body, indent + 1, body.span.start)
+                    );
+                }
             }
             if let Some(broken) = self.render_expr(value, text_width(&ind), text_width(&head)) {
                 return format!("{head}{broken}");

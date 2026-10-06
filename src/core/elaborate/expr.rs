@@ -962,8 +962,15 @@ impl Elab<'_> {
                 let mut ops = Vec::new();
                 let mut return_var = None;
                 let mut return_body = None;
+                let mut finally_body = None;
                 for arm in arms {
                     match arm {
+                        // The cleanup clause binds nothing and runs after the
+                        // handler has been left, so it elaborates in the outer
+                        // scope.
+                        HandlerArm::Finally(arm_body) => {
+                            finally_body = Some(Box::new(self.elab(arm_body, locals)?));
+                        }
                         HandlerArm::Return(x, arm_body) => {
                             let mut l2 = locals.clone();
                             l2.insert(x.clone(), None);
@@ -999,6 +1006,7 @@ impl Elab<'_> {
                     body: Box::new(body_comp),
                     return_var,
                     return_body,
+                    finally_body,
                     // Sole validating build; the checker already rejects dups (E5008).
                     ops: CheckedHandler::new(ops).expect("checker rejects duplicate ops"),
                 }

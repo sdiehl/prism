@@ -27,8 +27,8 @@ pub(super) fn expand_synonyms(prog: &mut Program) -> Result<(), TypeError> {
         apply_syn_decl(d, &map)?;
     }
     for c in &mut prog.classes {
-        for (_, t) in &mut c.methods {
-            apply_syn(t, &map)?;
+        for m in &mut c.methods {
+            apply_syn(&mut m.ty, &map)?;
         }
     }
     for i in &mut prog.instances {

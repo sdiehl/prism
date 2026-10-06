@@ -9,8 +9,8 @@ effect Peek
 
 fn run_thunks(fs, acc) =
   match fs of
-    Nil => acc
-    Cons(f, rest) => run_thunks(rest, acc + f())
+    [] => acc
+    f :: rest => run_thunks(rest, acc + f())
 
 fn peeked() =
   let fs = [\() -> peek(4), \() -> peek(7)]

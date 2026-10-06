@@ -12,6 +12,7 @@
 // keeps the oracle from going vacuous if recognition silently breaks, and a
 // determinism check covers the byte-stable join naming the anti-unifier promises.
 
+use prism::DumpPhase;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -60,8 +61,8 @@ fn touched_cases() -> Vec<PathBuf> {
     let selected = Mutex::new(Vec::new());
     let failures = parallel_check(&candidates, |case| {
         let full = source(case);
-        let a = dump_on("core", &full, &roots, &off);
-        let b = dump_on("core", &full, &roots, &on);
+        let a = dump_on(DumpPhase::Core, &full, &roots, &off);
+        let b = dump_on(DumpPhase::Core, &full, &roots, &on);
         let touched = match (a, b) {
             (Ok(a), Ok(b)) => a != b,
             // A dump error under exactly one config is itself a divergence worth
@@ -136,7 +137,9 @@ fn fusion_fires_on_pipelines() {
     let cfg = fused();
     let fired = fuse_cases()
         .iter()
-        .filter(|c| dump_on("core", &source(c), &roots, &cfg).is_ok_and(|s| s.contains("%fuse$")))
+        .filter(|c| {
+            dump_on(DumpPhase::Core, &source(c), &roots, &cfg).is_ok_and(|s| s.contains("%fuse$"))
+        })
         .count();
     assert!(
         fired >= 3,
@@ -153,8 +156,8 @@ fn fusion_is_deterministic() {
     let cfg = fused();
     for c in fuse_cases() {
         let full = source(&c);
-        let a = dump_on("core", &full, &roots, &cfg).unwrap();
-        let b = dump_on("core", &full, &roots, &cfg).unwrap();
+        let a = dump_on(DumpPhase::Core, &full, &roots, &cfg).unwrap();
+        let b = dump_on(DumpPhase::Core, &full, &roots, &cfg).unwrap();
         assert_eq!(a, b, "fused Core is not byte-stable for {}", c.display());
     }
 }

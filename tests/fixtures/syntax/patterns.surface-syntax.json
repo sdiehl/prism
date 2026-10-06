@@ -1,9 +1,9 @@
 {
-  "schema": "prism-surface-syntax-v1",
+  "schema": "prism-surface-syntax-v2",
   "compiler": "<version>",
   "source": {
-    "digest": "4af039e91ba99d57a978bb8d61f6cb3a8193a72f0c1e18d29d2a910e9c10dff8",
-    "text": "-- Pattern forms: constructors, tuples, records, literals, guards, views,\n-- alternations, and parameters written as patterns.\ntype Point = Point { x: Int, y: Int }\n\ntype Shape = Dot | Line(Point, Point) | Poly(List(Point))\n\npattern Diag(n) for Point =\n  view \\(p) -> if p.x == p.y then Some(p.x) else None\n  make \\(n) -> Point { x = n, y = n }\n\nfn classify(s : Shape) : Int =\n  match s of\n    Dot => 0\n    Line(Point { x = 0, y = 0 }, _) => 1\n    Line(a, b) if a.x == b.x => 2\n    Poly(Nil) => 3\n    Poly(Cons(p, Nil)) => p.x\n    _ => 9\n\nfn literals(v : Int, c : Char, f : Float, b : Bool) : Int =\n  match (v, c, f, b) of\n    (0, 'a', 1.5, true) => 1\n    (n, _, _, false) => n\n    _ => 2\n\nfn record_rest(p : Point) : Int =\n  match p of\n    Point { x = 0, .. } => 0\n    Point { x = x, y = y } => x + y\n\nfn views(p : Point) : Int =\n  match p of\n    Diag(n) if n > 3 => n * 2\n    Diag(n) => n\n    _ => 0\n\nfn alternation(s : Shape) : Int =\n  match s of\n    Dot | Poly(Nil) => 0\n    Line(Point { x = 0, y = 0 } | Point { x = 1, y = 1 }, _) => 1\n    Line(p, _) | Poly(Cons(p, _)) => p.x\n\nfn alt_literals(c : Char, n : Int) : Int =\n  match (c, n) of\n    ('a' | 'b' | 'c', 0 | 1) => 1\n    (_, _) => 2\n\nfn param_pats(Point { x = x, .. }, (a, b), borrow q : Point) : Int =\n  let f = \\(Point { x = u, y = v }) -> u + v\n  x + a + b + q.y + f(q)\n"
+    "digest": "530fc4b93c27eed1d4fc80ccb9893da2465f7fca1bccc3720a58ef713fb5b981",
+    "text": "-- Pattern forms: constructors, tuples, records, literals, guards, views,\n-- alternations, and parameters written as patterns.\ntype Point = Point { x: Int, y: Int }\n\ntype Shape = Dot | Line(Point, Point) | Poly(List(Point))\n\npattern Diag(n) for Point =\n  view \\(p) -> if p.x == p.y then Some(p.x) else None\n  make \\(n) -> Point { x = n, y = n }\n\nfn classify(s : Shape) : Int =\n  match s of\n    Dot => 0\n    Line(Point { x = 0, y = 0 }, _) => 1\n    Line(a, b) if a.x == b.x => 2\n    Poly([]) => 3\n    Poly([p]) => p.x\n    _ => 9\n\nfn literals(v : Int, c : Char, f : Float, b : Bool) : Int =\n  match (v, c, f, b) of\n    (0, 'a', 1.5, true) => 1\n    (n, _, _, false) => n\n    _ => 2\n\nfn record_rest(p : Point) : Int =\n  match p of\n    Point { x = 0, .. } => 0\n    Point { x = x, y = y } => x + y\n\nfn views(p : Point) : Int =\n  match p of\n    Diag(n) if n > 3 => n * 2\n    Diag(n) => n\n    _ => 0\n\nfn alternation(s : Shape) : Int =\n  match s of\n    Dot | Poly([]) => 0\n    Line(Point { x = 0, y = 0 } | Point { x = 1, y = 1 }, _) => 1\n    Line(p, _) | Poly(p :: _) => p.x\n\nfn alt_literals(c : Char, n : Int) : Int =\n  match (c, n) of\n    ('a' | 'b' | 'c', 0 | 1) => 1\n    (_, _) => 2\n\nfn param_pats(Point { x = x, .. }, (a, b), borrow q : Point) : Int =\n  let f = \\(Point { x = u, y = v }) -> u + v\n  x + a + b + q.y + f(q)\n"
   },
   "items": [
     {
@@ -23,7 +23,11 @@
               }
             }
           ],
-          "name": "Point"
+          "name": "Point",
+          "span": [
+            140,
+            145
+          ]
         }
       ],
       "kind": "data",
@@ -36,7 +40,11 @@
     {
       "ctors": [
         {
-          "name": "Dot"
+          "name": "Dot",
+          "span": [
+            179,
+            182
+          ]
         },
         {
           "args": [
@@ -49,7 +57,11 @@
               "name": "Point"
             }
           ],
-          "name": "Line"
+          "name": "Line",
+          "span": [
+            185,
+            189
+          ]
         },
         {
           "args": [
@@ -64,7 +76,11 @@
               "name": "List"
             }
           ],
-          "name": "Poly"
+          "name": "Poly",
+          "span": [
+            206,
+            210
+          ]
         }
       ],
       "kind": "data",
@@ -390,8 +406,8 @@
             "body": {
               "kind": "int",
               "span": [
-                495,
-                496
+                494,
+                495
               ],
               "value": "3"
             },
@@ -402,7 +418,7 @@
                   "name": "Nil",
                   "span": [
                     487,
-                    490
+                    489
                   ]
                 }
               ],
@@ -410,7 +426,7 @@
               "name": "Poly",
               "span": [
                 482,
-                491
+                490
               ]
             }
           },
@@ -420,15 +436,15 @@
                 "kind": "var",
                 "name": "p",
                 "span": [
-                  523,
-                  524
+                  513,
+                  514
                 ]
               },
               "kind": "field",
               "name": "x",
               "span": [
-                523,
-                526
+                513,
+                516
               ]
             },
             "pat": {
@@ -439,32 +455,32 @@
                       "kind": "var",
                       "name": "p",
                       "span": [
-                        511,
-                        512
+                        506,
+                        507
                       ]
                     },
                     {
                       "kind": "ctor",
                       "name": "Nil",
                       "span": [
-                        514,
-                        517
+                        508,
+                        508
                       ]
                     }
                   ],
                   "kind": "ctor",
                   "name": "Cons",
                   "span": [
-                    506,
-                    518
+                    505,
+                    508
                   ]
                 }
               ],
               "kind": "ctor",
               "name": "Poly",
               "span": [
-                501,
-                519
+                500,
+                509
               ]
             }
           },
@@ -472,16 +488,16 @@
             "body": {
               "kind": "int",
               "span": [
-                536,
-                537
+                526,
+                527
               ],
               "value": "9"
             },
             "pat": {
               "kind": "wild",
               "span": [
-                531,
-                532
+                521,
+                522
               ]
             }
           }
@@ -497,7 +513,7 @@
         },
         "span": [
           379,
-          537
+          527
         ]
       },
       "kind": "fn",
@@ -516,7 +532,7 @@
       },
       "span": [
         346,
-        537
+        527
       ]
     },
     {
@@ -526,8 +542,8 @@
             "body": {
               "kind": "int",
               "span": [
-                650,
-                651
+                640,
+                641
               ],
               "value": "1"
             },
@@ -536,40 +552,40 @@
                 {
                   "kind": "int",
                   "span": [
-                    628,
-                    629
+                    618,
+                    619
                   ],
                   "value": "0"
                 },
                 {
                   "kind": "char",
                   "span": [
-                    631,
-                    634
+                    621,
+                    624
                   ],
                   "value": "a"
                 },
                 {
                   "kind": "float",
                   "span": [
-                    636,
-                    639
+                    626,
+                    629
                   ],
                   "value": "1.5"
                 },
                 {
                   "kind": "bool",
                   "span": [
-                    641,
-                    645
+                    631,
+                    635
                   ],
                   "value": true
                 }
               ],
               "kind": "tuple",
               "span": [
-                627,
-                646
+                617,
+                636
               ]
             }
           },
@@ -578,8 +594,8 @@
               "kind": "var",
               "name": "n",
               "span": [
-                676,
-                677
+                666,
+                667
               ]
             },
             "pat": {
@@ -588,37 +604,37 @@
                   "kind": "var",
                   "name": "n",
                   "span": [
-                    657,
-                    658
+                    647,
+                    648
                   ]
                 },
                 {
                   "kind": "wild",
                   "span": [
-                    660,
-                    661
+                    650,
+                    651
                   ]
                 },
                 {
                   "kind": "wild",
                   "span": [
-                    663,
-                    664
+                    653,
+                    654
                   ]
                 },
                 {
                   "kind": "bool",
                   "span": [
-                    666,
-                    671
+                    656,
+                    661
                   ],
                   "value": false
                 }
               ],
               "kind": "tuple",
               "span": [
-                656,
-                672
+                646,
+                662
               ]
             }
           },
@@ -626,16 +642,16 @@
             "body": {
               "kind": "int",
               "span": [
-                687,
-                688
+                677,
+                678
               ],
               "value": "2"
             },
             "pat": {
               "kind": "wild",
               "span": [
-                682,
-                683
+                672,
+                673
               ]
             }
           }
@@ -647,44 +663,44 @@
               "kind": "var",
               "name": "v",
               "span": [
-                608,
-                609
+                598,
+                599
               ]
             },
             {
               "kind": "var",
               "name": "c",
               "span": [
-                611,
-                612
+                601,
+                602
               ]
             },
             {
               "kind": "var",
               "name": "f",
               "span": [
-                614,
-                615
+                604,
+                605
               ]
             },
             {
               "kind": "var",
               "name": "b",
               "span": [
-                617,
-                618
+                607,
+                608
               ]
             }
           ],
           "kind": "tuple",
           "span": [
-            607,
-            619
+            597,
+            609
           ]
         },
         "span": [
-          601,
-          688
+          591,
+          678
         ]
       },
       "kind": "fn",
@@ -719,8 +735,8 @@
         "kind": "int"
       },
       "span": [
-        539,
-        688
+        529,
+        678
       ]
     },
     {
@@ -730,8 +746,8 @@
             "body": {
               "kind": "int",
               "span": [
-                764,
-                765
+                754,
+                755
               ],
               "value": "0"
             },
@@ -742,8 +758,8 @@
                   "pat": {
                     "kind": "int",
                     "span": [
-                      753,
-                      754
+                      743,
+                      744
                     ],
                     "value": "0"
                   }
@@ -753,8 +769,8 @@
               "name": "Point",
               "rest": true,
               "span": [
-                741,
-                760
+                731,
+                750
               ]
             }
           },
@@ -765,8 +781,8 @@
                 "kind": "var",
                 "name": "x",
                 "span": [
-                  796,
-                  797
+                  786,
+                  787
                 ]
               },
               "op": "+",
@@ -774,13 +790,13 @@
                 "kind": "var",
                 "name": "y",
                 "span": [
-                  800,
-                  801
+                  790,
+                  791
                 ]
               },
               "span": [
-                796,
-                801
+                786,
+                791
               ]
             },
             "pat": {
@@ -791,8 +807,8 @@
                     "kind": "var",
                     "name": "x",
                     "span": [
-                      782,
-                      783
+                      772,
+                      773
                     ]
                   }
                 },
@@ -802,8 +818,8 @@
                     "kind": "var",
                     "name": "y",
                     "span": [
-                      789,
-                      790
+                      779,
+                      780
                     ]
                   }
                 }
@@ -811,8 +827,8 @@
               "kind": "record",
               "name": "Point",
               "span": [
-                770,
-                792
+                760,
+                782
               ]
             }
           }
@@ -822,13 +838,13 @@
           "kind": "var",
           "name": "p",
           "span": [
-            732,
-            733
+            722,
+            723
           ]
         },
         "span": [
-          726,
-          801
+          716,
+          791
         ]
       },
       "kind": "fn",
@@ -846,8 +862,8 @@
         "kind": "int"
       },
       "span": [
-        690,
-        801
+        680,
+        791
       ]
     },
     {
@@ -860,22 +876,22 @@
                 "kind": "var",
                 "name": "n",
                 "span": [
-                  868,
-                  869
+                  858,
+                  859
                 ]
               },
               "op": "*",
               "rhs": {
                 "kind": "int",
                 "span": [
-                  872,
-                  873
+                  862,
+                  863
                 ],
                 "value": "2"
               },
               "span": [
-                868,
-                873
+                858,
+                863
               ]
             },
             "guard": {
@@ -884,22 +900,22 @@
                 "kind": "var",
                 "name": "n",
                 "span": [
-                  859,
-                  860
+                  849,
+                  850
                 ]
               },
               "op": ">",
               "rhs": {
                 "kind": "int",
                 "span": [
-                  863,
-                  864
+                  853,
+                  854
                 ],
                 "value": "3"
               },
               "span": [
-                859,
-                864
+                849,
+                854
               ]
             },
             "pat": {
@@ -908,16 +924,16 @@
                   "kind": "var",
                   "name": "n",
                   "span": [
-                    853,
-                    854
+                    843,
+                    844
                   ]
                 }
               ],
               "kind": "ctor",
               "name": "Diag",
               "span": [
-                848,
-                855
+                838,
+                845
               ]
             }
           },
@@ -926,8 +942,8 @@
               "kind": "var",
               "name": "n",
               "span": [
-                889,
-                890
+                879,
+                880
               ]
             },
             "pat": {
@@ -936,16 +952,16 @@
                   "kind": "var",
                   "name": "n",
                   "span": [
-                    883,
-                    884
+                    873,
+                    874
                   ]
                 }
               ],
               "kind": "ctor",
               "name": "Diag",
               "span": [
-                878,
-                885
+                868,
+                875
               ]
             }
           },
@@ -953,16 +969,16 @@
             "body": {
               "kind": "int",
               "span": [
-                900,
-                901
+                890,
+                891
               ],
               "value": "0"
             },
             "pat": {
               "kind": "wild",
               "span": [
-                895,
-                896
+                885,
+                886
               ]
             }
           }
@@ -972,13 +988,13 @@
           "kind": "var",
           "name": "p",
           "span": [
-            839,
-            840
+            829,
+            830
           ]
         },
         "span": [
-          833,
-          901
+          823,
+          891
         ]
       },
       "kind": "fn",
@@ -996,8 +1012,8 @@
         "kind": "int"
       },
       "span": [
-        803,
-        901
+        793,
+        891
       ]
     },
     {
@@ -1007,8 +1023,8 @@
             "body": {
               "kind": "int",
               "span": [
-                973,
-                974
+                962,
+                963
               ],
               "value": "0"
             },
@@ -1018,8 +1034,8 @@
                   "kind": "ctor",
                   "name": "Dot",
                   "span": [
-                    954,
-                    957
+                    944,
+                    947
                   ]
                 },
                 {
@@ -1028,23 +1044,23 @@
                       "kind": "ctor",
                       "name": "Nil",
                       "span": [
-                        965,
-                        968
+                        955,
+                        957
                       ]
                     }
                   ],
                   "kind": "ctor",
                   "name": "Poly",
                   "span": [
-                    960,
-                    969
+                    950,
+                    958
                   ]
                 }
               ],
               "kind": "or",
               "span": [
-                954,
-                969
+                944,
+                958
               ]
             }
           },
@@ -1052,8 +1068,8 @@
             "body": {
               "kind": "int",
               "span": [
-                1039,
-                1040
+                1028,
+                1029
               ],
               "value": "1"
             },
@@ -1068,8 +1084,8 @@
                           "pat": {
                             "kind": "int",
                             "span": [
-                              996,
-                              997
+                              985,
+                              986
                             ],
                             "value": "0"
                           }
@@ -1079,8 +1095,8 @@
                           "pat": {
                             "kind": "int",
                             "span": [
-                              1003,
-                              1004
+                              992,
+                              993
                             ],
                             "value": "0"
                           }
@@ -1089,8 +1105,8 @@
                       "kind": "record",
                       "name": "Point",
                       "span": [
-                        984,
-                        1006
+                        973,
+                        995
                       ]
                     },
                     {
@@ -1100,8 +1116,8 @@
                           "pat": {
                             "kind": "int",
                             "span": [
-                              1021,
-                              1022
+                              1010,
+                              1011
                             ],
                             "value": "1"
                           }
@@ -1111,8 +1127,8 @@
                           "pat": {
                             "kind": "int",
                             "span": [
-                              1028,
-                              1029
+                              1017,
+                              1018
                             ],
                             "value": "1"
                           }
@@ -1121,30 +1137,30 @@
                       "kind": "record",
                       "name": "Point",
                       "span": [
-                        1009,
-                        1031
+                        998,
+                        1020
                       ]
                     }
                   ],
                   "kind": "or",
                   "span": [
-                    984,
-                    1031
+                    973,
+                    1020
                   ]
                 },
                 {
                   "kind": "wild",
                   "span": [
-                    1033,
-                    1034
+                    1022,
+                    1023
                   ]
                 }
               ],
               "kind": "ctor",
               "name": "Line",
               "span": [
-                979,
-                1035
+                968,
+                1024
               ]
             }
           },
@@ -1154,15 +1170,15 @@
                 "kind": "var",
                 "name": "p",
                 "span": [
-                  1078,
-                  1079
+                  1063,
+                  1064
                 ]
               },
               "kind": "field",
               "name": "x",
               "span": [
-                1078,
-                1081
+                1063,
+                1066
               ]
             },
             "pat": {
@@ -1173,23 +1189,23 @@
                       "kind": "var",
                       "name": "p",
                       "span": [
-                        1050,
-                        1051
+                        1039,
+                        1040
                       ]
                     },
                     {
                       "kind": "wild",
                       "span": [
-                        1053,
-                        1054
+                        1042,
+                        1043
                       ]
                     }
                   ],
                   "kind": "ctor",
                   "name": "Line",
                   "span": [
-                    1045,
-                    1055
+                    1034,
+                    1044
                   ]
                 },
                 {
@@ -1200,38 +1216,38 @@
                           "kind": "var",
                           "name": "p",
                           "span": [
-                            1068,
-                            1069
+                            1052,
+                            1053
                           ]
                         },
                         {
                           "kind": "wild",
                           "span": [
-                            1071,
-                            1072
+                            1057,
+                            1058
                           ]
                         }
                       ],
                       "kind": "ctor",
                       "name": "Cons",
                       "span": [
-                        1063,
-                        1073
+                        1052,
+                        1058
                       ]
                     }
                   ],
                   "kind": "ctor",
                   "name": "Poly",
                   "span": [
-                    1058,
-                    1074
+                    1047,
+                    1059
                   ]
                 }
               ],
               "kind": "or",
               "span": [
-                1045,
-                1074
+                1034,
+                1059
               ]
             }
           }
@@ -1241,13 +1257,13 @@
           "kind": "var",
           "name": "s",
           "span": [
-            945,
-            946
+            935,
+            936
           ]
         },
         "span": [
-          939,
-          1081
+          929,
+          1066
         ]
       },
       "kind": "fn",
@@ -1265,8 +1281,8 @@
         "kind": "int"
       },
       "span": [
-        903,
-        1081
+        893,
+        1066
       ]
     },
     {
@@ -1276,8 +1292,8 @@
             "body": {
               "kind": "int",
               "span": [
-                1176,
-                1177
+                1161,
+                1162
               ],
               "value": "1"
             },
@@ -1288,32 +1304,32 @@
                     {
                       "kind": "char",
                       "span": [
-                        1149,
-                        1152
+                        1134,
+                        1137
                       ],
                       "value": "a"
                     },
                     {
                       "kind": "char",
                       "span": [
-                        1155,
-                        1158
+                        1140,
+                        1143
                       ],
                       "value": "b"
                     },
                     {
                       "kind": "char",
                       "span": [
-                        1161,
-                        1164
+                        1146,
+                        1149
                       ],
                       "value": "c"
                     }
                   ],
                   "kind": "or",
                   "span": [
-                    1149,
-                    1164
+                    1134,
+                    1149
                   ]
                 },
                 {
@@ -1321,31 +1337,31 @@
                     {
                       "kind": "int",
                       "span": [
-                        1166,
-                        1167
+                        1151,
+                        1152
                       ],
                       "value": "0"
                     },
                     {
                       "kind": "int",
                       "span": [
-                        1170,
-                        1171
+                        1155,
+                        1156
                       ],
                       "value": "1"
                     }
                   ],
                   "kind": "or",
                   "span": [
-                    1166,
-                    1171
+                    1151,
+                    1156
                   ]
                 }
               ],
               "kind": "tuple",
               "span": [
-                1148,
-                1172
+                1133,
+                1157
               ]
             }
           },
@@ -1353,8 +1369,8 @@
             "body": {
               "kind": "int",
               "span": [
-                1192,
-                1193
+                1177,
+                1178
               ],
               "value": "2"
             },
@@ -1363,22 +1379,22 @@
                 {
                   "kind": "wild",
                   "span": [
-                    1183,
-                    1184
+                    1168,
+                    1169
                   ]
                 },
                 {
                   "kind": "wild",
                   "span": [
-                    1186,
-                    1187
+                    1171,
+                    1172
                   ]
                 }
               ],
               "kind": "tuple",
               "span": [
-                1182,
-                1188
+                1167,
+                1173
               ]
             }
           }
@@ -1390,28 +1406,28 @@
               "kind": "var",
               "name": "c",
               "span": [
-                1135,
-                1136
+                1120,
+                1121
               ]
             },
             {
               "kind": "var",
               "name": "n",
               "span": [
-                1138,
-                1139
+                1123,
+                1124
               ]
             }
           ],
           "kind": "tuple",
           "span": [
-            1134,
-            1140
+            1119,
+            1125
           ]
         },
         "span": [
-          1128,
-          1193
+          1113,
+          1178
         ]
       },
       "kind": "fn",
@@ -1434,8 +1450,8 @@
         "kind": "int"
       },
       "span": [
-        1083,
-        1193
+        1068,
+        1178
       ]
     },
     {
@@ -1452,8 +1468,8 @@
                   "kind": "var",
                   "name": "x",
                   "span": [
-                    1311,
-                    1312
+                    1296,
+                    1297
                   ]
                 },
                 "op": "+",
@@ -1461,13 +1477,13 @@
                   "kind": "var",
                   "name": "a",
                   "span": [
-                    1315,
-                    1316
+                    1300,
+                    1301
                   ]
                 },
                 "span": [
-                  1311,
-                  1316
+                  1296,
+                  1301
                 ]
               },
               "op": "+",
@@ -1475,13 +1491,13 @@
                 "kind": "var",
                 "name": "b",
                 "span": [
-                  1319,
-                  1320
+                  1304,
+                  1305
                 ]
               },
               "span": [
-                1311,
-                1320
+                1296,
+                1305
               ]
             },
             "op": "+",
@@ -1490,20 +1506,20 @@
                 "kind": "var",
                 "name": "q",
                 "span": [
-                  1323,
-                  1324
+                  1308,
+                  1309
                 ]
               },
               "kind": "field",
               "name": "y",
               "span": [
-                1323,
-                1326
+                1308,
+                1311
               ]
             },
             "span": [
-              1311,
-              1326
+              1296,
+              1311
             ]
           },
           "op": "+",
@@ -1513,8 +1529,8 @@
                 "kind": "var",
                 "name": "q",
                 "span": [
-                  1331,
-                  1332
+                  1316,
+                  1317
                 ]
               }
             ],
@@ -1522,26 +1538,26 @@
               "kind": "var",
               "name": "f",
               "span": [
-                1329,
-                1330
+                1314,
+                1315
               ]
             },
             "kind": "call",
             "span": [
-              1329,
-              1333
+              1314,
+              1318
             ]
           },
           "span": [
-            1311,
-            1333
+            1296,
+            1318
           ]
         },
         "kind": "let",
         "name": "f",
         "span": [
-          1266,
-          1333
+          1251,
+          1318
         ],
         "value": {
           "body": {
@@ -1550,8 +1566,8 @@
               "kind": "var",
               "name": "u",
               "span": [
-                1303,
-                1304
+                1288,
+                1289
               ]
             },
             "op": "+",
@@ -1559,13 +1575,13 @@
               "kind": "var",
               "name": "v",
               "span": [
-                1307,
-                1308
+                1292,
+                1293
               ]
             },
             "span": [
-              1303,
-              1308
+              1288,
+              1293
             ]
           },
           "kind": "lam",
@@ -1580,8 +1596,8 @@
                       "kind": "var",
                       "name": "u",
                       "span": [
-                        1288,
-                        1289
+                        1273,
+                        1274
                       ]
                     }
                   },
@@ -1591,8 +1607,8 @@
                       "kind": "var",
                       "name": "v",
                       "span": [
-                        1295,
-                        1296
+                        1280,
+                        1281
                       ]
                     }
                   }
@@ -1600,15 +1616,15 @@
                 "kind": "record",
                 "name": "Point",
                 "span": [
-                  1276,
-                  1298
+                  1261,
+                  1283
                 ]
               }
             }
           ],
           "span": [
-            1274,
-            1308
+            1259,
+            1293
           ]
         }
       },
@@ -1625,8 +1641,8 @@
                   "kind": "var",
                   "name": "x",
                   "span": [
-                    1221,
-                    1222
+                    1206,
+                    1207
                   ]
                 }
               }
@@ -1635,8 +1651,8 @@
             "name": "Point",
             "rest": true,
             "span": [
-              1209,
-              1228
+              1194,
+              1213
             ]
           }
         },
@@ -1648,23 +1664,23 @@
                 "kind": "var",
                 "name": "a",
                 "span": [
-                  1231,
-                  1232
+                  1216,
+                  1217
                 ]
               },
               {
                 "kind": "var",
                 "name": "b",
                 "span": [
-                  1234,
-                  1235
+                  1219,
+                  1220
                 ]
               }
             ],
             "kind": "tuple",
             "span": [
-              1230,
-              1236
+              1215,
+              1221
             ]
           }
         },
@@ -1681,8 +1697,8 @@
         "kind": "int"
       },
       "span": [
-        1195,
-        1333
+        1180,
+        1318
       ]
     }
   ]

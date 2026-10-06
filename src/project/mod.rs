@@ -556,6 +556,96 @@ pub fn load_project(arg: &Path) -> Result<Project, Error> {
     load_project_rec(arg, &mut Vec::new())
 }
 
+/// A file's module search path and prelude, resolved the way `prism check`
+/// resolves them.
+///
+/// A file inside a project (the nearest ancestor directory holding a
+/// `prism.toml`) sees the project's source tree, its path, hash, and git
+/// dependencies, the Std root `prism.lock` pins, and the project's replacement
+/// prelude if `[package] prelude` names one. A file outside any project sees
+/// its own directory and the built-in prelude.
+#[derive(Debug)]
+pub struct SearchPath {
+    /// The enclosing project, or `None` for a standalone file.
+    pub project: Option<Project>,
+    /// Module roots, searched in order.
+    pub roots: Vec<crate::resolve::Root>,
+    /// The text of the project's replacement prelude, when it has one.
+    pub prelude: Option<String>,
+}
+
+impl SearchPath {
+    /// `src` with the effective prelude prepended, ready for the driver.
+    #[must_use]
+    pub fn with_prelude(&self, src: &str) -> String {
+        self.prelude.as_ref().map_or_else(
+            || crate::driver::with_prelude(src),
+            |p| crate::driver::with_custom_prelude(p, src),
+        )
+    }
+}
+
+/// Resolve the search path for the source file `file`.
+///
+/// # Errors
+/// Fails when the enclosing project's manifest, lockfile, prelude, or a locked
+/// dependency cannot be read or does not validate.
+pub fn search_path(file: &Path, flags: &DynFlags) -> Result<SearchPath, Error> {
+    let dir = file.parent().unwrap_or_else(|| Path::new("."));
+    let Some(root) = dir.ancestors().find(|d| d.join(MANIFEST).is_file()) else {
+        return Ok(SearchPath {
+            project: None,
+            roots: crate::resolve::default_roots(dir),
+            prelude: None,
+        });
+    };
+    let project = load_project(root)?;
+    let roots = project_search_roots(&project, flags)?;
+    let prelude = match &project.prelude {
+        Some(p) => Some(std::fs::read_to_string(p).map_err(Error::Io)?),
+        None => None,
+    };
+    Ok(SearchPath {
+        project: Some(project),
+        roots,
+        prelude,
+    })
+}
+
+/// The module roots of `project`: its source tree, path dependencies,
+/// store-served dependencies, and the pinned Std root.
+///
+/// # Errors
+/// Fails when `prism.lock` is malformed or a locked dependency cannot be served.
+pub fn project_search_roots(
+    project: &Project,
+    flags: &DynFlags,
+) -> Result<Vec<crate::resolve::Root>, Error> {
+    let lock = read_lock(&project.root)?;
+    let store_root = crate::store::disk::resolve_store_path(flags.store_path.as_deref());
+    let package_roots =
+        crate::pkg::package_source_roots(&lock, &project.dependencies, &store_root, flags)?;
+    let std_root = crate::pkg::stdlib_source_root(&lock, &store_root)?;
+    Ok(crate::resolve::project_roots_with_packages_and_std(
+        &project.src_dir,
+        &project.dep_src_dirs,
+        package_roots,
+        std_root,
+    ))
+}
+
+fn read_lock(project_root: &Path) -> Result<crate::pkg::lock::Lock, Error> {
+    match std::fs::read_to_string(project_root.join(LOCKFILE)) {
+        Ok(text) => {
+            let lock = crate::pkg::lock::Lock::parse(&text)?;
+            lock.validate_current_scheme()?;
+            Ok(lock)
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(crate::pkg::lock::Lock::default()),
+        Err(e) => Err(Error::Io(e)),
+    }
+}
+
 /// One package in the transitive dependency-license audit.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct DependencyLicense {

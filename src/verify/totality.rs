@@ -549,6 +549,7 @@ fn add_binders(pat: &S<Pattern>, out: &mut BTreeSet<String>) {
 #[cfg(test)]
 mod tests {
     use crate::dump;
+    use crate::DumpPhase;
 
     // A recursive call certifies structural only when it consumes a strict subterm
     // of a matched parameter. A binder that reuses a tracked subterm's name but
@@ -570,7 +571,7 @@ total fn loops(n: Nat): Int =
         Z => 0
         S(m) => loops(m)
 ";
-        let out = dump("totality", src).expect("dump totality");
+        let out = dump(DumpPhase::Totality, src).expect("dump totality");
         assert!(
             out.contains("loops: pending:"),
             "a shadowed subterm must not certify structural:\n{out}"
@@ -595,7 +596,7 @@ total fn loops(n: Nat): Int =
       let m = n
       loops(m)
 ";
-        let out = dump("totality", src).expect("dump totality");
+        let out = dump(DumpPhase::Totality, src).expect("dump totality");
         assert!(
             out.contains("loops: pending:"),
             "a shadowing let must not certify structural:\n{out}"
@@ -621,7 +622,7 @@ total fn loops(n: Nat): Int =
     S(m) if loops(n) > 0 => 1
     S(m) => 1 + loops(m)
 ";
-        let out = dump("totality", src).expect("dump totality");
+        let out = dump(DumpPhase::Totality, src).expect("dump totality");
         assert!(
             out.contains("loops: pending:"),
             "a non-descending recursive call in a guard must not certify:\n{out}"
@@ -644,7 +645,7 @@ total fn pick(n: Int): Int =
     k if helper(k) > 0 => 1
     _ => 0
 ";
-        let out = dump("totality", src).expect("dump totality");
+        let out = dump(DumpPhase::Totality, src).expect("dump totality");
         assert!(
             out.contains("pick: pending:") && out.contains("helper"),
             "an uncertified call in a guard must not certify:\n{out}"
@@ -665,7 +666,7 @@ total fn depth(n: Nat): Int =
     S(m) if depth(m) > 0 => 1
     S(m) => 1 + depth(m)
 ";
-        let out = dump("totality", src).expect("dump totality");
+        let out = dump(DumpPhase::Totality, src).expect("dump totality");
         assert!(
             out.contains("depth: checked (structural on n)"),
             "a descending guard call must still certify:\n{out}"
@@ -684,7 +685,7 @@ total fn depth(n: Nat): Int =
     Z => 0
     S(m) => 1 + depth(m)
 ";
-        let out = dump("totality", src).expect("dump totality");
+        let out = dump(DumpPhase::Totality, src).expect("dump totality");
         assert!(
             out.contains("depth: checked (structural on n)"),
             "structural recursion must still certify:\n{out}"

@@ -682,11 +682,13 @@ impl<'a> Builder<'a> {
                 body,
                 return_var,
                 return_body,
+                finally_body,
                 ops,
             } => self.handle(
                 *body,
                 return_var,
                 return_body.map(|body| *body),
+                finally_body.map(|body| *body),
                 &ops,
                 expected,
             ),
@@ -833,7 +835,7 @@ impl<'a> Builder<'a> {
                     _ => false,
                 }));
         let declared = if unsigned_shared_lane {
-            intrinsic_sig("(U64, U64) -> U64")?
+            unsigned_lane_sig()
         } else if let Some(signature) = op.signature() {
             intrinsic_sig(signature)?
         } else {
@@ -1035,6 +1037,7 @@ impl<'a> Builder<'a> {
         body: Comp,
         return_var: Option<Sym>,
         return_body: Option<Comp>,
+        finally_body: Option<Comp>,
         ops: &CheckedHandler,
         expected: Option<&CompSig>,
     ) -> Result<TypedComp, BuildError> {
@@ -1051,6 +1054,15 @@ impl<'a> Builder<'a> {
             .cloned()
             .unwrap_or_else(|| self.solver.fresh_row());
         let outer = CompSig::new(result.clone(), outer_effects.clone());
+        // The cleanup clause runs once the handler has been left, so it sees
+        // none of the handler's binders, answers unit, and performs only at the
+        // handler's own row.
+        let finally_body = finally_body
+            .map(|finally_body| {
+                let cleanup = CompSig::new(CoreType::Source(Type::Unit), outer_effects.clone());
+                self.comp(finally_body, Some(&cleanup)).map(Box::new)
+            })
+            .transpose()?;
         let mut clause_results = Vec::new();
 
         let (return_binder, return_body, mut clause_effects) =
@@ -1182,6 +1194,7 @@ impl<'a> Builder<'a> {
                 body: Box::new(body),
                 return_binder,
                 return_body,
+                finally_body,
                 ops,
             },
             expected,
@@ -1307,4 +1320,15 @@ impl<'a> Builder<'a> {
         }
         discharged
     }
+}
+
+/// The `(U64, U64) -> U64` signature an `I64` arithmetic op takes on the
+/// unsigned lane it shares with `U64`.
+fn unsigned_lane_sig() -> CoreFnSig {
+    let word = CoreType::Source(Type::U64);
+    CoreFnSig::new(
+        Vec::new(),
+        vec![word.clone(), word.clone()],
+        CompSig::new(word, EffRow::Empty),
+    )
 }

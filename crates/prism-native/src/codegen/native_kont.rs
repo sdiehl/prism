@@ -6,8 +6,8 @@
 //! drift independently.
 
 use std::collections::BTreeMap;
-use std::fmt::Write as _;
 
+use prism_common::format::FormatTag;
 use prism_common::sym::Sym;
 use prism_core::core::{Core, Hashes, HASH_SCHEME};
 
@@ -61,7 +61,7 @@ const FLAG_ROW: &str = "flag";
 const FN_ROW: &str = "fn";
 const STATE_MAP_HEADER: &str = "state-map 1";
 const SLOT_FORMAT_ROW: &str = "slot-format";
-const SLOT_FORMAT: &str = "prism-native-abi-word-v1";
+const SLOT_FORMAT: FormatTag = FormatTag::new("prism-native-abi-word-v1");
 const STATE_ROW: &str = "state";
 const ARITY_FIELD: &str = "arity";
 const SLOTS_FIELD: &str = "slots";
@@ -79,15 +79,26 @@ pub struct IdentityRow<'a> {
     pub value: String,
 }
 
-pub(crate) fn rows(table: &str) -> impl Iterator<Item = Row<'_>> {
-    table.lines().filter_map(|line| {
-        let mut parts = line.split_whitespace();
-        (parts.next()? == FN_ROW).then(|| Row {
-            symbol: parts.next().unwrap_or_default(),
-            def_hash: parts.next().unwrap_or_default(),
-            core_name: parts.next().unwrap_or_default(),
-        })
-    })
+/// The `fn` rows of a continuation table, each `fn <symbol> <hash> <name>`.
+///
+/// # Errors
+/// Refuses a `fn` row that does not carry exactly those three fields, so a
+/// malformed table fails loudly instead of decoding to empty symbols.
+pub(crate) fn rows(table: &str) -> Result<Vec<Row<'_>>, String> {
+    table
+        .lines()
+        .filter(|line| line.split_whitespace().next() == Some(FN_ROW))
+        .map(
+            |line| match line.split_whitespace().collect::<Vec<_>>()[..] {
+                [_, symbol, def_hash, core_name] => Ok(Row {
+                    symbol,
+                    def_hash,
+                    core_name,
+                }),
+                _ => Err(format!("malformed native kont table row: {line}")),
+            },
+        )
+        .collect()
 }
 
 #[must_use]
@@ -95,30 +106,35 @@ pub fn table(hashes: &Hashes, bundle: &str, identity: &[IdentityRow<'_>]) -> Str
     let mut names: Vec<&Sym> = hashes.keys().collect();
     names.sort_by_key(|s| s.as_str());
 
-    let mut out = String::new();
-    writeln!(out, "{SCHEME_ROW}  {HASH_SCHEME}").unwrap();
-    writeln!(out, "{BUNDLE_ROW}  {bundle}").unwrap();
-    writeln!(out, "{COMPILER_ROW}  {}", env!("CARGO_PKG_VERSION")).unwrap();
-    writeln!(out, "{TARGET_ROW}  {}", env!("PRISM_TARGET")).unwrap();
-    writeln!(out, "{BACKEND_ROW}  llvm").unwrap();
-    for row in identity {
-        writeln!(out, "{FLAG_ROW}  {}  {}", row.key, row.value).unwrap();
-    }
-    for name in names {
-        writeln!(
-            out,
+    let mut lines = vec![
+        format!("{SCHEME_ROW}  {HASH_SCHEME}"),
+        format!("{BUNDLE_ROW}  {bundle}"),
+        format!("{COMPILER_ROW}  {}", env!("CARGO_PKG_VERSION")),
+        format!("{TARGET_ROW}  {}", env!("PRISM_TARGET")),
+        format!("{BACKEND_ROW}  llvm"),
+    ];
+    lines.extend(
+        identity
+            .iter()
+            .map(|row| format!("{FLAG_ROW}  {}  {}", row.key, row.value)),
+    );
+    lines.extend(names.into_iter().map(|name| {
+        format!(
             "{FN_ROW}      {}  {}  {}",
             super::native_symbol(name.as_str()),
             hashes[name],
             name.as_str()
         )
-        .unwrap();
-    }
-    out
+    }));
+    terminated(lines)
 }
 
-#[must_use]
-pub fn state_map(core: &Core, table: &str) -> String {
+/// The per-function ABI slot layout for every `fn` row of `table`.
+///
+/// # Errors
+/// Refuses a `fn` row of `table` that does not carry exactly a symbol, a hash,
+/// and a name.
+pub fn state_map(core: &Core, table: &str) -> Result<String, String> {
     let layouts: BTreeMap<String, (usize, String)> = core
         .fns
         .iter()
@@ -131,22 +147,22 @@ pub fn state_map(core: &Core, table: &str) -> String {
         })
         .collect();
 
-    let mut out = String::new();
-    out.push_str(STATE_MAP_HEADER);
-    out.push('\n');
-    copy_header_rows(table, &mut out);
-    writeln!(out, "{SLOT_FORMAT_ROW} {SLOT_FORMAT}").unwrap();
-    for row in rows(table) {
+    let mut lines = vec![STATE_MAP_HEADER.to_string()];
+    lines.extend(header_rows(table).map(str::to_string));
+    lines.push(format!("{SLOT_FORMAT_ROW} {SLOT_FORMAT}"));
+    for row in rows(table)? {
         if let Some((arity, slots)) = layouts.get(row.symbol) {
-            writeln!(
-                out,
+            lines.push(format!(
                 "{STATE_ROW} {} {} {} {ARITY_FIELD} {} {SLOTS_FIELD} {}",
                 row.symbol, row.def_hash, row.core_name, arity, slots
-            )
-            .unwrap();
+            ));
         }
     }
-    out
+    Ok(terminated(lines))
+}
+
+fn terminated(lines: Vec<String>) -> String {
+    lines.into_iter().map(|line| line + "\n").collect()
 }
 
 fn abi_slots(arity: usize) -> String {
@@ -160,11 +176,8 @@ fn abi_slots(arity: usize) -> String {
     format!("abi-word[{slots}]")
 }
 
-fn copy_header_rows(table: &str, out: &mut String) {
-    for line in table.lines().filter(|line| !line.trim().is_empty()) {
-        if !line.starts_with(FN_ROW) {
-            out.push_str(line);
-            out.push('\n');
-        }
-    }
+fn header_rows(table: &str) -> impl Iterator<Item = &str> {
+    table
+        .lines()
+        .filter(|line| !line.trim().is_empty() && !line.starts_with(FN_ROW))
 }

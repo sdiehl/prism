@@ -157,8 +157,8 @@ fn an_add(a : ExprCensus, b : ExprCensus) : ExprCensus =
 
 fn an_dedup(xs : List(String), seen : List(String)) : List(String) =
   match xs of
-    Nil => Nil
-    Cons(x, rest) =>
+    [] => Nil
+    x :: rest =>
       if elem(x, seen) then
         an_dedup(rest, seen)
       else

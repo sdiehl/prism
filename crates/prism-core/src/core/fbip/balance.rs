@@ -1,6 +1,7 @@
 use std::{collections::BTreeMap, mem};
 
 use prism_common::sym::Sym;
+use prism_syntax::names;
 
 use crate::core::cbpv::{Comp, Core, CorePat, Value};
 use crate::core::effect_check::{residual_effect_node, HANDLE_NODE};
@@ -51,7 +52,7 @@ pub fn balanced(core: &Core, sigs: &Sigs) -> Result<(), Imbalance> {
         simulate(&f.body, &mut env, sigs, &external)
             .map_err(|fault| Imbalance::in_function(fault, f.name))?;
         for (v, n) in &env {
-            if v.as_str() != "_" && *n != 0 {
+            if v.as_str() != names::WILD && *n != 0 {
                 return Err(Imbalance::in_function(
                     TokenFault::ScopeExit {
                         var: *v,
@@ -66,7 +67,7 @@ pub fn balanced(core: &Core, sigs: &Sigs) -> Result<(), Imbalance> {
 }
 
 fn consume(x: Sym, k: i64, env: &mut Env) -> Result<(), TokenFault> {
-    if x.as_str() == "_" {
+    if x.as_str() == names::WILD {
         return Ok(());
     }
     let e = env.entry(x).or_insert(0);
@@ -139,7 +140,7 @@ impl<'a> Simulator<'a> {
                 body,
                 outer_external,
             } => {
-                if binder.as_str() != "_" {
+                if binder.as_str() != names::WILD {
                     self.env.insert(binder, 1);
                 }
                 self.external.clone_from(&outer_external);
@@ -184,7 +185,7 @@ impl<'a> Simulator<'a> {
                 parent_external,
             } => {
                 for (var, tokens) in &self.env {
-                    if var.as_str() != "_" && *tokens != 0 {
+                    if var.as_str() != names::WILD && *tokens != 0 {
                         return Err(TokenFault::ThunkCapture {
                             var: *var,
                             tokens: *tokens,
@@ -207,7 +208,7 @@ impl<'a> Simulator<'a> {
             Comp::Bind(bound, binder, body) => {
                 // Renaming a loan extends it without spending or minting a token.
                 if let Comp::Return(Value::Var(var)) = &**bound {
-                    if self.external.contains(var) && binder.as_str() != "_" {
+                    if self.external.contains(var) && binder.as_str() != names::WILD {
                         self.env.insert(*binder, 0);
                         let outer_external = self.external.clone();
                         self.external.insert(*binder);
@@ -486,7 +487,7 @@ mod tests {
                 for _ in 0..DEEP_BALANCE_DEPTH {
                     body = Comp::Bind(
                         Box::new(Comp::Return(Value::Int(0))),
-                        Sym::new("_"),
+                        Sym::new(names::WILD),
                         Box::new(body),
                     );
                 }
@@ -594,7 +595,7 @@ mod tests {
         let observe = Sym::new("observe");
         let body = Comp::Bind(
             Box::new(Comp::Drop(Value::Var(retained))),
-            Sym::new("_"),
+            Sym::new(names::WILD),
             Box::new(Comp::Call(observe, vec![Value::Var(retained)])),
         );
         let core = Core {
@@ -626,7 +627,7 @@ mod tests {
             borrowed,
             Box::new(Comp::Bind(
                 Box::new(Comp::Drop(Value::Var(borrowed))),
-                Sym::new("_"),
+                Sym::new(names::WILD),
                 Box::new(Comp::Call(observe, vec![Value::Var(borrowed)])),
             )),
         );
@@ -666,6 +667,7 @@ mod tests {
                     body: Box::new(Comp::Return(Value::Unit)),
                     return_var: None,
                     return_body: None,
+                    finally_body: None,
                     ops: CheckedHandler::new(Vec::new()).expect("no clauses, no duplicates"),
                 },
                 dict_arity: 0,

@@ -102,22 +102,22 @@ fn ly_prev_line(st : LState) : Int =
 -- The head of an indent stack, or None when empty.
 fn ly_top(xs : List(Int)) : Option(Int) =
   match xs of
-    Nil => None
-    Cons(h, _) => Some(h)
+    [] => None
+    h :: _ => Some(h)
 
 -- The tail of an indent stack.
 fn ly_pop(xs : List(Int)) : List(Int) =
   match xs of
-    Nil => Nil
-    Cons(_, t) => t
+    [] => Nil
+    _ :: t => t
 
 -- Whether an indent stack holds more than `floor` frames. Answered by walking
 -- `floor` frames rather than the whole stack, since the floor is a small
 -- constant and the stack is as deep as the source nests.
 fn ly_deeper_than(xs : List(Int), floor : Int) : Bool =
   match xs of
-    Nil => false
-    Cons(_, t) => floor <= 0 || ly_deeper_than(t, floor - 1)
+    [] => false
+    _ :: t => floor <= 0 || ly_deeper_than(t, floor - 1)
 
 -- A zero-width virtual token of the given kind at `off`.
 fn ly_virt(k : TokenKind, off : Int) : Token =
@@ -243,8 +243,8 @@ fn ly_inject_go(
   acc : List(LEntry)
 ) : List(LEntry) =
   match toks of
-    Nil => acc
-    Cons(t, rest) =>
+    [] => acc
+    t :: rest =>
       if ly_opens_decl(t.kind) then
         match ly_head_run(text, rest, t.span.hi, Cons(LTok(t), acc)) of
           HeadR { rest = rest2, endoff = endoff, acc = acc2 } =>
@@ -259,8 +259,8 @@ fn ly_head_run(
   acc : List(LEntry)
 ) : HeadR =
   match toks of
-    Nil => HeadR { rest = Nil, endoff = endoff, acc = acc }
-    Cons(t, rest) =>
+    [] => HeadR { rest = Nil, endoff = endoff, acc = acc }
+    t :: rest =>
       if ly_same_line(text, endoff, t.span.lo) then
         ly_head_run(text, rest, t.span.hi, Cons(LTok(t), acc))
       else
@@ -426,8 +426,8 @@ fn ly_step(text : String, e : LEntry, st : LState, out : List(Token)) : StepR =
 -- lint: allow(L0105)
 fn ly_drain(stack : List(Int), last_hi : Int, out : List(Token)) : List(Token) =
   match stack of
-    Nil => reverse(out)
-    Cons(_, rest) => ly_drain(rest, last_hi, Cons(ly_vclose(last_hi), out))
+    [] => reverse(out)
+    _ :: rest => ly_drain(rest, last_hi, Cons(ly_vclose(last_hi), out))
 
 fn ly_run(
   text : String,
@@ -436,8 +436,8 @@ fn ly_run(
   out : List(Token)
 ) : List(Token) =
   match entries of
-    Nil => ly_drain(st.stack, st.last_hi, out)
-    Cons(e, rest) =>
+    [] => ly_drain(st.stack, st.last_hi, out)
+    e :: rest =>
       match ly_step(text, e, st, out) of
         StepR(st2, out2) => ly_run(text, rest, st2, out2)
 

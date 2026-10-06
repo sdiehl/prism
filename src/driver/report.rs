@@ -118,7 +118,13 @@ pub fn report_on(src: &str, roots: &[Root], cfg: &Config) -> String {
         return out;
     }
 
-    let sigs = rc_borrow_sigs(&program, &checked, &core, cfg);
+    let sigs = match rc_borrow_sigs(&program, &checked, &core, cfg) {
+        Ok(sigs) => sigs,
+        Err(e) => {
+            section(&mut out, "fbip (rc)", &render(e));
+            return out;
+        }
+    };
     section(
         &mut out,
         "fbip (rc)",

@@ -22,6 +22,7 @@
 // own `dump syntax-tokens`, and the Prism consumer is compared and reported,
 // never substituted for a compiler stage.
 
+use prism::DumpPhase;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -78,7 +79,7 @@ fn root_of(src: &str) -> String {
 // qualified (`Data.Char.is_alnum`); the program's own definitions are bare
 // (`double`, `triple`, `main`).
 fn core_hashes(src: &str) -> BTreeMap<String, String> {
-    dump("core-hash", src)
+    dump(DumpPhase::CoreHash, src)
         .expect("core-hash dump")
         .lines()
         .filter_map(|l| {
@@ -98,7 +99,7 @@ fn query_report(src: &str, label: &str) -> String {
 // As above, under an explicit configuration, so a caller can vary compiler cache
 // state without disturbing the ambient one.
 fn query_report_on(src: &str, label: &str, cfg: &Config) -> String {
-    let artifact = dump("syntax-tokens", src).expect("syntax-tokens dump");
+    let artifact = dump(DumpPhase::SyntaxTokens, src).expect("syntax-tokens dump");
     let tmp =
         std::env::temp_dir().join(format!("prism_source_identity_{label}.syntax-tokens.json"));
     fs::write(&tmp, &artifact).expect("write artifact");
@@ -207,8 +208,8 @@ fn core_identity_blind_to_comments_and_formatting() {
         "a comment/formatting-only edit moved the namespace root"
     );
     assert_eq!(
-        dump("core-hash", BASE).unwrap(),
-        dump("core-hash", COMMENT).unwrap(),
+        dump(DumpPhase::CoreHash, BASE).unwrap(),
+        dump(DumpPhase::CoreHash, COMMENT).unwrap(),
         "a comment/formatting-only edit moved a per-definition Core hash"
     );
 }

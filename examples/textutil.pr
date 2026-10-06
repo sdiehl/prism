@@ -20,8 +20,8 @@
 
 fn tally(m : HashMap(Int), ws : List(String)) : HashMap(Int) =
   match ws of
-    Nil => m
-    Cons(w, rest) => tally(hm_insert(m, w, hm_get_or(0, m, w) + 1), rest)
+    [] => m
+    w :: rest => tally(hm_insert(m, w, hm_get_or(0, m, w) + 1), rest)
 
 fn main() : Unit ! {IO} =
   let phrase = "  hello, Prism  "

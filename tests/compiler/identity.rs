@@ -20,6 +20,7 @@
 // identical program text, identical source and surface identity, different Core
 // identity, different output.
 
+use prism::DumpPhase;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -157,7 +158,7 @@ fn report(artifact: &str, mode: &str, label: &str, roots: &[Root]) -> String {
 // The three identities of one program: source and surface computed in Prism from
 // the artifact, Core taken from the compiler's own whole-program root.
 fn identities(src: &str, label: &str) -> (String, String, String) {
-    let artifact = dump("surface-syntax", src).expect("surface-syntax dump");
+    let artifact = dump(DumpPhase::SurfaceSyntax, src).expect("surface-syntax dump");
     let source = report(&artifact, "source", &format!("{label}_source"), &roots());
     let surface = report(&artifact, "surface", &format!("{label}_surface"), &roots());
     (
@@ -241,7 +242,7 @@ fn main() = println(\"{f(1)}\")
         fs::write(dir.join("Dep.pr"), dep).expect("write dep");
         let world = default_roots(&dir);
 
-        let artifact = dump("surface-syntax", MAIN).expect("surface-syntax dump");
+        let artifact = dump(DumpPhase::SurfaceSyntax, MAIN).expect("surface-syntax dump");
         let source = report(&artifact, "source", &format!("world_{label}_src"), &roots());
         let surface = report(
             &artifact,

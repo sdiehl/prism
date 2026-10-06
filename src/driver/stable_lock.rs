@@ -110,7 +110,7 @@ pub fn read_committed(source: &Path) -> Result<Option<LockManifest>, Error> {
     match fs::read_to_string(&path) {
         Ok(text) => LockManifest::from_text(&text)
             .map(Some)
-            .map_err(Error::ResolveCommand),
+            .map_err(|e| Error::ResolveCommand(e.to_string())),
         Err(e) if e.kind() == ErrorKind::NotFound => Ok(None),
         Err(e) => Err(Error::Io(e)),
     }

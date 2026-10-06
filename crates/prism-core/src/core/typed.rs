@@ -318,7 +318,7 @@ impl TypedBinder {
     fn erase_name(&self) -> Sym {
         match self.erasure {
             BinderErasure::Identity => self.name,
-            BinderErasure::RcSequence => Sym::new("_"),
+            BinderErasure::RcSequence => Sym::new(prism_syntax::names::WILD),
         }
     }
 
@@ -969,6 +969,8 @@ pub enum TypedCompKind {
         return_binder: Option<TypedBinder>,
         /// Optional return-clause body.
         return_body: Option<Box<TypedComp>>,
+        /// Optional cleanup body, scoped over the handler's outer binders only.
+        finally_body: Option<Box<TypedComp>>,
         /// Duplicate-free operation clauses.
         ops: TypedHandler,
     },
@@ -1048,6 +1050,7 @@ enum CompFinish {
     Handle {
         return_var: Option<Sym>,
         has_return: bool,
+        has_finally: bool,
         ops: CheckedHandler,
     },
     Mask(Vec<Sym>),
@@ -1173,14 +1176,20 @@ fn erase_comp_frame(comp: TypedComp, work: &mut Vec<EraseFrame>) {
             body,
             return_binder,
             return_body,
+            finally_body,
             ops,
         } => {
             let has_return = return_body.is_some();
+            let has_finally = finally_body.is_some();
             work.push(EraseFrame::FinishComp(CompFinish::Handle {
                 return_var: return_binder.map(TypedBinder::into_name),
                 has_return,
+                has_finally,
                 ops: ops.erase(),
             }));
+            if let Some(finally_body) = finally_body {
+                work.push(EraseFrame::Comp(finally_body));
+            }
             if let Some(return_body) = return_body {
                 work.push(EraseFrame::Comp(return_body));
             }
@@ -1304,14 +1313,17 @@ fn finish_comp(finish: CompFinish, results: &mut Vec<ErasedNode>) {
         CompFinish::Handle {
             return_var,
             has_return,
+            has_finally,
             ops,
         } => {
+            let finally_body = has_finally.then(|| Box::new(pop_comp(results)));
             let return_body = has_return.then(|| Box::new(pop_comp(results)));
             let body = Box::new(pop_comp(results));
             Comp::Handle {
                 body,
                 return_var,
                 return_body,
+                finally_body,
                 ops,
             }
         }

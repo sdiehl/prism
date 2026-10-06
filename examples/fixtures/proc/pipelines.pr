@@ -1,0 +1,97 @@
+-- Every shape of answer a pipeline can give, one line each, provoked through
+-- `/bin/sh` so the children are the same on every host.
+--
+-- The lines a host stops (`out-limit`, `err-limit`, `deadline`) answer with every
+-- stream empty, which is what lets them be pinned at all: what each stage had
+-- written by then depends on scheduling.
+
+import Proc (..)
+
+fn sh(script : String) : Command = command("/bin/sh", ["-c", script])
+
+fn show_text(b : Buf) : String =
+  match text(b) of
+    Some(s) => s
+    None => "<bytes>"
+
+fn show_texts(bs : List(Buf)) : String =
+  match bs of
+    [] => ""
+    [b] => show(show_text(b))
+    b :: rest => "{show(show_text(b))},{show_texts(rest)}"
+
+fn report(label : String, p : Pipeline) : Unit ! {Proc, IO} =
+  let r = collect_pipeline(p)
+  println(
+      "{label} {show(r.statuses)} out={show(show_text(r.out))} errs={show_texts(r.errs)}",
+    )
+
+fn run(label : String, stages : List(Command)) : Unit ! {Proc, IO} =
+  report(label, pipeline(stages))
+
+-- Every stage carries more than a pipe buffer, and the first one writes it to
+-- both of its streams, so a host that drained them in turn, or held a pipe end
+-- open, would deadlock here instead of answering.
+fn large() : Unit ! {Proc, IO} =
+  let size = default_capture
+  let cap = Capture(2 * size)
+  let first = { sh("head -c {show(size)} /dev/zero | tee /dev/stderr") | stderr_policy = cap }
+  let r = collect_pipeline(pipeline([
+      first,
+      sh("cat"),
+      { sh("cat") | stdout_policy = cap },
+    ]))
+  let errs =
+    match r.errs of
+      e :: _ => buf_len(e)
+      [] => -1
+  println("large {show(r.statuses)} out={buf_len(r.out)} err={errs}")
+
+fn verdict(r : Result(Buf, StageFailure)) : String =
+  match r of
+    Ok(out) => "ok:{show(show_text(out))}"
+    Err(f) => "stage {show(f.stage)} {show(f.status)}"
+
+fn checks(label : String, stages : List(Command)) : Unit ! {Proc, IO} =
+  let r = collect_pipeline(pipeline(stages))
+  println(
+      "{label} last=[{verdict(check_last(r))}] all=[{verdict(check_all(r))}] pipefail=[{verdict(check_pipefail(r))}]",
+    )
+
+fn pipelines() : Unit ! {Proc, IO} =
+  run("two", [sh("echo hi"), command("tr", ["a-z", "A-Z"])])
+  run("fed", [
+      { command("sort", []) | input = Feed(buf_of_string("b\na\n")) },
+      sh("cat"),
+    ])
+  run("first-fails", [sh("exit 3"), sh("cat")])
+  run("middle-fails", [sh("echo x"), sh("cat > /dev/null; exit 4"), sh("cat")])
+  run("last-fails", [sh("echo x"), sh("cat; exit 5")])
+  run("early-exit", [command("yes", []), command("head", ["-n", "1"])])
+  run("errs", [sh("echo a >&2"), sh("cat; echo b >&2")])
+  run("first-missing", [command("prism-no-such-program", []), sh("cat")])
+  run("middle-missing", [
+      sh("true"),
+      command("prism-no-such-program", []),
+      sh("echo after"),
+    ])
+  large()
+  run("out-limit", [
+      command("yes", []),
+      { sh("cat") | stdout_policy = Capture(16) },
+    ])
+  run("err-limit", [{ sh("yes >&2") | stderr_policy = Capture(16) }, sh("cat")])
+  report(
+      "deadline",
+      { pipeline([sh("sleep 5"), sh("cat")]) | deadline_ms = Some(50) },
+    )
+  run("no-stages", [])
+  run("fed-later", [
+      sh("true"),
+      { sh("cat") | input = Feed(buf_of_string("x")) },
+    ])
+  run("stage-deadline", [{ sh("true") | deadline_ms = Some(10) }])
+  checks("checks", [sh("exit 1"), sh("cat; exit 2"), sh("cat")])
+  checks("checks-ok", [sh("echo ok"), sh("cat")])
+
+fn main() : Unit ! {IO} = run_proc(pipelines)

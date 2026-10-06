@@ -1,10 +1,10 @@
 fn merge(xs, ys) =
   match xs of
-    Nil => ys
-    Cons(x, xr) =>
+    [] => ys
+    x :: xr =>
       match ys of
-        Nil => xs
-        Cons(y, yr) =>
+        [] => xs
+        y :: yr =>
           if x <= y then
             Cons(x, merge(xr, ys))
           else
@@ -20,8 +20,8 @@ fn msort(xs) =
 
 fn print_list(xs : List(Int)) =
   match xs of
-    Nil => ()
-    Cons(x, rest) =>
+    [] => ()
+    x :: rest =>
       println(x)
       print_list(rest)
 

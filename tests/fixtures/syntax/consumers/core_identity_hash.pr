@@ -46,8 +46,8 @@ type Scope = Scope {
 
 fn jlook(fs : List((String, Json)), k : String) : Json =
   match fs of
-    Nil => JStr(absent)
-    Cons(f, rest) =>
+    [] => JStr(absent)
+    f :: rest =>
       if fst(f) == k then
         snd(f)
       else
@@ -128,8 +128,8 @@ fn enc_op_canon(name : String, o : Json) : String ! {State(VarIds)} =
 
 fn enc_vals(js : List(Json)) : List(Nameless) ! {State(VarIds)} =
   match js of
-    Nil => Nil
-    Cons(v, rest) =>
+    [] => Nil
+    v :: rest =>
       let e = enc_val(v)
       Cons(e, enc_vals(rest))
 
@@ -140,8 +140,8 @@ fn enc_args(j : Json) : Nameless ! {State(VarIds)} =
 
 fn enc_record(fs : List(Json)) : List(Nameless) ! {State(VarIds)} =
   match fs of
-    Nil => Nil
-    Cons(f, rest) =>
+    [] => Nil
+    f :: rest =>
       let n = NTok(jat(f, "name"))
       let v = enc_val(jfield(f, "val"))
       Cons(NSeq([n, v]), enc_record(rest))
@@ -216,8 +216,8 @@ fn enc_fields(fs : List(Json)) : (Nameless, List(String)) =
 
 fn enc_fields_go(fs : List(Json)) : (String, List(String)) =
   match fs of
-    Nil => ("", Nil)
-    Cons(f, rest) =>
+    [] => ("", Nil)
+    f :: rest =>
       let (marks, bs) = enc_fields_go(rest)
       match f of
         JNull => (concat("_", marks), bs)
@@ -225,8 +225,8 @@ fn enc_fields_go(fs : List(Json)) : (String, List(String)) =
 
 fn enc_arms(js : List(Json)) : List(Nameless) ! {State(VarIds)} =
   match js of
-    Nil => Nil
-    Cons(a, rest) =>
+    [] => Nil
+    a :: rest =>
       let (shape, bs) = enc_pat(jfield(a, "pat"))
       let body = enc_comp(jfield(a, "body"))
       Cons(NSeq([shape, NScope(bs, body)]), enc_arms(rest))
@@ -235,15 +235,15 @@ fn enc_arms(js : List(Json)) : List(Nameless) ! {State(VarIds)} =
 -- generated-`var` ids are minted, before any clause body is walked.
 fn enc_op_names(js : List(Json)) : List((String, Json)) ! {State(VarIds)} =
   match js of
-    Nil => Nil
-    Cons(o, rest) =>
+    [] => Nil
+    o :: rest =>
       let c = enc_op_canon(jat(o, "name"), o)
       Cons((c, o), enc_op_names(rest))
 
 fn enc_op_clauses(ops : List((String, Json))) : List(Nameless) ! {State(VarIds)} =
   match ops of
-    Nil => Nil
-    Cons(p, rest) =>
+    [] => Nil
+    p :: rest =>
       let (canon, o) = p
       let binders = append(jstrs(jfield(o, "params")), [jat(o, "resume")])
       let body = enc_comp(jfield(o, "body"))
@@ -420,8 +420,8 @@ fn hash_groups(
   groups : List(List(String))
 ) : Map(String, String) =
   match groups of
-    Nil => known
-    Cons(g, rest) =>
+    [] => known
+    g :: rest =>
       let got = hash_group_of(known, defs, g)
       hash_groups(
           foldl(\(m, p) -> map_insert(fst(p), snd(p), m), known, got),
@@ -452,8 +452,8 @@ fn emit_lines(
   names : List(String)
 ) : Unit ! {IO} =
   match names of
-    Nil => ()
-    Cons(n, rest) =>
+    [] => ()
+    n :: rest =>
       println(hash_line(n, lookup_hash(hashes, n)))
       emit_lines(hashes, rest)
 

@@ -51,8 +51,8 @@ fn fits(w, items) =
     false
   else
     match items of
-      Nil => true
-      Cons(Item(i, m, d), rest) =>
+      [] => true
+      Item(i, m, d) :: rest =>
         match d of
           DNil => fits(w, rest)
           DText(s) => fits(w - str_len(s), rest)
@@ -69,8 +69,8 @@ fn fits(w, items) =
 -- `k` is the current column.
 fn best(w, k, items) =
   match items of
-    Nil => SNil
-    Cons(Item(i, m, d), rest) =>
+    [] => SNil
+    Item(i, m, d) :: rest =>
       match d of
         DNil => best(w, k, rest)
         DText(s) => SText(s, best(w, k + str_len(s), rest))
@@ -142,15 +142,15 @@ pub fn group(d) = DGroup(d)
 -- | Concatenate a list of documents end to end.
 pub fn concat_docs(ds) =
   match ds of
-    Nil => DNil
-    Cons(d, rest) => DCat(d, concat_docs(rest))
+    [] => DNil
+    d :: rest => DCat(d, concat_docs(rest))
 
 -- Put `s` between each pair of documents in `ds`.
 fn intersperse(s, ds) =
   match ds of
-    Nil => DNil
-    Cons(x, Nil) => x
-    Cons(x, rest) => DCat(x, DCat(s, intersperse(s, rest)))
+    [] => DNil
+    [x] => x
+    x :: rest => DCat(x, DCat(s, intersperse(s, rest)))
 
 -- | Put `separator` between each pair of documents. Unlike `hsep` and `vsep`,
 -- the caller selects the exact separator document, which is useful for small

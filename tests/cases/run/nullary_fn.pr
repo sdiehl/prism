@@ -7,8 +7,8 @@ fn force(g : () -> Int) : Int = g()
 
 fn pick(fs : List(() -> Int), i : Int) : Int =
   match fs of
-    Nil => 0
-    Cons(f, rest) =>
+    [] => 0
+    f :: rest =>
       if i == 0 then
         f()
       else

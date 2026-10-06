@@ -1,0 +1,15 @@
+effect Ask
+  ask() : Int
+  tell(Int) : Unit
+
+effect Quit
+  never quit(Unit) : Unit
+
+fn go() =
+  handle ask() with
+    once ask() => 1
+    tell(n) resume k => k(())
+    never quit(u) => 0
+    finally => println("cleanup")
+
+fn main() = println(go())

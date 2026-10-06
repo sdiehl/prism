@@ -232,8 +232,8 @@ pub fn arg_int(meta, help) =
 
 fn lookup_opt(name, opts) =
   match opts of
-    Nil => None
-    Cons((k, v), rest) =>
+    [] => None
+    (k, v) :: rest =>
       if str_eq(k, name) then
         Some(v)
       else
@@ -294,8 +294,8 @@ fn is_short_flag(tok) =
 
 fn find_long(specs : List(OptSpec), name) =
   match specs of
-    Nil => None
-    Cons(s, rest) =>
+    [] => None
+    s :: rest =>
       if str_eq(s.long, name) then
         Some(s)
       else
@@ -303,8 +303,8 @@ fn find_long(specs : List(OptSpec), name) =
 
 fn find_short(specs : List(OptSpec), name) =
   match specs of
-    Nil => None
-    Cons(s, rest) =>
+    [] => None
+    s :: rest =>
       if str_eq(s.short, name) then
         Some(s)
       else
@@ -320,8 +320,8 @@ pub fn lex(specs, argv) = lex_go(specs, argv, Nil, Nil)
 -- lint: allow(L0105)
 fn lex_go(specs, argv, opts_acc, pos_acc) =
   match argv of
-    Nil => Ok(Tokens { opts = reverse(opts_acc), pos = reverse(pos_acc) })
-    Cons(tok, rest) =>
+    [] => Ok(Tokens { opts = reverse(opts_acc), pos = reverse(pos_acc) })
+    tok :: rest =>
       if is_help_tok(tok) then
         lex_go(specs, rest, opts_acc, pos_acc)
       elif is_long_flag(tok) then
@@ -361,8 +361,8 @@ fn lex_eq(specs, name, rest, opts_acc, pos_acc) =
 -- lint: allow(L0103)
 fn lex_valued(specs, name, rest, opts_acc, pos_acc, tok) =
   match rest of
-    Nil => Err(NeedsValue(tok))
-    Cons(v, rest2) => lex_go(specs, rest2, Cons((name, v), opts_acc), pos_acc)
+    [] => Err(NeedsValue(tok))
+    v :: rest2 => lex_go(specs, rest2, Cons((name, v), opts_acc), pos_acc)
 
 fn lex_short(specs, tok, rest, opts_acc, pos_acc) =
   let name = substring(tok, 1, str_len(tok) - 1)
@@ -391,8 +391,8 @@ fn finish_leaf(p : Parser(a), toks) =
 
 fn find_sub(subs : List(SubCmd(a)), key) =
   match subs of
-    Nil => None
-    Cons(sc, rest) =>
+    [] => None
+    sc :: rest =>
       if str_eq(sc.key, key) then
         Some(sc)
       else
@@ -425,8 +425,8 @@ fn run_plain(cmd : Command(a), p : Parser(a), argv) =
 
 fn run_group(cmd : Command(a), subs : List(SubCmd(a)), argv) =
   match argv of
-    Nil => ShowHelp(group_help(cmd, subs))
-    Cons(key, rest) =>
+    [] => ShowHelp(group_help(cmd, subs))
+    key :: rest =>
       if is_help_tok(key) then
         ShowHelp(group_help(cmd, subs))
       else
@@ -447,8 +447,8 @@ fn run_sub(cmd : Command(a), sc : SubCmd(a), rest) =
 
 fn has_help(argv) =
   match argv of
-    Nil => false
-    Cons(t, rest) =>
+    [] => false
+    t :: rest =>
       if is_help_tok(t) then
         true
       else
@@ -541,8 +541,8 @@ let help_spec : OptSpec =
 -- The "Arguments:" section, or no lines at all when there are no positionals.
 fn arg_section(specs : List(ArgSpec)) : List(String) =
   match specs of
-    Nil => Nil
-    Cons(_, _) => Cons("", Cons("Arguments:", map(arg_line, specs)))
+    [] => Nil
+    _ :: _ => Cons("", Cons("Arguments:", map(arg_line, specs)))
 
 fn plain_help(cmd : Command(a), p : Parser(a)) =
   let header = [synopsis(cmd, p), "", cmd.about]

@@ -17,6 +17,7 @@ import Control.Fresh (Fresh, run_fresh)
 import Data.Name (Name, Binder, fresh_binder, bound_name)
 import Data.List (reverse, foldl, append)
 import Data.Foldable (length)
+import Test (expect_equal)
 
 -- Deterministic rigid names for the substitution laws: identities 0 and 1 in
 -- each namespace, minted by replaying the same fresh seed.
@@ -76,8 +77,8 @@ fn dedup_labels(ls : List(Label)) : List(Label) =
 
 fn label_in(ls : List(Label), l : Label) : Bool =
   match ls of
-    Nil => false
-    Cons(h, rest) => h.name == l.name || label_in(rest, l)
+    [] => false
+    h :: rest => h.name == l.name || label_in(rest, l)
 
 -- A generated substitution binding the two rigid names.
 fn gen_subst() : Gen(Subst) =
@@ -194,14 +195,11 @@ fn repeated_free_metas() : VTy =
 test fn free_metas_keep_first_occurrence_order() =
   let ty = repeated_free_metas()
   let row = repeated_meta_row()
-  if (free_metas_v(ty) == [7, 2, 5, 3, 1, 6, 4]
-      && free_ty_metas_v(ty) == [7, 2, 5, 3, 1]
-      && free_row_metas_v(ty) == [6, 4]
-      && free_ty_metas_row(row) == [5, 1]
-      && free_row_metas_row(row) == [6, 4]) then
-    ()
-  else
-    fail()
+  expect_equal([7, 2, 5, 3, 1, 6, 4], free_metas_v(ty))
+  expect_equal([7, 2, 5, 3, 1], free_ty_metas_v(ty))
+  expect_equal([6, 4], free_row_metas_v(ty))
+  expect_equal([5, 1], free_ty_metas_row(row))
+  expect_equal([6, 4], free_row_metas_row(row))
 
 -- Law: generalization never captures an ambient metavariable.
 fn gen_capture_witness() : (Int, Int) ! {Solve(Sol), TcFail, Fresh} =
@@ -282,7 +280,7 @@ fn row_meta_became_rigid(tail : Tail) : Bool ! {Solve(Sol)} =
       match sv_solution(sv_root(m)) of
         Some(RowSolved(row)) =>
           match (row.labels, row.tail) of
-            (Nil, TailVar(_name)) => true
+            ([], TailVar(_name)) => true
             _ => false
         _ => false
     _ => false
@@ -292,7 +290,7 @@ fn mixed_instance_ids(ty : VTy) : Option((Int, Int)) =
   match ty of
     VThunk(CFun(params, CRet(result, row))) =>
       match (params, result, row.tail) of
-        (Cons(VMeta(param), Nil), VMeta(returned), TailMeta(row_meta)) =>
+        ([VMeta(param)], VMeta(returned), TailMeta(row_meta)) =>
           if param == returned then
             Some((param, row_meta))
           else
@@ -388,13 +386,13 @@ fn selective_widening_witness() : Bool ! {Solve(Sol), TcFail, Fresh} =
   let scheme = generalize([], [], close_rows_v_except(keep, ty))
   match (scheme.rowvars, scheme.body) of
     (
-      Cons(binder, Nil),
+      [binder],
       VThunk(
         CFun(
-          Cons(
-            VThunk(CFun(Nil, CRet(VInt, callback_row))),
-            Cons(VThunk(CFun(Nil, CRet(VUnit, unrelated_row))), Nil)
-          ),
+          [
+            VThunk(CFun([], CRet(VInt, callback_row))),
+            VThunk(CFun([], CRet(VUnit, unrelated_row)))
+          ],
           CRet(VInt, body_row)
         )
       )
@@ -439,11 +437,7 @@ fn open_absorbs() : String ! {Solve(Sol), TcFail} =
 
 test fn open_row_absorbs_remainder() =
   match run_tc(\() -> open_absorbs()) of
-    Ok(shown) =>
-      if shown == "\{Ask, IO\}" then
-        ()
-      else
-        fail()
+    Ok(shown) => expect_equal("\{Ask, IO\}", shown)
     Err(_e) => fail()
 
 -- The row-algebra laws proper: the three operations principal-row inference
@@ -465,16 +459,16 @@ fn row_name() : Name(RowVarSpace) =
 
 fn subset_of(a : List(Label), b : List(Label)) : Bool =
   match a of
-    Nil => true
-    Cons(h, rest) => label_in(b, h) && subset_of(rest, b)
+    [] => true
+    h :: rest => label_in(b, h) && subset_of(rest, b)
 
 fn same_label_set(a : List(Label), b : List(Label)) : Bool =
   subset_of(a, b) && subset_of(b, a)
 
 fn name_in(names : List(String), n : String) : Bool =
   match names of
-    Nil => false
-    Cons(h, rest) => h == n || name_in(rest, n)
+    [] => false
+    h :: rest => h == n || name_in(rest, n)
 
 -- Law: closed rows unify exactly when they carry the same label set, in
 -- either argument order.
@@ -562,14 +556,14 @@ fn kept_exactly(
   handled : List(String)
 ) : Bool =
   match before of
-    Nil => after == Nil
-    Cons(l, rest) =>
+    [] => after == Nil
+    l :: rest =>
       if name_in(handled, l.name) then
         kept_exactly(rest, after, handled)
       else
         match after of
-          Cons(k, krest) => k == l && kept_exactly(rest, krest, handled)
-          Nil => false
+          k :: krest => k == l && kept_exactly(rest, krest, handled)
+          [] => false
 
 test fn discharge_removes_exactly_the_handled() =
   match (quickcheck(gen_pair(gen_row_any(), gen_names()), prop_discharge)) of

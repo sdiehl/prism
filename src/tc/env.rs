@@ -1266,7 +1266,10 @@ type BuildDataResult = (
     Env,
 );
 
-pub(super) fn build_data(prog: &Program<Core>) -> Result<BuildDataResult, TypeError> {
+pub(super) fn build_data(
+    prog: &Program<Core>,
+    ambient: &BTreeMap<String, DataInfo>,
+) -> Result<BuildDataResult, TypeError> {
     let mut data = BTreeMap::new();
     let mut ctors = BTreeMap::new();
     let mut env = base_env()?;
@@ -1354,6 +1357,13 @@ pub(super) fn build_data(prog: &Program<Core>) -> Result<BuildDataResult, TypeEr
                 repr: NominalRepr::Vec128,
             },
         );
+    }
+    // The ambient datatypes (the prelude and imported interfaces of a modular
+    // check) take part in field saturation too: a field spelled `Map(k, v)`
+    // must find `Map`'s arity here, or it keeps arity 2 while every `Map` value
+    // carries 3 and the two never unify. A built-in or local name keeps its own.
+    for (name, info) in ambient {
+        data.entry(name.clone()).or_insert_with(|| info.clone());
     }
     // Register every declared type's header (params and kinds) before any field
     // is converted, so the field-type saturation below sees the full arity of
@@ -1660,7 +1670,9 @@ mod tests {
                 | "prim_net_local_addr"
                 | "prim_net_peer_addr"
                 | "prim_kont_encode"
-                | "prim_kont_resume" => &["IO"],
+                | "prim_kont_resume"
+                | "prim_proc_collect"
+                | "prim_proc_pipeline" => &["IO"],
                 "error" | "fatal" => &["Exn"],
                 _ => &[],
             };

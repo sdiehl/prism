@@ -26,8 +26,8 @@ fn refuting() : Int ! {V(String)} =
 
 fn show_errors(errs) =
   match errs of
-    Nil => "none"
-    Cons(e, rest) => concat(e, concat(" ", show_errors(rest)))
+    [] => "none"
+    e :: rest => concat(e, concat(" ", show_errors(rest)))
 
 fn main() =
   match capture(\() -> disputing()) of

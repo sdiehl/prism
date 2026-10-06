@@ -162,7 +162,9 @@ mod envelope_tests {
     use crate::driver::identity::native_kont_table_for;
     #[cfg(feature = "native")]
     use crate::driver::{default_roots, dump_on, Config};
-    use crate::driver::{dump, example_program, EnvelopeHeader, WireKind, NAMESPACE_FORMAT};
+    use crate::driver::{
+        dump, example_program, DumpPhase, EnvelopeHeader, WireKind, NAMESPACE_FORMAT,
+    };
     #[cfg(feature = "native")]
     use prism_native::MAIN_SYMBOL;
 
@@ -201,11 +203,20 @@ mod envelope_tests {
         assert_eq!(WireKind::parse("gremlin"), None);
     }
 
+    #[test]
+    fn dump_phase_spellings_round_trip() {
+        for phase in DumpPhase::ALL {
+            assert_eq!(phase.as_str().parse::<DumpPhase>(), Ok(*phase));
+        }
+        let err = "Core".parse::<DumpPhase>().unwrap_err();
+        assert_eq!(err.to_string(), "unknown phase Core");
+    }
+
     /// A `dump namespace` export parses back to its header: scheme accepted, kind
     /// and contract digest recoverable, format matched.
     #[test]
     fn namespace_header_round_trips() {
-        let out = dump("namespace", "let main = 1\n").expect("namespace export");
+        let out = dump(DumpPhase::Namespace, "let main = 1\n").expect("namespace export");
         let doc: serde_json::Value = serde_json::from_str(&out).expect("valid json export");
         let hdr = EnvelopeHeader::parse(&doc).expect("header parses");
         assert_eq!(hdr.kind, WireKind::Def);
@@ -216,7 +227,7 @@ mod envelope_tests {
     #[test]
     fn artifact_identity_fingerprint_names_roots() {
         let identity = crate::driver::Config::default()
-            .artifact_identity_for("llvm")
+            .artifact_identity_for(crate::driver::ArtifactBackend::Llvm)
             .with_source_root("source123")
             .with_stdlib_root("std456")
             .with_package_roots([format!("{STORE_PKG_NAME}@{HASH_SCHEME}:pkg789")]);
@@ -234,7 +245,7 @@ mod envelope_tests {
     #[cfg(feature = "native")]
     #[test]
     fn native_kont_table_names_native_symbols_by_hash() {
-        let out = dump("native-kont-table", "fn main() = 1\n").expect("native kont table");
+        let out = dump(DumpPhase::NativeKontTable, "fn main() = 1\n").expect("native kont table");
         assert!(out.starts_with(&format!("scheme  {HASH_SCHEME}\nbundle  ")));
         assert!(
             out.contains(&format!("compiler  {}\n", env!("CARGO_PKG_VERSION")))
@@ -267,8 +278,11 @@ mod envelope_tests {
     fn native_kont_table_names_package_source_roots() {
         let mut modules = BTreeMap::new();
         modules.insert(STORE_PKG_NAME.to_string(), STORE_PKG_SOURCE.to_string());
-        let bundle_identity =
-            SourceBundleIdentity::package(STORE_PKG_NAME, HASH_SCHEME, STORE_PKG_ROOT);
+        let bundle_identity = SourceBundleIdentity::package(
+            STORE_PKG_NAME,
+            HASH_SCHEME,
+            crate::core::hash_str(STORE_PKG_ROOT),
+        );
         let expected = format!("flag  package-root  {}\n", bundle_identity.descriptor());
         let roots = vec![
             Root::identified_source_bundle(
@@ -300,7 +314,7 @@ mod envelope_tests {
     #[test]
     fn native_kont_state_map_names_entry_abi_words() {
         let out = dump(
-            "native-kont-state-map",
+            DumpPhase::NativeKontStateMap,
             "fn count(i, last) = if i > last then i else count(i + 1, last)\n\nfn main() = count(1, 2)\n",
         )
         .expect("native kont state map");
@@ -322,7 +336,7 @@ mod envelope_tests {
     #[cfg(feature = "native")]
     #[test]
     fn llvm_dump_default_has_table_without_frame_instrumentation() {
-        let out = dump("llvm", "fn main() = 1\n").expect("llvm dump");
+        let out = dump(DumpPhase::Llvm, "fn main() = 1\n").expect("llvm dump");
         assert!(
             out.contains("@prism_native_kont_table = constant"),
             "default LLVM IR embeds the native kont table global:\n{out}"
@@ -343,7 +357,7 @@ mod envelope_tests {
         let mut cfg = Config::from_env();
         cfg.update_flags(|flags| flags.native_kont_frames = true);
         let roots = default_roots(Path::new("."));
-        let llvm = |src: &str| dump_on("llvm", src, &roots, &cfg).expect("llvm dump");
+        let llvm = |src: &str| dump_on(DumpPhase::Llvm, src, &roots, &cfg).expect("llvm dump");
 
         let out = llvm("fn main() = 1\n");
         assert!(

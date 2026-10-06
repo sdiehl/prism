@@ -528,7 +528,16 @@ pub struct ClassDecl {
     // given Eq(a)` records `["Eq"]`). Every instance of this class then carries
     // a resolved superclass dictionary, projectable from a `given` constraint.
     pub supers: Vec<String>,
-    pub methods: Vec<(String, Ty)>,
+    pub methods: Vec<ClassMethod>,
+    pub span: Span,
+}
+
+/// One method signature of a class declaration.
+#[derive(Clone, Debug)]
+pub struct ClassMethod {
+    pub name: String,
+    pub ty: Ty,
+    /// The method name as written.
     pub span: Span,
 }
 
@@ -586,6 +595,9 @@ pub struct Ctor {
     pub name: String,
     pub args: Vec<Ty>,
     pub fields: Option<Vec<(String, Ty)>>,
+    /// The constructor name as written. Synthesized constructors carry
+    /// [`Span::default`].
+    pub span: Span,
 }
 
 /// How a constructor addresses its fields: positional or record.
@@ -813,6 +825,9 @@ pub struct EffOp {
     // Declared resumption multiplicity (see `Grade`); `Many` unless the op's
     // surface prefix narrows it.
     pub grade: Grade,
+    /// The operation name as written. Synthesized operations carry
+    /// [`Span::default`].
+    pub span: Span,
 }
 
 // Several independent surface flags (`konst`, `replayable`, `no_alloc`); a
@@ -1303,7 +1318,11 @@ impl Phase for Surface {
                     q.each_child(f);
                 }
             }
-            Sugar::Default(a, b) | Sugar::Transact(a, b) | Sugar::Compose(_, a, b) => {
+            Sugar::Default(a, b)
+            | Sugar::Transact(a, b)
+            | Sugar::Compose(_, a, b)
+            | Sugar::Cons(a, b)
+            | Sugar::PathJoin(a, b) => {
                 f(a);
                 f(b);
             }
@@ -1384,7 +1403,11 @@ impl Phase for Surface {
                     q.each_child_mut(f);
                 }
             }
-            Sugar::Default(a, b) | Sugar::Transact(a, b) | Sugar::Compose(_, a, b) => {
+            Sugar::Default(a, b)
+            | Sugar::Transact(a, b)
+            | Sugar::Compose(_, a, b)
+            | Sugar::Cons(a, b)
+            | Sugar::PathJoin(a, b) => {
                 f(a);
                 f(b);
             }
@@ -1471,6 +1494,10 @@ pub enum SugarArm<P: Phase> {
 pub enum HandlerArm<P: Phase = Surface> {
     Return(String, S<Expr<P>>),
     Op(String, Vec<String>, String, S<Expr<P>>),
+    // The cleanup clause: binds nothing, answers Unit, and runs exactly once
+    // when the handler is left, whether by its return clause or by an
+    // operation clause that abandons the continuation.
+    Finally(S<Expr<P>>),
     // The surface-only clauses. `P::Arm = Never` in core, so this is dead there.
     Sugar(P::Arm),
 }
@@ -1487,7 +1514,7 @@ pub enum HandlerMode {
 impl<P: Phase> HandlerArm<P> {
     pub fn each_child<'a>(&'a self, f: &mut impl FnMut(&'a S<Expr<P>>)) {
         match self {
-            Self::Return(_, body) | Self::Op(_, _, _, body) => f(body),
+            Self::Return(_, body) | Self::Op(_, _, _, body) | Self::Finally(body) => f(body),
             Self::Sugar(a) => P::each_arm_child(a, f),
         }
     }
@@ -1495,7 +1522,7 @@ impl<P: Phase> HandlerArm<P> {
     /// Mutable counterpart of [`Self::each_child`].
     pub fn each_child_mut(&mut self, f: &mut impl FnMut(&mut S<Expr<P>>)) {
         match self {
-            Self::Return(_, body) | Self::Op(_, _, _, body) => f(body),
+            Self::Return(_, body) | Self::Op(_, _, _, body) | Self::Finally(body) => f(body),
             Self::Sugar(a) => P::each_arm_child_mut(a, f),
         }
     }
@@ -1555,6 +1582,12 @@ pub enum Sugar<P: Phase> {
     // (backward, `false`). Kept as sugar so the surface operator survives
     // formatting; desugar lowers it to `\x -> g(f(x))` / `\x -> f(g(x))`.
     Compose(bool, Box<S<Expr<P>>>, Box<S<Expr<P>>>),
+    // `x :: xs`: list cons. Kept as sugar so the infix spelling survives
+    // formatting; desugar lowers it to the `Cons(x, xs)` constructor call.
+    Cons(Box<S<Expr<P>>>, Box<S<Expr<P>>>),
+    // `a </> b`: path join. Kept as sugar so the infix spelling survives
+    // formatting; desugar lowers it to a call of the `PathJoin` method.
+    PathJoin(Box<S<Expr<P>>>, Box<S<Expr<P>>>),
     // `s.[ path ]`: read every focus the path selects into a `List`, the read
     // twin of the `{ s | path = .. }` update. Desugars to a `map`/`concat` fold.
     ReadPath(Box<S<Expr<P>>>, Vec<PathStep<P>>),

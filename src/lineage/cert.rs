@@ -9,10 +9,11 @@
 //! ([`sidecar_subject`]) so minting and checking cannot drift.
 
 use crate::error::Error;
-use crate::lineage::provenance::{sha256_hex, EVENT_HASH_SCHEME};
+use crate::lineage::provenance::{sha256_digest, EVENT_HASH_SCHEME};
 use crate::store::cert::{
     check_lineage_cert, encode_lineage_cert, lineage_cert, replay_cert, CertStatus,
 };
+use prism_common::digest::SchemedDigest;
 
 use super::graph::LineageGraph;
 use super::verify::{RunVerification, VerifyReport};
@@ -20,8 +21,9 @@ use super::verify::{RunVerification, VerifyReport};
 // The sidecar digest a certificate vouches for: the sha256 of the sidecar bytes,
 // spelled `scheme:hex`. The one home for the subject format, shared by minting and
 // checking.
-fn sidecar_subject(sidecar_bytes: &[u8]) -> String {
-    format!("{EVENT_HASH_SCHEME}:{}", sha256_hex(sidecar_bytes))
+fn sidecar_subject(sidecar_bytes: &[u8]) -> SchemedDigest {
+    SchemedDigest::new(EVENT_HASH_SCHEME, sha256_digest(sidecar_bytes))
+        .expect("the event hash scheme is a valid scheme name")
 }
 
 /// Mint a `replay-verified` certificate over `sidecar_bytes` from a passed replay.

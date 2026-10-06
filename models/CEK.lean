@@ -122,6 +122,7 @@ def matchPatR : Pat → Rv → Option (List (String × Rv))
   | .var x, v => some [(x, v)]
   | .int n, .int m => if n = m then some [] else none
   | .bool b, .bool c => if b = c then some [] else none
+  | .float f, .float g => if f == g then some [] else none
   | .ctor name args, .data name' _ vs => if name = name' then matchPatRL args vs else none
   | .tuple args, .tuple vs => matchPatRL args vs
   | _, _ => none
@@ -137,9 +138,11 @@ where
 def matchArmsR (scrut : Rv) : List (Pat × Comp) → Option (Comp × List (String × Rv))
   | [] => none
   | (p, c) :: rest =>
-    match matchPatR p scrut with
-      | some binds => some (c, binds)
-      | none => matchArmsR scrut rest
+    if p.decided then
+      match matchPatR p scrut with
+        | some binds => some (c, binds)
+        | none => matchArmsR scrut rest
+    else none
 
 /-- Look up the handler clause for `op` in a handler's op list. -/
 @[prism_model]

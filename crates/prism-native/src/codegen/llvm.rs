@@ -474,7 +474,7 @@ impl<'ctx> Inkwell<'ctx> {
         used.set_section(Some(LLVM_METADATA_SECTION));
     }
 
-    fn native_kont_ptrs_global(&self, table: &str) -> Vec<GlobalValue<'ctx>> {
+    fn native_kont_ptrs_global(&self, table: &str) -> Result<Vec<GlobalValue<'ctx>>, String> {
         let entry_t = self.ctx.struct_type(
             &[
                 self.ptr_t().into(),
@@ -485,7 +485,7 @@ impl<'ctx> Inkwell<'ctx> {
             false,
         );
         let mut entries: Vec<StructValue<'ctx>> = Vec::new();
-        for (i, row) in native_kont::rows(table).enumerate() {
+        for (i, row) in native_kont::rows(table)?.into_iter().enumerate() {
             let Some(f) = self.module.get_function(row.symbol) else {
                 continue;
             };
@@ -503,7 +503,7 @@ impl<'ctx> Inkwell<'ctx> {
             ));
         }
         if entries.is_empty() {
-            return Vec::new();
+            return Ok(Vec::new());
         }
 
         let init = entry_t.const_array(&entries);
@@ -536,10 +536,10 @@ impl<'ctx> Inkwell<'ctx> {
         len.set_linkage(Linkage::External);
         len.set_section(Some(native_kont::TABLE_SECTION));
         len.set_alignment(8);
-        vec![ptrs, len]
+        Ok(vec![ptrs, len])
     }
 
-    fn native_kont_table_global(&self, core: &Core, table: &str) {
+    fn native_kont_table_global(&self, core: &Core, table: &str) -> Result<(), String> {
         let init = self.ctx.const_string(table.as_bytes(), true);
         let global = self
             .module
@@ -553,7 +553,7 @@ impl<'ctx> Inkwell<'ctx> {
         global.set_linkage(Linkage::External);
         global.set_section(Some(native_kont::TABLE_SECTION));
         global.set_alignment(1);
-        let state_map = native_kont::state_map(core, table);
+        let state_map = native_kont::state_map(core, table)?;
         let state_init = self.ctx.const_string(state_map.as_bytes(), true);
         let state_global = self
             .module
@@ -568,8 +568,9 @@ impl<'ctx> Inkwell<'ctx> {
         state_global.set_section(Some(native_kont::TABLE_SECTION));
         state_global.set_alignment(1);
         let mut retained = vec![global, state_global];
-        retained.extend(self.native_kont_ptrs_global(table));
+        retained.extend(self.native_kont_ptrs_global(table)?);
         self.retain_globals(&retained);
+        Ok(())
     }
 
     fn printf(&self, fmt_name: &str, fmt: &[u8], arg: BasicMetadataValueEnum<'ctx>) {
@@ -1086,7 +1087,7 @@ pub fn scc_function_map(
     for arity in plan.dispatch_arities() {
         let ctx = Context::create();
         let isa = Inkwell::new(&ctx, false);
-        let _ = emit_closure_dispatch_with_isa(&isa, core, ctors, &plan, arity);
+        emit_closure_dispatch_with_isa(&isa, core, ctors, &plan, arity)?;
         functions.extend(defined_functions(&isa.module));
     }
     Ok(functions)
@@ -1103,7 +1104,7 @@ fn with_module<T>(
     let isa = Inkwell::new(&ctx, native_kont_frames);
     emit_lowered_with_isa(&isa, core, ctors)?;
     if let Some(table) = native_kont_table {
-        isa.native_kont_table_global(core, table);
+        isa.native_kont_table_global(core, table)?;
     }
     // Surface the first codegen-internal failure captured during emission as a
     // structured error instead of a panic at the original site.
@@ -1162,7 +1163,7 @@ pub fn emit_native_kont_plan_bitcode(
 ) -> Result<(), String> {
     let ctx = Context::create();
     let isa = Inkwell::new(&ctx, false);
-    isa.native_kont_table_global(core, native_kont_table);
+    isa.native_kont_table_global(core, native_kont_table)?;
     if let Err(error) = isa.module.verify() {
         return Err(format!("LLVM verifier rejected native kont plan: {error}"));
     }
@@ -1264,7 +1265,7 @@ pub fn emit_closure_plan_shard_bitcode(
             emit_closure_adapters_with_isa(&isa, core, ctors, &plan.plan)?;
         }
         ClosurePlanShard::Dispatch(arity) => {
-            let _ = emit_closure_dispatch_with_isa(&isa, core, ctors, &plan.plan, arity);
+            emit_closure_dispatch_with_isa(&isa, core, ctors, &plan.plan, arity)?;
         }
     }
     if let Some(error) = isa.err.borrow_mut().take() {
@@ -1327,18 +1328,16 @@ pub fn emit_selected_bitcode(
         })?;
     }
     if !native_kont_table.is_empty() {
-        isa.native_kont_table_global(core, native_kont_table);
+        isa.native_kont_table_global(core, native_kont_table)
+            .map_err(SccBitcodeError::Codegen)?;
     }
     if let Some(error) = isa.err.borrow_mut().take() {
         return Err(SccBitcodeError::Codegen(error));
     }
     if let Err(error) = isa.module.verify() {
-        let kept = std::env::temp_dir().join("prism_failed_scc.ll");
-        let _ = std::fs::write(&kept, isa.module.print_to_string().to_string());
+        let kept = super::keep_failed("ll", isa.module.print_to_string().to_bytes());
         return Err(SccBitcodeError::Codegen(format!(
-            "LLVM verifier rejected backend SCC, kept at {}:\n{}",
-            kept.display(),
-            error
+            "LLVM verifier rejected backend SCC, {kept}:\n{error}"
         )));
     }
     if isa.module.write_bitcode_to_path(bc) {
@@ -1366,13 +1365,8 @@ pub fn emit_bitcode_with_native_kont_table(
     let table = (!native_kont_table.is_empty()).then_some(native_kont_table);
     with_module(core, ctors, table, native_kont_frames, |m| {
         if let Err(e) = m.verify() {
-            let kept = std::env::temp_dir().join("prism_failed.ll");
-            let _ = std::fs::write(&kept, m.print_to_string().to_string());
-            return Err(format!(
-                "LLVM verifier rejected module, kept at {}:\n{}",
-                kept.display(),
-                e
-            ));
+            let kept = super::keep_failed("ll", m.print_to_string().to_bytes());
+            return Err(format!("LLVM verifier rejected module, {kept}:\n{e}"));
         }
         if m.write_bitcode_to_path(bc) {
             Ok(())

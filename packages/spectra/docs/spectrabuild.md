@@ -4,7 +4,7 @@
 
 Standalone Spectra build orchestration, written in Prism.
 
-The executable treats `prism` and `typst` as explicit external tools. Deck construction and Typst lowering remain pure package code; this module is the narrow host shell that captures the framed envelope and writes artifacts. The pipeline a `spectra build` runs, end to end:
+The executable treats `prism` and `typst` as explicit external tools; the compiler is the binary the caller names (`--prism`), never looked up again. Deck construction and Typst lowering remain pure package code; this module is the narrow host shell that captures the framed envelope and writes artifacts. The pipeline a `spectra build` runs, end to end:
 
 ```text
 prism docs <project> --test     doctest outputs pinned before anything renders
@@ -52,7 +52,7 @@ Take the framed envelope out of a deck program's standard output, returning it b
 ### `check_project`
 
 ```prism,sig
-check_project : (String) -> Int ! {IO, Output}
+check_project : (String, String) -> Int ! {IO, Output}
 ```
 
 Verify the external tools and the deck without writing any artifact, returning the status to exit with.
@@ -60,7 +60,7 @@ Verify the external tools and the deck without writing any artifact, returning t
 ### `build_project`
 
 ```prism,sig
-build_project : (String, String, Bool) -> Int ! {FileSystem, IO, Output}
+build_project : (String, String, Bool, String) -> Int ! {FileSystem, IO, Output}
 ```
 
 Run the whole pipeline, installing the Typst source and PDF under `target/spectra`, and return the status to exit with.

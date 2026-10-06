@@ -250,11 +250,13 @@ impl Erase<'_> {
                 body,
                 return_binder,
                 return_body,
+                finally_body,
                 ops,
             } => TypedCompKind::Handle {
                 body: Box::new(self.comp(*body)),
                 return_binder,
                 return_body: return_body.map(|body| Box::new(self.comp(*body))),
+                finally_body: finally_body.map(|body| Box::new(self.comp(*body))),
                 ops: TypedHandler {
                     arms: ops
                         .arms

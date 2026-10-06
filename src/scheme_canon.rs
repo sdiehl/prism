@@ -13,11 +13,13 @@
 
 use std::collections::HashMap;
 
+use prism_common::format::FormatTag;
+
 /// Version identifier for the canonical scheme spelling.
 ///
 /// Stamped into the bootstrap report and demanded of the shadow checker's
 /// protocol header, so a drifted normalization is rejected.
-pub const SCHEME_CANON_CONTRACT: &str = "prism-scheme-canon-v1";
+pub const SCHEME_CANON_CONTRACT: FormatTag = FormatTag::new("prism-scheme-canon-v1");
 
 const FORALL_PREFIX: &str = "forall ";
 const BINDER_BODY_SEPARATOR: &str = ". ";

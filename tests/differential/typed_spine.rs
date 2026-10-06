@@ -5,6 +5,7 @@
 //! compatibility boundary can run in isolation.
 
 use crate::support;
+use prism::DumpPhase;
 use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -36,13 +37,13 @@ fn typed_erasure_preserves_corpus_core_identity() {
         let declares_newtype = src
             .lines()
             .any(|line| line.trim_start().starts_with("newtype "));
-        let linted = prism::dump_on("core", &full, &roots, &linted_cfg);
+        let linted = prism::dump_on(DumpPhase::Core, &full, &roots, &linted_cfg);
 
         // This public path crosses typed construction, independent
         // verification, and exact erasure equality. Some type-correct negative
         // fixtures intentionally fail a later elaboration precondition; only
         // programs that reach the identity boundary enter this relational gate.
-        let dumped = match prism::dump("core-hash", &full) {
+        let dumped = match prism::dump(DumpPhase::CoreHash, &full) {
             Ok(dumped) => dumped,
             Err(error) => {
                 if let Some(canonical) = typed_spine_error_code(&error) {
@@ -157,8 +158,8 @@ fn full_front_crosses_typed_newtype_prefix_across_corpus() {
             .lines()
             .any(|line| line.trim_start().starts_with("newtype "));
 
-        let linted = prism::dump_on("core", &full, &roots, &linted_cfg);
-        let typed = prism::dump_on("core", &full, &roots, &cfg);
+        let linted = prism::dump_on(DumpPhase::Core, &full, &roots, &linted_cfg);
+        let typed = prism::dump_on(DumpPhase::Core, &full, &roots, &cfg);
         match (linted, typed) {
             (_, Err(error)) if typed_spine_error_code(&error).is_some() => {
                 let canonical = typed_spine_error_code(&error).expect("matched typed error");
@@ -251,9 +252,9 @@ fn main() : Int = ints() + bool_score()
     let mut linted_cfg = typed_cfg.clone();
     linted_cfg.update_flags(|flags| flags.core_lint = true);
 
-    let typed = prism::dump_on("core", &full, &roots, &typed_cfg)
+    let typed = prism::dump_on(DumpPhase::Core, &full, &roots, &typed_cfg)
         .expect("typed O1 polymorphic-builder front");
-    let linted = prism::dump_on("core", &full, &roots, &linted_cfg)
+    let linted = prism::dump_on(DumpPhase::Core, &full, &roots, &linted_cfg)
         .expect("linted O1 polymorphic-builder front");
     assert_eq!(typed, linted, "typed and linted polymorphic specialization");
 
@@ -267,7 +268,7 @@ fn main() : Int = ints() + bool_score()
     );
 
     let o0_cfg = prism::Config::default().with_opt(prism::OptLevel::O0);
-    let o0 = prism::dump_on("core", &full, &roots, &o0_cfg).expect("typed O0 front");
+    let o0 = prism::dump_on(DumpPhase::Core, &full, &roots, &o0_cfg).expect("typed O0 front");
     assert!(
         !o0.contains("copy_one$sp"),
         "O0 must stop after typed EraseNewtypes"
@@ -275,7 +276,7 @@ fn main() : Int = ints() + bool_score()
 
     let mut disabled_cfg = typed_cfg;
     disabled_cfg.update_flags(|flags| flags.no_specialize = true);
-    let disabled = prism::dump_on("core", &full, &roots, &disabled_cfg)
+    let disabled = prism::dump_on(DumpPhase::Core, &full, &roots, &disabled_cfg)
         .expect("typed O1 front with specialization disabled");
     assert!(
         !disabled.contains("copy_one$sp"),
@@ -300,9 +301,9 @@ fn main() : Int = scan(0, \(x) -> x < 2)
     let mut linted_cfg = typed_cfg.clone();
     linted_cfg.update_flags(|flags| flags.core_lint = true);
 
-    let typed = prism::dump_on("core", &full, &roots, &typed_cfg)
+    let typed = prism::dump_on(DumpPhase::Core, &full, &roots, &typed_cfg)
         .expect("typed higher-order local-var front");
-    let linted = prism::dump_on("core", &full, &roots, &linted_cfg)
+    let linted = prism::dump_on(DumpPhase::Core, &full, &roots, &linted_cfg)
         .expect("linted higher-order local-var front");
     assert_eq!(typed, linted, "typed local-var row erasure");
 }
@@ -317,9 +318,9 @@ fn effect_polymorphic_traverse_stays_compatibility_exact() {
     let typed_cfg = prism::Config::default().with_opt(prism::OptLevel::O1);
     let mut linted_cfg = typed_cfg.clone();
     linted_cfg.update_flags(|flags| flags.core_lint = true);
-    let typed = prism::dump_on("core", &full, &roots, &typed_cfg)
+    let typed = prism::dump_on(DumpPhase::Core, &full, &roots, &typed_cfg)
         .expect("typed effect-polymorphic traverse front");
-    let linted = prism::dump_on("core", &full, &roots, &linted_cfg)
+    let linted = prism::dump_on(DumpPhase::Core, &full, &roots, &linted_cfg)
         .expect("linted effect-polymorphic traverse front");
     assert_eq!(typed, linted, "typed effect-polymorphic specialization");
 }

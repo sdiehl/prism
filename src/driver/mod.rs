@@ -3,7 +3,7 @@ use std::convert::Infallible;
 use std::path::Path;
 use std::sync::OnceLock;
 
-use crate::core::fbip::{borrow_sigs, infer_borrow_sigs, Fips, Sigs};
+use crate::core::fbip::{borrow_sigs, check_borrow_sigs, infer_borrow_sigs, Fips, Sigs};
 use crate::core::opt::PassStage;
 use crate::core::typed::effect_lower::{FinishedLowering, TypedLoweringTransitionError};
 use crate::core::typed::{
@@ -62,7 +62,7 @@ pub mod stable_lock;
 mod tests;
 mod timing;
 mod verify;
-pub use artifact::{ArtifactField, ArtifactIdentity, ArtifactRow};
+pub use artifact::{ArtifactBackend, ArtifactField, ArtifactIdentity, ArtifactRow};
 #[cfg(feature = "native")]
 pub(crate) use build::explain_downstream_queries;
 pub use build::rc_balanced;
@@ -84,15 +84,15 @@ pub use diff::{
 };
 #[cfg(feature = "native")]
 pub(crate) use diff::{diff_on_roots, render_source_diff, source_diff_on_roots};
-pub use dump::{dump, dump_at, dump_on};
+pub use dump::{dump, dump_at, dump_on, DumpPhase, UnknownPhase};
 pub use execution::{
     debug_on, durable_run_on, interpret, interpret_at, interpret_deferred_holes, interpret_io_at,
     interpret_io_on, interpret_io_on_with_args, interpret_io_on_with_args_deferred_holes,
-    interpret_on, observe_lowered_run_on, observe_run_on, observe_run_on_deferred_holes, record_on,
-    record_on_with_args, record_run_on, replay_on, replay_run_on, resume_observed_on, resume_on,
-    step_ruler_on, suspend_at_cut_on, suspend_line_cuts, suspend_on, CutReport, CutTarget,
-    DurableRun, RecordedRun, StepRuler, StepRulerRow, SuspendAtCut, SuspendCut, SuspendResult,
-    STEP_RULER_FORMAT,
+    interpret_on, observe_lowered_run_on, observe_lowered_run_rewritten_on, observe_run_on,
+    observe_run_on_deferred_holes, record_on, record_on_with_args, record_run_on, replay_on,
+    replay_run_on, resume_observed_on, resume_on, step_ruler_on, suspend_at_cut_on,
+    suspend_line_cuts, suspend_on, CutReport, CutTarget, DurableRun, RecordedRun, StepRuler,
+    StepRulerRow, SuspendAtCut, SuspendCut, SuspendResult, STEP_RULER_FORMAT,
 };
 use front::{run_front, run_front_verdict, Front, FrontRequest};
 pub(crate) use identity::NAMESPACE_FORMAT;
@@ -311,6 +311,33 @@ pub fn check_docs_on(src: &str, roots: &[Root]) -> Result<Checked, Error> {
     Ok(run_front(src, roots, &cfg, FrontRequest::CheckHolesValidated)?.into_checked())
 }
 
+/// Everything an editor shows for one source, from one front-end pass.
+#[derive(Clone, Debug)]
+pub struct Analysis {
+    /// The `prism check` verdict's checked program: its warnings and reports.
+    pub checked: Checked,
+    /// The hover types, as `dump typespans` prints them.
+    pub typespans: crate::docs::TypeSpans,
+    /// Every resolved reference and definition, as `dump occurrences` prints them.
+    pub occurrences: crate::index::occurrences::Occurrences,
+}
+
+/// Check `src` the way [`check_validated_on_in`] does and, from the same parse,
+/// resolution, and judgment, collect its type spans and occurrences.
+///
+/// # Errors
+/// Fails exactly as [`check_validated_on_in`] does.
+pub fn analyze(src: &str, roots: &[Root], cfg: &Config) -> Result<Analysis, Error> {
+    let (front, seen) = front::run_front_seeing(src, roots, cfg, FrontRequest::Analyze)?;
+    let (program, checked) = front.into_program_checked();
+    let typespans = crate::docs::extract_typespans(src, &program, &checked)?;
+    Ok(Analysis {
+        checked,
+        typespans,
+        occurrences: crate::index::occurrences::from_seen(seen),
+    })
+}
+
 // The checked Core-surface tree plus presentation facts used only by
 // `dump typespans` and the documentation preprocessor.
 fn tooltip_checked_on(
@@ -441,9 +468,11 @@ fn store_commit(
     coherence::commit_canonical(&store, &program.instances, &program.canonicals, &hashes).map_err(
         |e| match e {
             CoherenceError::Io(io) => Error::Io(io),
-            CoherenceError::Conflict { span, msg } => {
-                Error::Type(TypeError::TypeFailure { span, msg })
-            }
+            CoherenceError::Conflict { span, msg } => Error::Type(TypeError::TypeFailure {
+                span,
+                msg,
+                origin: None,
+            }),
         },
     )?;
     let stats = commit_program(&store, core, &hashes, &hash_metas, &graph, &metas)?;
@@ -554,17 +583,16 @@ fn prepared_core_deferred_holes(
 // callee always agree on each call's convention. Definition identity
 // (`hash_meta`) always reads the declared `borrow_sigs` instead: the inferred
 // masks are a pure function of the checked source, a cost decision like a
-// lowering tier, never part of what a definition is.
+// lowering tier, never part of what a definition is. The inferred map is
+// computed and checked even when the setting is off, so a malformed map is an
+// internal error on every build rather than only on the builds that use it.
 fn rc_borrow_sigs(
     program: &Program<CorePhase>,
     checked: &Checked,
     core: &Core,
     cfg: &Config,
-) -> Sigs {
+) -> Result<Sigs, Error> {
     let declared = borrow_sigs(program);
-    if !cfg.flags().borrow_infer {
-        return declared;
-    }
     let pure_fns = checked
         .defs
         .decls
@@ -572,7 +600,13 @@ fn rc_borrow_sigs(
         .filter(|decl| decl.pure)
         .map(|decl| Sym::new(&decl.name))
         .collect();
-    infer_borrow_sigs(core, &pure_fns, &declared)
+    let inferred = infer_borrow_sigs(core, &pure_fns, &declared);
+    check_borrow_sigs(core, &pure_fns, &declared, &inferred).map_err(Error::InternalInvariant)?;
+    Ok(if cfg.flags().borrow_infer {
+        inferred
+    } else {
+        declared
+    })
 }
 
 fn prepared_core_with_opts(
@@ -583,7 +617,7 @@ fn prepared_core_with_opts(
 ) -> Result<ElaboratedCore, Error> {
     let (program, checked, core, typed, verify_env) =
         run_front(src, roots, cfg, request)?.into_typed_pre();
-    let sigs = rc_borrow_sigs(&program, &checked, &core, cfg);
+    let sigs = rc_borrow_sigs(&program, &checked, &core, cfg)?;
     let lowered = lower_opt(
         typed,
         &verify_env,
@@ -730,7 +764,7 @@ fn lowered_front(
 ) -> Result<(Checked, Sigs, TypedLowering), Error> {
     let (program, checked, core, typed, verify_env) =
         run_front(src, roots, cfg, FrontRequest::Full)?.into_typed_pre();
-    let sigs = rc_borrow_sigs(&program, &checked, &core, cfg);
+    let sigs = rc_borrow_sigs(&program, &checked, &core, cfg)?;
     let lowered = lower_opt(
         typed,
         &verify_env,
@@ -768,7 +802,7 @@ fn lowered_spine_with_identity(
     let (program, checked, identity_core, core, typed, verify_env) =
         run_front(src, roots, cfg, FrontRequest::Full)?.into_compilation();
     let declared = borrow_sigs(&program);
-    let sigs = rc_borrow_sigs(&program, &checked, &core, cfg);
+    let sigs = rc_borrow_sigs(&program, &checked, &core, cfg)?;
     let hashes = if cfg.scheduler().retarget().is_some() {
         // Scheduler policy is execution configuration, never source identity.
         // The full path has already retargeted its surface program, so recover
@@ -990,7 +1024,7 @@ pub fn core_ir_full(full: &str, base: &Path) -> Result<String, Error> {
     let prelude = prelude_fn_names()?;
     let cfg = Config::from_env();
     let (program, checked, core) = frontend(full, &default_roots(base), &cfg)?;
-    let sigs = rc_borrow_sigs(&program, &checked, &core, &cfg);
+    let sigs = rc_borrow_sigs(&program, &checked, &core, &cfg)?;
     let optimized = reuse(&insert_rc(&core, &sigs));
     Ok(pp_core_pretty(&strip_prelude(optimized, &prelude)))
 }

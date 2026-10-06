@@ -44,6 +44,7 @@ Program {
                             ),
                         ],
                     ),
+                    span: 31..32,
                 },
             ],
             deriving: [

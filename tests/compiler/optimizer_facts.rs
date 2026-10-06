@@ -8,11 +8,12 @@
 //! or duplicates its callback's use. A pass that later resolves one of these
 //! must move the pinned number deliberately, never silently.
 
+use prism::DumpPhase;
 use std::{env, fs, path::Path, process};
 
 use serde_json::Value;
 
-const OPTIMIZER_FACTS: &str = "optimizer-facts";
+const OPTIMIZER_FACTS: DumpPhase = DumpPhase::OptimizerFacts;
 const FIXTURE_DIR: &str = "examples/fixtures/compiler";
 const FACTS_SCHEMA: &str = "prism-optimizer-facts-v2";
 

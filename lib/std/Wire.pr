@@ -319,8 +319,8 @@ pub fn bytes_of_list(xs : List(Int)) : Bytes =
 
 fn list_to_buf(acc : Buf, xs : List(Int)) : Buf =
   match xs of
-    Nil => acc
-    Cons(h, t) => list_to_buf(buf_push(acc, mod(h, byte_mask)), t)
+    [] => acc
+    h :: t => list_to_buf(buf_push(acc, mod(h, byte_mask)), t)
 
 -- | Spread a byte body out as a list of byte values, from the cursor to the end.
 -- The inverse of `bytes_of_list`.
@@ -528,8 +528,8 @@ fn encode_elems(xs : List(a)) : Bytes given Serialize(a) =
 
 fn encode_elems_go(acc : Buf, xs : List(a)) : Buf given Serialize(a) =
   match xs of
-    Nil => acc
-    Cons(h, t) => encode_elems_go(buf_append(acc, encode(h)), t)
+    [] => acc
+    h :: t => encode_elems_go(buf_append(acc, encode(h)), t)
 
 -- Decode exactly `n` elements, threading the remaining bytes. Each element read
 -- consumes at least one byte, so a hostile length is bounded by the input.
@@ -679,11 +679,11 @@ fn enc_map(m : Map(k, v, ord)) : Bytes given Serialize(k), Serialize(v) =
 
 fn zip_pairs(ks : List(k), vs : List(v)) : List((k, v)) =
   match ks of
-    Nil => Nil
-    Cons(k, kr) =>
+    [] => Nil
+    k :: kr =>
       match vs of
-        Nil => Nil
-        Cons(v, vr) => Cons((k, v), zip_pairs(kr, vr))
+        [] => Nil
+        v :: vr => Cons((k, v), zip_pairs(kr, vr))
 
 -- The stored-witness stopgap for the implicit ordering path. A map is written in
 -- its own `Ord(k)` order; the reader has no brand to check (the explicit branded
@@ -698,9 +698,9 @@ fn zip_pairs(ks : List(k), vs : List(v)) : List((k, v)) =
 -- dictionary-reflection capability closes it statically.
 fn keys_strictly_ascending(ks : List(k)) : Bool given Ord(k) =
   match ks of
-    Nil => true
-    Cons(_, Nil) => true
-    Cons(a, Cons(b, r)) => cmp(a, b) < 0 && keys_strictly_ascending(Cons(b, r))
+    [] => true
+    [_] => true
+    a :: b :: r => cmp(a, b) < 0 && keys_strictly_ascending(Cons(b, r))
 
 fn dec_map(bs : Bytes) : (Map(k, v, ord), Bytes) given Ord(k), Serialize(k), Serialize(v) =
   match decode(bs) of

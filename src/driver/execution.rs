@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use std::io::{BufRead, Cursor, Write};
 use std::path::Path;
 
-use crate::core::{hash_root, hash_str, pp_core_pretty};
+use crate::core::{hash_root, hash_str, pp_core_pretty, Core};
 use crate::debug::durable::{committed_frames, DurableLog};
 use crate::debug::{run_repl, trace};
 use crate::error::Error;
@@ -25,6 +25,7 @@ use crate::eval::{
 use crate::lineage::provenance::{cap_op_label, cap_op_labels, CapEvent, ObservationTrace};
 use crate::resolve::{default_roots, Root};
 use crate::sym::Sym;
+use prism_common::format::FormatTag;
 use serde::Serialize;
 
 use super::identity::stdlib_layers;
@@ -378,12 +379,30 @@ pub fn observe_lowered_run_on(
     roots: &[Root],
     cfg: &Config,
 ) -> Result<(ObservationTrace, String), Error> {
-    let (_, core, _, _) = reuse_lowered_core(src, roots, cfg)?;
-    let lowered = pp_core_pretty(&core);
+    observe_lowered_run_rewritten_on(src, roots, cfg, |_| {})
+}
+
+/// [`observe_lowered_run_on`] with `rewrite` applied to the lowered Core before
+/// it runs. A gate's negative control uses it to plant the miscompile the gate
+/// exists to catch and confirm the trace diverges; no compile path calls it.
+///
+/// # Errors
+/// Fails only while preparing and lowering source through the compiler pipeline.
+#[doc(hidden)]
+pub fn observe_lowered_run_rewritten_on(
+    src: &str,
+    roots: &[Root],
+    cfg: &Config,
+    rewrite: impl FnOnce(&mut Core),
+) -> Result<(ObservationTrace, String), Error> {
+    let (_, lowered, _, _) = reuse_lowered_core(src, roots, cfg)?;
+    let mut core = Core::clone(&lowered);
+    rewrite(&mut core);
+    let pretty = pp_core_pretty(&core);
     let mut output = Vec::new();
     let mut input = Cursor::new(Vec::new());
     let run = run_observed_lowered_with_args(&core, &mut output, &mut input, Vec::new());
-    Ok((ObservationTrace::new(run.observations), lowered))
+    Ok((ObservationTrace::new(run.observations), pretty))
 }
 
 fn observe_run_on_policy(
@@ -429,7 +448,7 @@ pub fn replay_run_on(
     cfg: &Config,
 ) -> Result<RecordedRun, Error> {
     let core = prepared_core(src, roots, cfg)?;
-    let frames = trace::decode(trace).map_err(Error::RuntimeReplay)?;
+    let frames = trace::decode(trace).map_err(|e| Error::RuntimeReplay(e.to_string()))?;
     let mut empty = Cursor::new(Vec::new());
     let identity = identity_of(src, roots, cfg);
     let run = run_traced(
@@ -471,7 +490,7 @@ pub fn replay_on(
     cfg: &Config,
 ) -> Result<Option<i32>, Error> {
     let core = prepared_core(src, roots, cfg)?;
-    let frames = trace::decode(trace).map_err(Error::RuntimeReplay)?;
+    let frames = trace::decode(trace).map_err(|e| Error::RuntimeReplay(e.to_string()))?;
     let mut empty = Cursor::new(Vec::new());
     let identity = identity_of(src, roots, cfg);
     let run = run_traced(
@@ -583,12 +602,12 @@ pub fn debug_on(
     cfg: &Config,
 ) -> Result<(), Error> {
     let core = prepared_core(src, roots, cfg)?;
-    let frames = trace::decode(trace).map_err(Error::RuntimeReplay)?;
+    let frames = trace::decode(trace).map_err(|e| Error::RuntimeReplay(e.to_string()))?;
     run_repl(&core, &frames, cmds, ui).map_err(Error::RuntimeDebugger)
 }
 
 /// The versioned format tag heading a step-ruler rendering.
-pub const STEP_RULER_FORMAT: &str = "prism-step-ruler-v1";
+pub const STEP_RULER_FORMAT: FormatTag = FormatTag::new("prism-step-ruler-v1");
 
 /// One observation on the machine-step clock.
 ///
@@ -612,7 +631,7 @@ pub struct StepRulerRow {
 #[derive(Debug, Serialize)]
 pub struct StepRuler {
     /// The versioned format tag ([`STEP_RULER_FORMAT`]).
-    pub format: &'static str,
+    pub format: FormatTag,
     /// Machine steps the whole run took.
     pub total_steps: usize,
     /// `Some(code)` when the program called `exit(code)`.

@@ -25,8 +25,8 @@ let bound_l : Traversal(Solver, Ty) =
 
 fn lookup_meta(n : Int, rows : List((Int, Ty))) : Option(Ty) =
   match rows of
-    Nil => None
-    Cons(row, rest) =>
+    [] => None
+    row :: rest =>
       if fst(row) == n then
         Some(snd(row))
       else

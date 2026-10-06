@@ -1,4 +1,4 @@
--- The binding-power differential. arg(0) is a `prism-surface-syntax-v1`
+-- The binding-power differential. arg(0) is a `prism-surface-syntax-v2`
 -- artifact. The artifact embeds both the exact source text and the compiler's
 -- own parse of it, so this harness can put the two parsers side by side on one
 -- input: it re-lexes the embedded text, slices the tokens of each declaration
@@ -43,6 +43,8 @@ fn pc_shape(e : Sp(Expr)) : String =
     ENeg(x) => "(- {pc_shape(x)})"
     EPipe(l, r) => "({pc_shape(l)} |> {pc_shape(r)})"
     EDefault(l, r) => "({pc_shape(l)} ?? {pc_shape(r)})"
+    ECons(l, r) => "({pc_shape(l)} :: {pc_shape(r)})"
+    EPathJoin(l, r) => "({pc_shape(l)} </> {pc_shape(r)})"
     ECompose(dir, l, r) => "({pc_shape(l)} {pc_compose_op(dir)} {pc_shape(r)})"
     _ => "<outside the comparable fragment>"
 

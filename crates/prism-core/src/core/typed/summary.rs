@@ -41,6 +41,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 use prism_common::fixpoint::stabilize;
+use prism_common::format::FormatTag;
 use prism_common::scc::tarjan_scc;
 use prism_common::sym::Sym;
 use prism_syntax::names;
@@ -232,7 +233,7 @@ impl Cardinality {
 /// A cache-bust counter, not a compat version: it joins the artifact's first
 /// line and its query key, so a layout change misses every stale entry and no
 /// old layout is ever read back.
-pub const SUMMARY_ENCODING_SCHEMA: &str = "prism-function-summaries-v1";
+pub const SUMMARY_ENCODING_SCHEMA: FormatTag = FormatTag::new("prism-function-summaries-v1");
 
 /// The canonical byte encoding of a summary table: the schema line, then one
 /// tab-separated row per function, each field rendered by the canonical
@@ -251,7 +252,7 @@ pub fn encode_summaries(table: &BTreeMap<Sym, FunctionSummary>) -> Vec<u8> {
         .collect();
     rows.sort_unstable_by_key(|(name, _)| *name);
     let mut out = String::new();
-    out.push_str(SUMMARY_ENCODING_SCHEMA);
+    out.push_str(SUMMARY_ENCODING_SCHEMA.as_str());
     out.push('\n');
     for (name, summary) in rows {
         let callbacks = summary
@@ -1876,7 +1877,7 @@ pub(crate) mod tests {
         assert_eq!(bytes, encode_summaries(&table));
         let text = String::from_utf8(bytes).unwrap();
         let mut lines = text.lines();
-        assert_eq!(lines.next(), Some(SUMMARY_ENCODING_SCHEMA));
+        assert_eq!(lines.next(), Some(SUMMARY_ENCODING_SCHEMA.as_str()));
         let rows: Vec<&str> = lines.collect();
         assert_eq!(
             rows,

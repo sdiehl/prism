@@ -19,9 +19,9 @@ fn at_origin(s : Shape) : Option(Int) =
 -- pattern is sugar for the nested `Cons`/`Nil` constructor patterns it expands to.
 fn describe(pair : (Int, List(Int))) : String =
   match pair of
-    (0, Nil) => "zero, empty"
-    (_, Cons(only, Nil)) => "single: {only}"
-    (_, Cons(a, Cons(b, Nil))) => "pair: {a}, {b}"
+    (0, []) => "zero, empty"
+    (_, [only]) => "single: {only}"
+    (_, [a, b]) => "pair: {a}, {b}"
     (_, _) => "other"
 
 -- Expected output:

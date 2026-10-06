@@ -22,8 +22,8 @@ alias AppErr = {ConfigErr, NetErr}
 
 fn read_port(cfg, key) : Int ! {ConfigErr} =
   match cfg of
-    Nil => throw NotFound(key)
-    Cons(pair, rest) =>
+    [] => throw NotFound(key)
+    pair :: rest =>
       let (k, v) = pair
       if k == key then
         if v == "8080" then

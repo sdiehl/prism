@@ -14,6 +14,7 @@
 // for `?`, avoiding an arbitrary choice.
 
 use prism::eval::Rv;
+use prism::DumpPhase;
 use prism::{check, dump, interpret, with_prelude, Error};
 
 const SUGARED: &str = "\
@@ -43,8 +44,10 @@ fn use_it(r : Result(Option(Int), Str)) : Result(Int, Str) =
 
 #[test]
 fn desugars_to_the_hand_written_match() {
-    let sugared = dump("core-hash", &with_prelude(SUGARED)).expect("the sugar must compile");
-    let expanded = dump("core-hash", &with_prelude(EXPANDED)).expect("the match must compile");
+    let sugared =
+        dump(DumpPhase::CoreHash, &with_prelude(SUGARED)).expect("the sugar must compile");
+    let expanded =
+        dump(DumpPhase::CoreHash, &with_prelude(EXPANDED)).expect("the match must compile");
     assert_eq!(
         sugared, expanded,
         "the early-return binding must elaborate to the term the hand-written match does"

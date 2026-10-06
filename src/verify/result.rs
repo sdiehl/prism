@@ -17,10 +17,11 @@
 
 use crate::store::codec::{put_str, put_uvarint, Reader};
 use crate::store::CodecError;
+use prism_common::format::FormatTag;
 
 /// The schema tag; the single home for this string, written first into every
 /// frame so the digest is domain-separated by construction.
-pub(crate) const SCHEMA: &str = "prism-smt-result-v1";
+pub(crate) const SCHEMA: FormatTag = FormatTag::new("prism-smt-result-v1");
 
 // The normalized status vocabulary, pinned as frozen varint discriminants so the
 // binary body and any reader agree. This is a closed set: an unknown discriminant
@@ -233,7 +234,7 @@ impl SmtResult {
     /// The canonical frame. The bytes are the identity.
     pub(crate) fn encode(&self) -> Vec<u8> {
         let mut out = Vec::new();
-        put_str(&mut out, SCHEMA);
+        put_str(&mut out, SCHEMA.as_str());
         put_str(&mut out, &self.query_digest);
         put_uvarint(&mut out, self.status.to_varint());
         put_uvarint(&mut out, self.trust.to_varint());
@@ -259,7 +260,7 @@ impl SmtResult {
     /// field, an over-count, or trailing bytes.
     pub(crate) fn decode(bytes: &[u8]) -> Result<Self, CodecError> {
         let mut r = Reader::new(bytes);
-        if r.string()? != SCHEMA {
+        if SCHEMA.expect(&r.string()?).is_err() {
             return Err(CodecError::Scheme);
         }
         let query_digest = r.string()?;

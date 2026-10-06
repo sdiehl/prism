@@ -36,11 +36,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::debug::trace;
 use crate::eval::Obs;
+use prism_common::format::FormatTag;
 
 // The sidecar index schema tag, its own first line. A foreign or future tag is
 // refused rather than misread; the trace body reuses the pinned `.replay` frame
 // format and carries no separate version of its own.
-const IDX_VERSION: &str = "prism-replay-idx-v1";
+const IDX_VERSION: FormatTag = FormatTag::new("prism-replay-idx-v1");
 
 // The sidecar lives beside the log, sharing its path plus this suffix.
 const IDX_SUFFIX: &str = "idx";
@@ -91,7 +92,7 @@ fn read_if_present(path: &Path) -> io::Result<Option<String>> {
 fn parse_index(body: &str) -> io::Result<u64> {
     let mut lines = body.lines();
     let version = lines.next().unwrap_or_default();
-    if version != IDX_VERSION {
+    if IDX_VERSION.expect(version).is_err() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!(
@@ -131,7 +132,8 @@ fn recover(path: &Path) -> io::Result<(Vec<Obs>, u64)> {
     let Some(idx_body) = read_if_present(&index_path(path))? else {
         // No committed boundary to trust: a snapshot or foreign trace, decoded
         // strictly in full so a malformed file is rejected, not truncated.
-        let frames = trace::decode(&log).map_err(invalid)?;
+        let frames =
+            trace::decode(&log).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         return Ok((frames, log.len() as u64));
     };
     let committed = parse_index(&idx_body)?;

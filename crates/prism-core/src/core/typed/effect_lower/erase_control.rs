@@ -627,9 +627,13 @@ impl Eraser<'_> {
                 body,
                 return_binder,
                 return_body,
+                finally_body,
                 ops,
             } => {
                 let body2 = self.erase(body, env);
+                let finally_body2 = finally_body
+                    .as_ref()
+                    .map(|body| Box::new(self.erase(body, env)));
                 let return_body2 = match (return_binder, return_body) {
                     (Some(rb), Some(rbody)) => {
                         let shadowed = env.insert(rb.name(), rb.ty().clone());
@@ -671,6 +675,7 @@ impl Eraser<'_> {
                         body: Box::new(body2),
                         return_binder: return_binder.clone(),
                         return_body: return_body2,
+                        finally_body: finally_body2,
                         ops: ops2,
                     },
                 )

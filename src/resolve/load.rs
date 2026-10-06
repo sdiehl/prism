@@ -16,6 +16,7 @@ use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::core::Digest;
 use crate::error::{suggest, Error};
 use crate::syntax::ast::Program;
 use crate::syntax::reflect::parse_unit;
@@ -33,7 +34,7 @@ pub struct SourceBundleIdentity {
     pub kind: SourceBundleKind,
     pub artifact_kind: SourceBundleArtifactKind,
     pub scheme: String,
-    pub root: String,
+    pub root: Digest,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -85,21 +86,17 @@ impl SourceBundleOrigin {
 
 impl SourceBundleIdentity {
     #[must_use]
-    pub fn stdlib(scheme: impl Into<String>, root: impl Into<String>) -> Self {
+    pub fn stdlib(scheme: impl Into<String>, root: Digest) -> Self {
         Self {
             kind: SourceBundleKind::Std,
             artifact_kind: SourceBundleArtifactKind::Stdlib,
             scheme: scheme.into(),
-            root: root.into(),
+            root,
         }
     }
 
     #[must_use]
-    pub fn package(
-        name: impl Into<String>,
-        scheme: impl Into<String>,
-        root: impl Into<String>,
-    ) -> Self {
+    pub fn package(name: impl Into<String>, scheme: impl Into<String>, root: Digest) -> Self {
         Self::package_with_origin(name, SourceBundleOrigin::HashPin, scheme, root)
     }
 
@@ -108,7 +105,7 @@ impl SourceBundleIdentity {
         name: impl Into<String>,
         origin: SourceBundleOrigin,
         scheme: impl Into<String>,
-        root: impl Into<String>,
+        root: Digest,
     ) -> Self {
         Self {
             kind: SourceBundleKind::Package {
@@ -117,7 +114,7 @@ impl SourceBundleIdentity {
             },
             artifact_kind: SourceBundleArtifactKind::Package,
             scheme: scheme.into(),
-            root: root.into(),
+            root,
         }
     }
 
@@ -242,6 +239,32 @@ pub fn serving_root<'r>(path: &str, roots: &'r [Root]) -> Result<Option<&'r Root
         }
     }
     Ok(None)
+}
+
+/// The source text of dotted module `path`, from the first root that serves it.
+///
+/// `None` when no root has it or a read fails; a caller that only wants the
+/// text for a diagnostic has nothing better to do with the failure.
+#[must_use]
+pub fn module_source(path: &str, roots: &[Root]) -> Option<String> {
+    let segments: Vec<String> = path.split('.').map(str::to_string).collect();
+    roots
+        .iter()
+        .find_map(|root| root.fetch(&segments).ok().flatten())
+}
+
+/// Give an error raised inside an imported module that module's text, fetched
+/// through the same roots resolution used, so any renderer can place its caret.
+#[must_use]
+pub fn with_origin_source(mut e: Error, roots: &[Root]) -> Error {
+    if let Error::Type(t) = &mut e {
+        if let Some(origin) = t.origin_mut() {
+            if origin.source.is_none() {
+                origin.source = module_source(&origin.module, roots);
+            }
+        }
+    }
+    e
 }
 
 // The module paths a not-found diagnostic can offer as near misses: every name a

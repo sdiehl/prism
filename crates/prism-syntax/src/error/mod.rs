@@ -13,7 +13,7 @@ pub use code::{
     TYPED_CORE_ENVIRONMENT, TYPED_CORE_ERASURE, TYPED_CORE_SIMPLIFY, TYPED_CORE_SPECIALIZATION,
     TYPED_CORE_VERIFICATION, TYPED_HOLE,
 };
-pub use diag::{Diag, ErrKind, Frame, HoleBinding, HoleCandidate, HoleReport, TypeError};
+pub use diag::{Diag, ErrKind, Frame, HoleBinding, HoleCandidate, HoleReport, Origin, TypeError};
 pub use lex::LexError;
 pub use parse::{ParseError, SyntaxFault};
 pub use phase::{

@@ -71,14 +71,14 @@ fn diff_from(
   ys : List(a)
 ) : Option(Divergence(a)) =
   match xs of
-    Nil =>
+    [] =>
       match ys of
-        Nil => None
-        Cons(y, _yr) => Some(DiffLeftEnd(i, y))
-    Cons(x, xr) =>
+        [] => None
+        y :: _yr => Some(DiffLeftEnd(i, y))
+    x :: xr =>
       match ys of
-        Nil => Some(DiffRightEnd(i, x))
-        Cons(y, yr) =>
+        [] => Some(DiffRightEnd(i, x))
+        y :: yr =>
           if same(x, y) then
             diff_from(i + 1, same, xr, yr)
           else

@@ -25,17 +25,17 @@ fn only_in(xs : List(String), ys : List(String)) : List(String) =
 
 fn commas(xs : List(String)) : String =
   match xs of
-    Nil => ""
-    Cons(x, Nil) => x
-    Cons(x, rest) => "{x}, {commas(rest)}"
+    [] => ""
+    [x] => x
+    x :: rest => "{x}, {commas(rest)}"
 
 fn expected_gap(got : List(String), want : List(String)) : String =
   "missing [{commas(only_in(want, got))}], extra [{commas(only_in(got, want))}]"
 
 fn same_related(a : List(Span), b : List(Span)) : Bool =
   match (a, b) of
-    (Nil, Nil) => true
-    (Cons(x, xs), Cons(y, ys)) => x == y && same_related(xs, ys)
+    ([], []) => true
+    (x :: xs, y :: ys) => x == y && same_related(xs, ys)
     _ => false
 
 fn against(text : String, want : Diagnostic) : String =
@@ -70,7 +70,7 @@ fn main() =
     Err(e) => println("decode {codec_error_message(e)}")
     Ok(doc) =>
       match doc.diagnostics of
-        Cons(want, Nil) => println(against(doc.source.text, want))
+        [want] => println(against(doc.source.text, want))
         _ =>
           println(
               "oracle carries {show_int(length(doc.diagnostics))} diagnostics, expected one",

@@ -23,7 +23,7 @@ use crate::names::bare_name;
 use crate::{interpret_io_on_with_args, Config};
 
 use super::discovery::{self, TestPlan, TestTarget};
-use super::{events, report, Failure};
+use super::{decode_failure, events, junit, report, Failure, TEST_FAILURE_SCHEMA};
 
 /// How a test finished. `None` kind is a pass; a `Some(kind)` is a failure of
 /// that class.
@@ -54,6 +54,9 @@ pub(crate) struct Outcome {
     /// test-ABI bridge rather than the payload-free `fail()`. Rendered into the
     /// `test_failed` event's structured fields; `None` keeps the payload-free bytes.
     pub failure: Option<Failure>,
+    /// The `skip` pragma's reason when the test was not run. A skipped outcome
+    /// has no failure kind and counts apart from a pass.
+    pub skipped: Option<String>,
 }
 
 impl Outcome {
@@ -63,6 +66,17 @@ impl Outcome {
             message: String::new(),
             output,
             failure: None,
+            skipped: None,
+        }
+    }
+
+    const fn skip(reason: String) -> Self {
+        Self {
+            kind: None,
+            message: String::new(),
+            output: String::new(),
+            failure: None,
+            skipped: Some(reason),
         }
     }
 
@@ -72,6 +86,7 @@ impl Outcome {
             message,
             output,
             failure: None,
+            skipped: None,
         }
     }
 
@@ -83,6 +98,7 @@ impl Outcome {
             message: failure.message.clone(),
             output,
             failure: Some(failure),
+            skipped: None,
         }
     }
 
@@ -157,8 +173,9 @@ fn discover(input: &Input, cfg: &Config) -> Result<TestPlan, Error> {
     }
 }
 
-// Substring (default) or exact selection over logical IDs, preserving the
-// logical-ID order the plan is already sorted into.
+// Substring (default) or exact selection over logical IDs, narrowed to the tests
+// carrying any requested `--tag`, preserving the logical-ID order the plan is
+// already sorted into.
 fn select<'a>(plan: &'a TestPlan, options: &TestOptions) -> Vec<&'a TestTarget> {
     plan.targets
         .iter()
@@ -166,6 +183,13 @@ fn select<'a>(plan: &'a TestPlan, options: &TestOptions) -> Vec<&'a TestTarget> 
             None => true,
             Some(f) if options.exact => t.descriptor.logical_id == *f,
             Some(f) => t.descriptor.logical_id.contains(f),
+        })
+        .filter(|t| {
+            options.tags.is_empty()
+                || options
+                    .tags
+                    .iter()
+                    .any(|tag| t.descriptor.tags.contains(tag))
         })
         .collect()
 }
@@ -242,15 +266,20 @@ fn no_match(options: &TestOptions) -> CmdResult {
 // from an ordinary test failure. Any nonzero `failed` or `infrastructure`
 // determines the nonzero exit status.
 #[derive(Default)]
-struct Tally {
-    passed: usize,
-    failed: usize,
-    infrastructure: usize,
+pub(crate) struct Tally {
+    pub passed: usize,
+    pub failed: usize,
+    pub skipped: usize,
+    pub infrastructure: usize,
 }
 
 impl Tally {
-    const fn record(&mut self, kind: Option<OutcomeKind>) {
-        match kind {
+    const fn record(&mut self, outcome: &Outcome) {
+        if outcome.skipped.is_some() {
+            self.skipped += 1;
+            return;
+        }
+        match outcome.kind {
             None => self.passed += 1,
             Some(OutcomeKind::Infrastructure) => self.infrastructure += 1,
             Some(_) => self.failed += 1,
@@ -270,9 +299,10 @@ fn execute(selected: &[&TestTarget], options: &TestOptions, cfg: &Config) -> Cmd
     }
 
     let mut tally = Tally::default();
+    let mut results = Vec::with_capacity(selected.len());
     for target in selected {
         let outcome = run_one(target, cfg);
-        tally.record(outcome.kind);
+        tally.record(&outcome);
         if options.json {
             let _ = events::emit_outcome(
                 &mut out,
@@ -288,16 +318,32 @@ fn execute(selected: &[&TestTarget], options: &TestOptions, cfg: &Config) -> Cmd
                 options.show_output,
             );
         }
+        results.push((target.descriptor.logical_id.clone(), outcome));
+    }
+
+    if let Some(path) = &options.junit {
+        std::fs::write(path, junit::render(&results)).map_err(|e| {
+            (
+                Error::ResolveCommand(format!("cannot write {}: {e}", path.display())),
+                String::new(),
+                String::new(),
+            )
+        })?;
     }
 
     if options.json {
         let _ = writeln!(
             out,
             "{}",
-            events::suite_finished(tally.passed, tally.failed, 0, tally.infrastructure)
+            events::suite_finished(
+                tally.passed,
+                tally.failed,
+                tally.skipped,
+                tally.infrastructure,
+            )
         );
     } else {
-        let _ = report::summary(&mut out, tally.passed, tally.failed, tally.infrastructure);
+        let _ = report::summary(&mut out, &tally);
     }
 
     if tally.ok() {
@@ -313,8 +359,11 @@ fn execute(selected: &[&TestTarget], options: &TestOptions, cfg: &Config) -> Cmd
 }
 
 // Map the internal outcome kind to the public status enum.
-pub(crate) const fn public_status(kind: Option<OutcomeKind>) -> super::TestStatus {
-    match kind {
+pub(crate) const fn public_status(outcome: &Outcome) -> super::TestStatus {
+    if outcome.skipped.is_some() {
+        return super::TestStatus::Skipped;
+    }
+    match outcome.kind {
         None => super::TestStatus::Passed,
         Some(OutcomeKind::Fail) => super::TestStatus::Failed,
         Some(OutcomeKind::Fault) => super::TestStatus::Fault,
@@ -363,7 +412,7 @@ pub(crate) fn event_bytes(
     let mut tally = Tally::default();
     for target in &selected {
         let outcome = run_one(target, cfg);
-        tally.record(outcome.kind);
+        tally.record(&outcome);
         let _ = events::emit_outcome(
             &mut out,
             &target.descriptor.logical_id,
@@ -374,13 +423,21 @@ pub(crate) fn event_bytes(
     let _ = writeln!(
         out,
         "{}",
-        events::suite_finished(tally.passed, tally.failed, 0, tally.infrastructure)
+        events::suite_finished(
+            tally.passed,
+            tally.failed,
+            tally.skipped,
+            tally.infrastructure,
+        )
     );
     Ok(out)
 }
 
 // Run one test in a fresh world and classify the outcome.
 fn run_one(target: &TestTarget, cfg: &Config) -> Outcome {
+    if let Some(reason) = &target.descriptor.skip {
+        return Outcome::skip(reason.clone());
+    }
     let harness = synthesize(&target.full_src, &target.entry_name);
     let mut sink: Vec<u8> = Vec::new();
     let mut input = Cursor::new(Vec::new());
@@ -430,13 +487,41 @@ fn classify(run: &Run, output: String) -> Outcome {
     }
     match run.value {
         Rv::Int(0) => Outcome::pass(output),
-        Rv::Int(1) => Outcome::fail(OutcomeKind::Fail, "test failed".into(), output),
+        Rv::Int(1) => match take_failure_frame(&output) {
+            Some((failure, rest)) => Outcome::structured(failure, rest),
+            None => Outcome::fail(OutcomeKind::Fail, "test failed".into(), output),
+        },
         _ => Outcome::fail(
             OutcomeKind::Infrastructure,
             "harness produced an unexpected result".into(),
             output,
         ),
     }
+}
+
+// Split a structured failure off a failing test's captured output. `Test.pr`
+// writes the `prism-test-failure-v1` envelope, hex-encoded behind its schema tag,
+// as the last line before `fail()` fires (`<schema>:<hex>`), so only a final line is honoured, and
+// only when it decodes; anything else leaves the output and the bare failure as
+// they were.
+fn take_failure_frame(output: &str) -> Option<(Failure, String)> {
+    let body = output.strip_suffix('\n')?;
+    let start = body.rfind('\n').map_or(0, |i| i + 1);
+    let hex = body[start..]
+        .strip_prefix(TEST_FAILURE_SCHEMA.as_str())?
+        .strip_prefix(':')?;
+    let failure = decode_failure(&decode_hex(hex)?).ok()?;
+    Some((failure, output[..start].to_string()))
+}
+
+fn decode_hex(hex: &str) -> Option<Vec<u8>> {
+    if !hex.len().is_multiple_of(2) {
+        return None;
+    }
+    (0..hex.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(hex.get(i..i + 2)?, 16).ok())
+        .collect()
 }
 
 // Build the harness source for one test: the compilation unit's full source plus

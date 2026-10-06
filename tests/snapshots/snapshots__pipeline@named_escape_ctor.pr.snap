@@ -19,6 +19,7 @@ Program {
                     params: [],
                     ret: Int,
                     grade: Many,
+                    span: 168..171,
                 },
             ],
             span: 155..179,

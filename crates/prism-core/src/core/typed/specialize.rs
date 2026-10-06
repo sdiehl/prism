@@ -12,7 +12,7 @@ use crate::types::ty::{EffRow, Label};
 use crate::types::Type;
 use prism_common::sym::Sym;
 use prism_syntax::error::TypedCoreSpecializationFailure;
-use prism_syntax::names::{self, DICT_PREFIX};
+use prism_syntax::names;
 
 use super::effect_lower::arena::installs_handler;
 use super::effect_lower::walk::{collect_ops, each_subcomp, each_value};
@@ -119,7 +119,7 @@ fn builders<P>(core: &TypedCore<P>) -> BTreeMap<Sym, Builder> {
             TypedCompKind::Return(TypedValue {
                 kind: TypedValueKind::Ctor { name, .. },
                 ..
-            }) if name.as_str().starts_with(DICT_PREFIX) => Some((
+            }) if names::is_dict_ctor(name.as_str()) => Some((
                 function.name,
                 Builder {
                     function: function.clone(),
@@ -557,11 +557,15 @@ impl Rewrite for Dce<'_> {
                     body,
                     return_binder,
                     return_body,
+                    finally_body,
                     ops,
                 } => TypedCompKind::Handle {
                     body: Box::new(self.comp(body, &())),
                     return_binder: return_binder.clone(),
                     return_body: return_body
+                        .as_ref()
+                        .map(|body| Box::new(self.comp(body, &()))),
+                    finally_body: finally_body
                         .as_ref()
                         .map(|body| Box::new(self.comp(body, &()))),
                     ops: TypedHandler {

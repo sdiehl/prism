@@ -262,7 +262,7 @@ fn hash_component(
 
 #[must_use]
 pub fn hex(s: &str) -> Digest {
-    Digest::from(blake3::hash(s.as_bytes()).to_hex().to_string())
+    Digest::of_bytes(blake3::hash(s.as_bytes()).as_bytes())
 }
 
 /// Canonically encode one definition's body (params as the outermost binders).
@@ -325,9 +325,11 @@ enum EncodeFrame<'a> {
     AfterHandleBody {
         return_var: Option<Sym>,
         return_body: Option<&'a Comp>,
+        finally_body: Option<&'a Comp>,
         ops: &'a [HandleOp],
     },
     HandlerOps(&'a [HandleOp]),
+    HandlerFinally(&'a Comp),
     HandlerClause {
         canonical_name: String,
         op: &'a HandleOp,
@@ -529,11 +531,13 @@ impl Enc<'_> {
                             body,
                             return_var,
                             return_body,
+                            finally_body,
                             ops,
                         } => {
                             pending.push(EncodeFrame::AfterHandleBody {
                                 return_var: *return_var,
                                 return_body: return_body.as_deref(),
+                                finally_body: finally_body.as_deref(),
                                 ops: ops.arms(),
                             });
                             pending.push(EncodeFrame::Comp(body));
@@ -656,8 +660,15 @@ impl Enc<'_> {
                 EncodeFrame::AfterHandleBody {
                     return_var,
                     return_body,
+                    finally_body,
                     ops,
                 } => {
+                    // The cleanup clause encodes after the clause set, and an
+                    // absent clause encodes nothing, so a handler without one
+                    // keeps the digest it had before the clause existed.
+                    if let Some(body) = finally_body {
+                        pending.push(EncodeFrame::HandlerFinally(body));
+                    }
                     pending.push(EncodeFrame::HandlerOps(ops));
                     if let (Some(binder), Some(body)) = (return_var, return_body) {
                         self.out.push('R');
@@ -665,6 +676,10 @@ impl Enc<'_> {
                     } else {
                         self.out.push('N');
                     }
+                }
+                EncodeFrame::HandlerFinally(body) => {
+                    self.out.push('F');
+                    pending.push(EncodeFrame::Comp(body));
                 }
                 EncodeFrame::HandlerOps(ops) => {
                     // Preserve the wire's two-phase order: canonicalize every
@@ -760,9 +775,7 @@ mod tests {
         );
     }
 
-    use super::{
-        encode, hash_group, hash_program, scc_groups, shallow_hashes, Digest, Hashes, Sym,
-    };
+    use super::{encode, hash_group, hash_program, scc_groups, shallow_hashes, Hashes, Sym};
     use crate::core::{CheckedHandler, Comp, Core, CoreFn, CorePat, HandleOp, Value};
     use std::{
         collections::{BTreeMap, BTreeSet},
@@ -846,6 +859,7 @@ mod tests {
                 body: Box::new(Comp::Return(Value::Var(parameter))),
                 return_var: Some(return_var),
                 return_body: Some(Box::new(Comp::Return(Value::Var(return_var)))),
+                finally_body: None,
                 ops,
             },
         };
@@ -853,6 +867,39 @@ mod tests {
         assert_eq!(
             isolated_encoding(&function),
             "fn1d0;<Handle><Return>v%b0;R<Return>v%b0;{1:a<Return>v%b0;1:z<Return>v%b1;}",
+        );
+    }
+
+    // A cleanup clause is encoded after the operation clauses under its own
+    // marker, in the handler's outer scope, so a handler without one keeps the
+    // bytes above unchanged.
+    #[test]
+    fn handler_cleanup_clause_encodes_after_the_operations() {
+        let parameter = sym("x");
+        let resume = sym("resume");
+        let ops = CheckedHandler::new(vec![HandleOp {
+            name: sym("a"),
+            params: Vec::new(),
+            resume,
+            body: Comp::Return(Value::Var(resume)),
+        }])
+        .expect("handler operation names are distinct");
+        let function = CoreFn {
+            name: sym("f"),
+            params: vec![parameter],
+            dict_arity: 0,
+            body: Comp::Handle {
+                body: Box::new(Comp::Return(Value::Var(parameter))),
+                return_var: None,
+                return_body: None,
+                finally_body: Some(Box::new(Comp::Return(Value::Var(parameter)))),
+                ops,
+            },
+        };
+
+        assert_eq!(
+            isolated_encoding(&function),
+            "fn1d0;<Handle><Return>v%b0;N{1:a<Return>v%b0;}F<Return>v%b0;",
         );
     }
 
@@ -1119,23 +1166,23 @@ mod tests {
     #[test]
     fn root_is_deterministic_and_order_independent() {
         let mut a = BTreeMap::new();
-        a.insert("map".to_string(), Digest::from("aaa"));
-        a.insert("filter".to_string(), Digest::from("bbb"));
+        a.insert("map".to_string(), super::hex("aaa"));
+        a.insert("filter".to_string(), super::hex("bbb"));
         // A different insertion order yields the same sorted map, so the same root.
         let mut b = BTreeMap::new();
-        b.insert("filter".to_string(), Digest::from("bbb"));
-        b.insert("map".to_string(), Digest::from("aaa"));
+        b.insert("filter".to_string(), super::hex("bbb"));
+        b.insert("map".to_string(), super::hex("aaa"));
         assert_eq!(super::root(&a), super::root(&b));
     }
 
     #[test]
     fn root_moves_under_rename_or_content_change() {
-        let base = BTreeMap::from([("map".to_string(), Digest::from("aaa"))]);
+        let base = BTreeMap::from([("map".to_string(), super::hex("aaa"))]);
         // Renaming the binding (same content hash, new name) changes the root:
         // the namespace commits to the public name.
-        let renamed = BTreeMap::from([("fmap".to_string(), Digest::from("aaa"))]);
+        let renamed = BTreeMap::from([("fmap".to_string(), super::hex("aaa"))]);
         // Changing the behavior hash under the same name changes it too.
-        let rebodied = BTreeMap::from([("map".to_string(), Digest::from("zzz"))]);
+        let rebodied = BTreeMap::from([("map".to_string(), super::hex("zzz"))]);
         assert_ne!(super::root(&base), super::root(&renamed));
         assert_ne!(super::root(&base), super::root(&rebodied));
     }

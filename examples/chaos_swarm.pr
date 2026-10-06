@@ -91,15 +91,15 @@ fn lcg(s : Int) : Int = mod(s * 16807, 2147483647)
 
 fn list_len(xs : List(a)) : Int =
   match xs of
-    Nil => 0
-    Cons(_, r) => 1 + list_len(r)
+    [] => 0
+    _ :: r => 1 + list_len(r)
 
 -- Remove the element at index `i`, returning it paired with the rest (order of
 -- the rest preserved). The scheduler's one primitive over the run queue.
 fn remove_at(i : Int, xs : List(Ready)) : (Ready, List(Ready)) =
   match xs of
-    Nil => ((0, \() -> Exited), Nil)
-    Cons(h, t) =>
+    [] => ((0, \() -> Exited), Nil)
+    h :: t =>
       if i <= 0 then
         (h, t)
       else
@@ -112,7 +112,7 @@ fn remove_at(i : Int, xs : List(Ready)) : (Ready, List(Ready)) =
 -- adversarial interleaving. This function is the whole scheduling policy.
 fn run_next(s : Sched) : (State, List(Int)) =
   match s.run of
-    Nil => (Nil, reverse(s.trace))
+    [] => (Nil, reverse(s.trace))
     _ =>
       let seed2 = lcg(s.seed)
       let idx = mod(seed2, list_len(s.run))
@@ -149,7 +149,7 @@ fn interpret(tid : Int, cmd : Cmd, s : Sched) : (State, List(Int)) =
         )
     Sent(v, k) =>
       match s.blocked of
-        Cons((rtid, rk), rest) =>
+        (rtid, rk) :: rest =>
           run_next(
               Sched {
                 ..s,
@@ -157,7 +157,7 @@ fn interpret(tid : Int, cmd : Cmd, s : Sched) : (State, List(Int)) =
                 run = append(s.run, [(tid, k), (rtid, \() -> rk(v))])
               },
             )
-        Nil =>
+        [] =>
           run_next(
               Sched {
                 ..s,
@@ -167,11 +167,11 @@ fn interpret(tid : Int, cmd : Cmd, s : Sched) : (State, List(Int)) =
             )
     Recved(k) =>
       match s.buf of
-        Cons(h, t) =>
+        h :: t =>
           run_next(
               Sched { ..s, buf = t, run = append(s.run, [(tid, \() -> k(h))]) },
             )
-        Nil => run_next(Sched { ..s, blocked = append(s.blocked, [(tid, k)]) })
+        [] => run_next(Sched { ..s, blocked = append(s.blocked, [(tid, k)]) })
 
 -- One worker: fold a small loop, yielding between iterations so the scheduler has
 -- many interleaving points, then send its (id, value). The value depends only on
@@ -198,8 +198,8 @@ fn spawn(i : Int, n : Int) : Unit ! {Chaos} =
 -- independent: this is precisely what makes the final state schedule-invariant.
 fn insert_msg(m : Msg, xs : State) : State =
   match xs of
-    Nil => [m]
-    Cons(h, t) =>
+    [] => [m]
+    h :: t =>
       match (m, h) of
         ((mi, _), (hi, _)) =>
           if mi <= hi then

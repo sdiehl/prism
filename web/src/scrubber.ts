@@ -1,10 +1,10 @@
 // The determinism scrubber: a boids swarm you drag backward and forward like a
 // video. The whole trajectory is one deterministic run of the same interpreter
-// the playground uses, computed once in wasm (`boids_run`); every frame is a
+// the playground uses, computed once in wasm (`resident_run`); every frame is a
 // pure function of its step index, so positioning the playhead at step N is
 // literally replaying the swarm to N. Backward is not an undo buffer, it is the
 // identical computation re-indexed. No dependencies beyond the wasm bundle.
-import init, { boids_run, tokens } from "../pkg/prism.js";
+import init, { resident_run, tokens } from "../pkg/prism.js";
 import { examples } from "./examples.js";
 import { highlight, initFaces, kernel } from "./showcase.js";
 import "./showcase.css";
@@ -16,7 +16,7 @@ import "./showcase.css";
 const KERNEL_SPLIT = "-- @scrubber:main-below";
 const KERNEL_SRC = kernel(examples.boids, KERNEL_SPLIT);
 
-// How many steps of the swarm to replay. The single upfront `boids_run` computes
+// How many steps of the swarm to replay. The single upfront `resident_run` computes
 // every frame 0..STEPS; scrubbing after that is pure array indexing.
 const STEPS = 120;
 // Playback advances at this many frames per second when Play is held.
@@ -55,7 +55,7 @@ let playing = false;
 // world coordinates map onto it, and the backing store is scaled for hi-dpi.
 let size = 0;
 
-// Parse the `boids_run` transcript: a header line "W H" then one line per frame,
+// Parse the `run_trace` transcript: a header line "W H" then one line per frame,
 // each a space-separated list of "x,y" integer positions.
 function parse(text: string): { world: number; frames: Frame[] } {
   const lines = text.split("\n");
@@ -211,7 +211,7 @@ async function boot(): Promise<void> {
     // blocks. `setTimeout` rather than `requestAnimationFrame`, so a tab loaded
     // in the background (where rAF is paused) still starts the simulation.
     await new Promise((r) => setTimeout(r, 0));
-    const raw = boids_run(STEPS);
+    const raw = resident_run("boids", `run_trace(${STEPS})`);
     if (raw.startsWith("error:")) {
       statusEl.textContent = raw;
       statusEl.classList.add("err");

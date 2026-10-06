@@ -245,8 +245,8 @@ fn lx_by_first_go(
   acc : Array(List(String))
 ) : Array(List(String)) =
   match xs of
-    Nil => acc
-    Cons(s, rest) =>
+    [] => acc
+    s :: rest =>
       let b = byte_at(s, 0)
       lx_by_first_go(rest, array_set(acc, b, Cons(s, array_get(acc, b))))
 
@@ -258,8 +258,8 @@ fn lx_find_kw(
   kws : List(String)
 ) : Option(String) =
   match kws of
-    Nil => None
-    Cons(k, rest) =>
+    [] => None
+    k :: rest =>
       if lx_run_eq(text, lo, hi, k) then
         Some(k)
       else
@@ -335,6 +335,7 @@ fn lx_upper_keywords() : List(String) =
 -- one-byte prefixes.
 fn lx_operators() : List(String) =
   [
+      "</>",
       "==.",
       "/=.",
       "<=.",
@@ -362,6 +363,7 @@ fn lx_operators() : List(String) =
       "*.",
       "/.",
       ":=",
+      "::",
       "..",
       "??",
       "?.",
@@ -682,25 +684,25 @@ fn lx_esc_byte(e : Int) : Option(Int) =
 -- re-entry).
 fn lx_head0(xs : List(Int)) : Int =
   match xs of
-    Nil => 0
-    Cons(h, _) => h
+    [] => 0
+    h :: _ => h
 
 -- The tail of an `Int` stack.
 fn lx_tail(xs : List(Int)) : List(Int) =
   match xs of
-    Nil => Nil
-    Cons(_, t) => t
+    [] => Nil
+    _ :: t => t
 
 -- Whether the stack is exactly the singleton [0]: the closing condition for a
 -- hole scan (the hole's own brace depth returned to zero, no nested string
 -- frames open).
 fn lx_zero_one(xs : List(Int)) : Bool =
   match xs of
-    Nil => false
-    Cons(h, t) =>
+    [] => false
+    h :: t =>
       match t of
-        Nil => h == 0
-        Cons(_, _) => false
+        [] => h == 0
+        _ :: _ => false
 
 -- Find the end of a string literal opened at `oq`, returning the offset just
 -- past the closing quote. A `{` opens a hole and a nested `"` inside it opens
@@ -722,12 +724,12 @@ fn lx_unterminated(
 ) : LexError =
   if lx_head0(depth) > 0 then
     match braces of
-      Cons(bo, _) => LxUntermHole(bo)
-      Nil => LxUntermStr(lx_head0(quotes))
+      bo :: _ => LxUntermHole(bo)
+      [] => LxUntermStr(lx_head0(quotes))
   else
     match quotes of
-      Cons(qo, _) => LxUntermStr(qo)
-      Nil => LxUntermHole(lx_head0(braces))
+      qo :: _ => LxUntermStr(qo)
+      [] => LxUntermHole(lx_head0(braces))
 
 -- lint: allow(L0101, L0103)
 fn lx_scan_str(
@@ -760,8 +762,8 @@ fn lx_scan_str(
       let d2 = lx_tail(depth)
       let q2 = lx_tail(quotes)
       match d2 of
-        Nil => Ok(p + 1)
-        Cons(_, _) => lx_scan_str(text, p + 1, n, d2, q2, braces, false)
+        [] => Ok(p + 1)
+        _ :: _ => lx_scan_str(text, p + 1, n, d2, q2, braces, false)
     elif b == lx_b("\"") then
       lx_scan_str(
           text,
@@ -896,8 +898,8 @@ fn lx_blank_range(text : String, lo : Int, hi : Int) : Bool =
 -- no match, including any byte that starts no operator at all, is a hard error.
 fn lx_op(text : String, i : Int, ops : List(String)) : LxStep =
   match ops of
-    Nil => LxErr(LxInvalid(i))
-    Cons(s, rest) =>
+    [] => LxErr(LxInvalid(i))
+    s :: rest =>
       if lx_matches(text, i, s) then
         LxTok(TFixed(s), i + byte_len(s))
       else
@@ -1003,8 +1005,8 @@ fn lx_value(text : String, k : TokenKind, lo : Int, hi : Int) : Option(String) =
 -- forward-order token run onto the reversed accumulator.
 fn lx_rev_append(xs : List(Token), acc : List(Token)) : List(Token) =
   match xs of
-    Nil => acc
-    Cons(x, rest) => lx_rev_append(rest, Cons(x, acc))
+    [] => acc
+    x :: rest => lx_rev_append(rest, Cons(x, acc))
 
 -- Re-lex the hole expression text[lo, hi) at its absolute source offsets. The
 -- range is bounded at `hi`, so lookahead never reads past the closing brace; a

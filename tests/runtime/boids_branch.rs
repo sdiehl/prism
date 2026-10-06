@@ -26,8 +26,8 @@ fn run(main: &str) -> String {
 }
 
 // Turn one full-state frame line ("x,y,vx,vy x,y,vx,vy ...") into the Prism list
-// literal `[(x,y,vx,vy), ...]` the run-from driver takes, exactly as the wasm
-// `boids_run_from` export does. The frontend forks by handing such a literal
+// literal `[(x,y,vx,vy), ...]` the run-from driver takes, exactly as the branch page
+// builds it for `resident_run`. The frontend forks by handing such a literal
 // (after perturbing it) to `run_trace_from`.
 fn swarm_literal(frame: &str) -> String {
     let tuples: Vec<String> = frame.split_whitespace().map(|b| format!("({b})")).collect();

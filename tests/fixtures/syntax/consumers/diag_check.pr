@@ -53,11 +53,11 @@ fn check_one(d : Diagnostic, text : String) : String =
 
 fn report(doc : DiagnosticsDoc) : String =
   match doc.diagnostics of
-    Nil => "mismatch: artifact carries no diagnostic"
-    Cons(d, rest) =>
+    [] => "mismatch: artifact carries no diagnostic"
+    d :: rest =>
       match rest of
-        Cons(_, _) => "mismatch: artifact carries more than one diagnostic"
-        Nil => check_one(d, doc.source.text)
+        _ :: _ => "mismatch: artifact carries more than one diagnostic"
+        [] => check_one(d, doc.source.text)
 
 fn main() =
   let text = read_file(arg(0))

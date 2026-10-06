@@ -1,6 +1,6 @@
 {
   "schema": "prism-parser-compaction-entry-receipt-v1",
-  "oracle_commit": "46886c1fa7064e4809020c1b788b3ee3531d6a63",
+  "oracle_tree": "cd110efef00d124b955cb6648724887e8e5517f4",
   "corpus_version": 2,
   "entry_id": "rust.TypeSigParser",
   "visibility": "public",
@@ -69,6 +69,6 @@
   "subject": {
     "backend": "Rust/LALRPOP",
     "adapter_source_blake3": "64e962d53f6c8f8f000524f66f2b1a5d13105448cb243292955507a9c36ea1ec",
-    "adapter_executable_blake3": "48d37d7d2fcec473d374d873307dd412ba2e0085a519a34bc94536d2d5ef50e0"
+    "adapter_executable_blake3": "b9a18d09217eb2c2ca9f935ed7f4f73289f909283b1690c259064ed59ba6f984"
   }
 }

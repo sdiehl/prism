@@ -159,7 +159,9 @@ fn expr(e: &mut S<Expr<Core>>, next: &mut u32) {
             expr(b, next);
             for a in arms {
                 match a {
-                    HandlerArm::Return(_, body) | HandlerArm::Op(_, _, _, body) => expr(body, next),
+                    HandlerArm::Return(_, body)
+                    | HandlerArm::Op(_, _, _, body)
+                    | HandlerArm::Finally(body) => expr(body, next),
                     #[expect(
                         clippy::uninhabited_references,
                         reason = "Never is uninhabited in Core; arm is unreachable"

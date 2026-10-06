@@ -143,7 +143,7 @@ pub fn build(input: IndexInput<'_>) -> Result<Index, Error> {
 
     Ok(Index {
         envelope: Envelope {
-            format: INDEX_FORMAT.to_string(),
+            format: INDEX_FORMAT,
             scheme: production.layers.scheme.to_string(),
             compiler: production.layers.version.to_string(),
             contract: production.layers.root.as_str().to_string(),
@@ -560,7 +560,7 @@ fn attach_members(defs: &mut [Def], program: &Program<Core>) {
         declared.insert(&e.name, e.ops.iter().map(|op| op.name.as_str()).collect());
     }
     for c in &program.classes {
-        declared.insert(&c.name, c.methods.iter().map(|(m, _)| m.as_str()).collect());
+        declared.insert(&c.name, c.methods.iter().map(|m| m.name.as_str()).collect());
     }
     for def in defs.iter_mut() {
         let Some(names) = declared.get(def.id.as_str()) else {
@@ -630,8 +630,8 @@ pub(super) fn member_owners(program: &Program<Core>) -> MemberOwners {
         }
     }
     for c in &program.classes {
-        for (method, _) in &c.methods {
-            claim(method, &c.name);
+        for m in &c.methods {
+            claim(&m.name, &c.name);
         }
     }
     candidates
@@ -676,7 +676,8 @@ fn attach_refs(defs: &mut [Def], seen: &occurrences::Occurrences, owners: &Membe
             .map_or_else(|| target.to_string(), Clone::clone)
     };
     let mut by_owner: BTreeMap<&str, Vec<&occurrences::Ref>> = BTreeMap::new();
-    for r in &seen.refs {
+    // A local names no definition, so it links nowhere in the index.
+    for r in seen.refs.iter().filter(|r| r.local.is_none()) {
         by_owner.entry(r.owner.as_str()).or_default().push(r);
     }
     for def in defs.iter_mut() {

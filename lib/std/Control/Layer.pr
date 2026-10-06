@@ -141,8 +141,8 @@ fn lay_any_list(
   xs : List(a)
 ) : Bool ! { | e} =
   match xs of
-    Nil => false
-    Cons(c, rest) =>
+    [] => false
+    c :: rest =>
       if lay_any(p, q, c) then
         true
       else
@@ -190,8 +190,8 @@ fn lay_index_go(
   i : Int
 ) : List(Int) ! { | e} =
   match xs of
-    Nil => Nil
-    Cons(n, rest) =>
+    [] => Nil
+    n :: rest =>
       if q(n) then
         Cons(i, lay_index_go(q, rest, i + 1))
       else
@@ -235,8 +235,8 @@ fn lay_path_kids(
   parent : Int
 ) : Option(List(Int)) =
   match cs of
-    Nil => None
-    Cons(c, rest) =>
+    [] => None
+    c :: rest =>
       let span = lay_size(p, c)
       if target < base + span then
         match lay_path_go(p, target, base, c) of
@@ -252,8 +252,8 @@ pub fn lay_indexed(p : Layer(a), x : a) : List((Int, a)) =
 
 fn lay_indexed_go(xs : List(a), i : Int) : List((Int, a)) =
   match xs of
-    Nil => Nil
-    Cons(n, rest) => Cons((i, n), lay_indexed_go(rest, i + 1))
+    [] => Nil
+    n :: rest => Cons((i, n), lay_indexed_go(rest, i + 1))
 
 -- | The immediate children of every node, flattened: the one-layer relation of
 -- the whole tree as parent-child pairs in preorder. A dependency or occurrence

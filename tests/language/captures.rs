@@ -5,14 +5,15 @@
 // analyses, so these check their content and their determinism, not compilation.
 
 use indoc::indoc;
+use prism::DumpPhase;
 use prism::{dump, with_prelude};
 
 fn cap(src: &str) -> String {
-    dump("captures", &with_prelude(src)).expect("captures")
+    dump(DumpPhase::Captures, &with_prelude(src)).expect("captures")
 }
 
 fn usage(src: &str) -> String {
-    dump("usage-summary", &with_prelude(src)).expect("usage-summary")
+    dump(DumpPhase::UsageSummary, &with_prelude(src)).expect("usage-summary")
 }
 
 // One program exercising every capture class: a lambda that captures a `var`

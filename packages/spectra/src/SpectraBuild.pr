@@ -1,6 +1,7 @@
 -- | Standalone Spectra build orchestration, written in Prism.
 --
--- The executable treats `prism` and `typst` as explicit external tools. Deck
+-- The executable treats `prism` and `typst` as explicit external tools; the
+-- compiler is the binary the caller names (`--prism`), never looked up again. Deck
 -- construction and Typst lowering remain pure package code; this module is the
 -- narrow host shell that captures the framed envelope and writes artifacts.
 -- The pipeline a `spectra build` runs, end to end:
@@ -18,6 +19,7 @@
 
 import Data.String (contains, ends_with, starts_with, str_of_char, trim)
 import Data.Result (map_err)
+import Test (expect_equal)
 import Json (Json, JObj, JStr, JInt, decode, encode, json_error_message)
 
 -- | The framed value a deck program prints: the Typst source, the logical
@@ -60,8 +62,8 @@ fn join_path(root : String, rest : String) : String =
 
 fn field(name : String, fields : List((String, Json))) : Option(Json) =
   match fields of
-    Nil => None
-    Cons((key, value), rest) =>
+    [] => None
+    (key, value) :: rest =>
       if key == name then
         Some(value)
       else
@@ -156,19 +158,25 @@ fn write_text(path : String, body : String) : Result(Unit, String) ! {IO} =
 -- doctest runner, which compiles the example and compares what it actually
 -- prints. An example that has drifted from its output fails the build rather
 -- than reaching a screen.
-fn doctest_steps(project : String) : Result(Unit, String) ! {IO} =
-  run("deck doctests", "prism docs {shell_quote(project)} --test")
+fn doctest_steps(
+  prism : String,
+  project : String
+) : Result(Unit, String) ! {IO} =
+  run(
+      "deck doctests",
+      "{shell_quote(prism)} docs {shell_quote(project)} --test",
+    )
 
-fn check_steps(project : String) : Result(Unit, String) ! {IO} =
-  run("Prism check", "prism check {shell_quote(project)}")?
-  doctest_steps(project)?
+fn check_steps(prism : String, project : String) : Result(Unit, String) ! {IO} =
+  run("Prism check", "{shell_quote(prism)} check {shell_quote(project)}")?
+  doctest_steps(prism, project)?
   run("Typst discovery", "typst --version")?
   Ok(())
 
 -- | Verify the external tools and the deck without writing any artifact,
 -- returning the status to exit with.
-pub fn check_project(project : String) : Int ! {IO, Output} =
-  match check_steps(project) of
+pub fn check_project(project : String, prism : String) : Int ! {IO, Output} =
+  match check_steps(prism, project) of
     Ok(_) =>
       out_println("Spectra project is ready")
       0
@@ -180,6 +188,7 @@ pub fn check_project(project : String) : Int ! {IO, Output} =
 -- nesting is the sequence, not a decision tree.
 -- lint: allow(L0101)
 fn build_steps(
+  prism : String,
   project : String,
   output : String
 ) : Result((DeckEnvelope, String), String) ! {FileSystem, IO} =
@@ -190,10 +199,10 @@ fn build_steps(
   let typst_path = join_path(target, "deck.typ")
   let pdf_path = join_path(target, output)
   run("creating target/spectra", "mkdir -p -- {shell_quote(target)}")?
-  doctest_steps(project)?
+  doctest_steps(prism, project)?
   run(
       "deck compilation",
-      "prism build {shell_quote(project)} --out {shell_quote(evaluator)}",
+      "{shell_quote(prism)} build {shell_quote(project)} --out {shell_quote(evaluator)}",
     )?
   run("deck evaluation", "{shell_quote(evaluator)} > {shell_quote(captured)}")?
   let parsed = parse_envelope(read_file(captured))?
@@ -211,13 +220,14 @@ fn build_steps(
 pub fn build_project(
   project : String,
   output : String,
-  open : Bool
+  open : Bool,
+  prism : String
 ) : Int ! {FileSystem, IO, Output} =
   if not(safe_output(output)) then
     eprintln("spectra: --output must be a plain relative .pdf filename")
     exit_refused
   else
-    match build_steps(project, output) of
+    match build_steps(prism, project, output) of
       Err(message) =>
         eprintln("spectra: {message}")
         1
@@ -247,10 +257,7 @@ pub fn clean_project(project : String) : Int ! {IO} =
         1
 
 test fn shell_arguments_are_single_quoted() =
-  if shell_quote("a'b c") == "'a'\\''b c'" then
-    ()
-  else
-    fail()
+  expect_equal("'a'\\''b c'", shell_quote("a'b c"))
 
 test fn framed_envelope_rejects_plain_output() =
   match parse_envelope("debug output") of

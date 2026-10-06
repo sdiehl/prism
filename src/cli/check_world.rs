@@ -5,12 +5,14 @@
 //! `Serialize` structs (below); its keys are emitted in the same sorted order the
 //! previous hand-built `serde_json::Map` produced, so the byte stream is unchanged.
 
+use crate::DumpPhase;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsStr;
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use prism_common::format::FormatTag;
 use serde::{Serialize, Serializer};
 use serde_json::Value;
 
@@ -24,8 +26,8 @@ use crate::lineage::{
 };
 use crate::project::MANIFEST as PRISM_MANIFEST;
 
-const CHECK_WORLD_FORMAT: &str = "prism-check-world-v1";
-const CHECK_WORLD_BACKEND: &str = "check";
+const CHECK_WORLD_FORMAT: FormatTag = FormatTag::new("prism-check-world-v1");
+const CHECK_WORLD_BACKEND: crate::driver::ArtifactBackend = crate::driver::ArtifactBackend::Check;
 const CHECK_WORLD_COMPATIBLE: &str = "compatible";
 const CHECK_WORLD_INCOMPATIBLE: &str = "incompatible";
 const CHECK_WORLD_SCOPE: &str = "typecheck-only";
@@ -53,11 +55,11 @@ const PACKAGE_DOCS_DIR: &str = "docs";
 // human-readable markdown projection of the usage summary, regenerated the way the
 // tier manifest golden is (`dump usage-summary-md`). Shared with `pkg accept-usage`.
 pub(crate) const PACKAGE_USAGE_SUMMARY: &str = "usage-summary.md";
-pub(crate) const USAGE_SUMMARY_PHASE: &str = "usage-summary-md";
+pub(crate) const USAGE_SUMMARY_PHASE: DumpPhase = DumpPhase::UsageSummaryMd;
 // The whole-program lowering-tier phase. The usage summary is headed by this same
 // tier (both read the typed cascade's canonical strategy decision), so the usage
 // gate surfaces it as a scalar in the report without parsing the markdown back.
-const TIER_PHASE: &str = "tier";
+const TIER_PHASE: DumpPhase = DumpPhase::Tier;
 const GIT_DIR: &str = ".git";
 const TARGET_DIR: &str = "target";
 
@@ -553,8 +555,8 @@ fn collect_world_manifests(
 #[derive(Serialize)]
 struct CheckWorldJson<'a> {
     compatibility: CompatibilityReport<'a>,
-    format: &'static str,
-    lineage_format: &'static str,
+    format: FormatTag,
+    lineage_format: FormatTag,
     packages: BTreeMap<String, PackageEntry<'a>>,
     root: String,
     validation: ValidationReport,
@@ -645,7 +647,7 @@ impl<'a> GatesReport<'a> {
             root: gates.root,
             usage: gates.usage,
             usage_drift: gates.usage_drift.as_deref(),
-            usage_format: USAGE_SUMMARY_PHASE,
+            usage_format: USAGE_SUMMARY_PHASE.as_str(),
             usage_tier: gates.usage_tier.as_deref(),
         }
     }

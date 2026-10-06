@@ -207,6 +207,87 @@ pub fn infer_borrow_sigs(core: &Core, pure_fns: &Set, declared: &Sigs) -> Sigs {
         .collect()
 }
 
+/// Check the promises an inferred borrow map makes to its consumers.
+///
+/// Run on every build, whether or not borrow inference is switched on, so a
+/// malformed map fails the build that produced it instead of lying dormant until
+/// the toggle next flips. `inferred` must keep every declared borrow, give
+/// entries only to known functions and only within their arity, leave
+/// dictionary parameters owned, omit all-owned entries, and add a borrow only to
+/// a provably pure function at a position every call site feeds a bare variable
+/// or a literal immediate.
+///
+/// # Errors
+/// Names the first entry that breaks one of those promises.
+pub fn check_borrow_sigs(
+    core: &Core,
+    pure_fns: &Set,
+    declared: &Sigs,
+    inferred: &Sigs,
+) -> Result<(), String> {
+    for (name, mask) in declared {
+        let kept = inferred.get(name).map(Vec::as_slice);
+        if (0..mask.len()).any(|i| mask[i] && !borrowed_at(kept, i)) {
+            return Err(format!(
+                "borrow inference dropped a declared borrow of `{name}`"
+            ));
+        }
+    }
+    let arity: BTreeMap<Sym, (usize, usize)> = core
+        .fns
+        .iter()
+        .map(|f| (f.name, (f.params.len(), f.dict_arity)))
+        .collect();
+    let mut added = Sigs::new();
+    for (name, mask) in inferred {
+        if !mask.iter().any(|b| *b) {
+            return Err(format!(
+                "borrow inference kept an all-owned entry for `{name}`"
+            ));
+        }
+        let own = declared.get(name).map(Vec::as_slice);
+        let fresh: Vec<bool> = (0..mask.len())
+            .map(|i| mask[i] && !borrowed_at(own, i))
+            .collect();
+        if !fresh.iter().any(|b| *b) {
+            continue;
+        }
+        let Some(&(params, dicts)) = arity.get(name) else {
+            return Err(format!("borrow inference gave a mask to unknown `{name}`"));
+        };
+        if !pure_fns.contains(name) {
+            return Err(format!("borrow inference borrowed in impure `{name}`"));
+        }
+        if mask.len() > params {
+            return Err(format!(
+                "borrow mask of `{name}` is wider than its {params} parameters"
+            ));
+        }
+        if fresh.iter().take(dicts).any(|b| *b) {
+            return Err(format!(
+                "borrow inference borrowed a dictionary of `{name}`"
+            ));
+        }
+        added.insert(*name, fresh);
+    }
+    let mut vetted = added.clone();
+    let mut shapes = CallShapes {
+        candidates: &mut vetted,
+    };
+    for f in &core.fns {
+        shapes.walk_comp(&normalized_body(&f.body));
+    }
+    match added
+        .iter()
+        .find(|(name, mask)| vetted.get(*name) != Some(*mask))
+    {
+        Some((name, _)) => Err(format!(
+            "a call to `{name}` passes a structured value at an inferred borrow"
+        )),
+        None => Ok(()),
+    }
+}
+
 // Reassociation is observable to loop classification only when a bind has a
 // bind as its head. Borrow the original body in the common case, which also
 // avoids manufacturing an owned tree merely to inspect it.
@@ -1155,6 +1236,52 @@ mod tests {
         );
         assert_eq!(mask(&sigs, "float_reader"), None);
         assert_eq!(mask(&sigs, "str_reader"), Some(&vec![true]));
+    }
+
+    #[test]
+    fn the_check_refuses_each_broken_promise() {
+        let reader = f(
+            "reader",
+            &["xs"],
+            Comp::Case(
+                Value::Var(s("xs")),
+                vec![(CorePat::Wild, Comp::Return(Value::Int(1)))],
+            ),
+        );
+        let feed = f(
+            "feed",
+            &[],
+            Comp::Call(
+                s("reader"),
+                vec![Value::Ctor(s("Nil"), TEST_CTOR_TAG, vec![])],
+            ),
+        );
+        let program = core(vec![reader, feed]);
+        let pure = pure_set(&["reader"]);
+        let one = |mask: Vec<bool>| -> Sigs { std::iter::once((s("reader"), mask)).collect() };
+        let refused = |declared: &Sigs, inferred: &Sigs, why: &str| {
+            let err = check_borrow_sigs(&program, &pure, declared, inferred)
+                .expect_err("a broken map must be refused");
+            assert!(err.contains(why), "{err}");
+        };
+        let none = Sigs::new();
+        refused(&one(vec![true]), &none, "dropped a declared borrow");
+        refused(&none, &one(vec![false]), "all-owned");
+        refused(&none, &one(vec![true, true]), "wider than");
+        refused(&none, &one(vec![true]), "structured value");
+        let ghost: Sigs = std::iter::once((s("ghost"), vec![true])).collect();
+        refused(&none, &ghost, "unknown");
+        let feed_borrow: Sigs = std::iter::once((s("feed"), vec![true])).collect();
+        assert!(check_borrow_sigs(&program, &pure, &none, &feed_borrow)
+            .is_err_and(|e| e.contains("impure")));
+        // A declared borrow is the source contract, so the call shape is the
+        // caller's problem and the check leaves it to the balance checker.
+        assert_eq!(
+            check_borrow_sigs(&program, &pure, &one(vec![true]), &one(vec![true])),
+            Ok(())
+        );
+        let inferred = infer_borrow_sigs(&program, &pure, &none);
+        assert_eq!(check_borrow_sigs(&program, &pure, &none, &inferred), Ok(()));
     }
 
     #[test]

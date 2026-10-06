@@ -18,8 +18,8 @@ effect Exn
 
 fn accumulate(xs) : Int ! {State} =
   match xs of
-    Nil => get()
-    Cons(x, rest) =>
+    [] => get()
+    x :: rest =>
       let n = get()
       put(n + x)
       accumulate(rest)

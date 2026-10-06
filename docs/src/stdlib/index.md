@@ -5,8 +5,8 @@ Prism's standard library is ordinary Prism source, not compiler built-ins. A sma
 ## Merkle root
 
 - **Scheme**: `prism-core-hash-v2`
-- **Hash**: `3e1bf0d4e6fb194b93b5cf9e087b431bb3217008bf27d9d4c96001f25c9caf02`
-- **Compiler version**: Prism v0.23.0
+- **Hash**: `72a01927a559833c587ce287356c2c56aab1765d809840876ef61ffed2751146`
+- **Compiler version**: Prism v0.24.0
 
 ## Modules
 
@@ -55,7 +55,7 @@ Prism's standard library is ordinary Prism source, not compiler built-ins. A sma
 - [Data.Validation](./data-validation.md) - `Validation`, the error-accumulating sibling of `Result`.
 - [Data.Vec](./data-vec.md) - Fixed-length vectors indexed by a `Nat` dimension.
 - [Syntax.Analysis](./syntax-analysis.md) - Analysis walks over the surface syntax tree.
-- [Syntax.Ast](./syntax-ast.md) - The typed surface syntax that the `prism-surface-syntax-v1` artifact decodes into.
+- [Syntax.Ast](./syntax-ast.md) - The typed surface syntax that the `prism-surface-syntax-v2` artifact decodes into.
 - [Syntax.Codec](./syntax-codec.md) - Codecs for the versioned syntax artifacts.
 - [Syntax.Cursor](./syntax-cursor.md) - The mechanical half of recursive descent: a token cursor with peek, advance, and expect, and a Pratt driver over a binding-power table.
 - [Syntax.Diagnostic](./syntax-diagnostic.md) - The typed vocabulary of the `prism-syntax-diagnostics-v1` artifact.
@@ -94,10 +94,13 @@ Prism's standard library is ordinary Prism source, not compiler built-ins. A sma
 - [Json](./json.md) - JSON: a dynamic value tree, a total parser, a canonical encoder, and a typed layer.
 - [Math](./math.md) - Named mathematical constants, matching Rust's `f64::consts` surface.
 - [Net](./net.md) - Net: TCP stream sockets, as an ordinary algebraic effect.
+- [Path](./path.md) - Path: lexical file paths, with no filesystem in sight.
+- [Proc](./proc.md) - Proc: child processes, as an ordinary algebraic effect.
 - [Quickcheck](./quickcheck.md) - Property testing: run a boolean property over many generated inputs and report the first counterexample, deterministically.
 - [Replay](./replay.md) - Record/replay handlers for the capability effects.
 - [Sequence](./sequence.md) - The one lazy iteration protocol: pull-based sequences with natural names.
+- [Shell](./shell.md) - Shell: a small vocabulary for script-shaped programs, over `Proc` and `Path`.
 - [Teleport](./teleport.md) - The checked mobility boundary: freezing a portable, single-use computation into an envelope, and placing that envelope wherever the installed transport puts it.
-- [Test](./test.md) - Per-type value generators for property testing.
+- [Test](./test.md) - Test assertions and per-type value generators for property testing.
 - [Time](./time.md) - Time: instants, wall-clock timestamps, durations, and RFC 3339.
 - [Wire](./wire.md) - The opt-in serialization layer.

@@ -47,7 +47,7 @@ type SurfaceDoc = SurfaceDoc {
 }
 ```
 
-A decoded `prism-surface-syntax-v1` document: the envelope identity, the embedded source, and the ordered item list of the parsed file.
+A decoded `prism-surface-syntax-v2` document: the envelope identity, the embedded source, and the ordered item list of the parsed file.
 
 ## Effects
 
@@ -104,15 +104,23 @@ Encode a token document back to the exact artifact bytes the compiler emits: `en
 
 ### `surface_schema`
 
-```prism,sig,h-669588210cda7c525bd8a8516cce114d8cfbfc8d439de7bf7d5a8995b408da7f
+```prism,sig,h-4507a10d6731c3d701e5b49b82e3f591793126bf424f68bc9147398f54f91f18
 surface_schema : () -> String
 ```
 
 The schema tag of the surface-syntax artifact.
 
+### `surface_schema_v1`
+
+```prism,sig,h-669588210cda7c525bd8a8516cce114d8cfbfc8d439de7bf7d5a8995b408da7f
+surface_schema_v1 : () -> String
+```
+
+The schema tag before constructors, effect operations, and class methods carried the span of their name. A document under it still decodes, upgraded: see `decode_surface`.
+
 ### `encode_surface`
 
-```prism,sig,h-9c9071f7174fef8aca97de42d1ee6f738a78c45599721cb81f79c145b7e993af
+```prism,sig,h-b29be35a14c799731affed7b161b5b64fe22a2bff9be42a78e83621b2c1e0f80
 encode_surface : (Syntax.Codec.SurfaceDoc) -> String
 ```
 
@@ -120,11 +128,11 @@ Encode a surface document back to the exact artifact bytes the compiler emits: `
 
 ### `decode_surface`
 
-```prism,sig,h-e7ec996d1108419ba2267a10cbcab037ed71318034e0ebb82662b09c0f15c1cc
+```prism,sig,h-369057476f6f403d03549255505e66a5c8e27b9b9c33d490749c4c64d5a8690e
 decode_surface : (String) -> Result(Syntax.Codec.SurfaceDoc, Syntax.Codec.CodecError)
 ```
 
-Decode a `prism-surface-syntax-v1` document from its exact bytes. A wrong or missing schema tag, malformed JSON, missing field, or invalid span is a structured `CodecError`, never a partial document.
+Decode a `prism-surface-syntax-v2` document from its exact bytes. A wrong or missing schema tag, malformed JSON, missing field, or invalid span is a structured `CodecError`, never a partial document. A `prism-surface-syntax-v1` document is upgraded first: its constructors, effect operations, and class methods carry no name span, so each reads as the empty span at offset 0, and the result is a v2 document. Nothing is upgraded under the v2 tag, so a v2 document missing a member span is refused.
 
 ### `decode_diagnostics`
 

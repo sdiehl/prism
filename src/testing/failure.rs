@@ -47,7 +47,7 @@ pub struct Failure {
 #[must_use]
 pub fn encode_failure(failure: &Failure) -> Vec<u8> {
     let mut out = Vec::new();
-    put_str(&mut out, TEST_FAILURE_SCHEMA);
+    put_str(&mut out, TEST_FAILURE_SCHEMA.as_str());
     put_uvarint(&mut out, FAILURE_ABI);
     put_str(&mut out, &failure.message);
     put_opt(&mut out, failure.expected.as_deref());
@@ -72,7 +72,7 @@ pub fn encode_failure(failure: &Failure) -> Vec<u8> {
 /// length, invalid UTF-8, or trailing bytes.
 pub fn decode_failure(bytes: &[u8]) -> Result<Failure, CodecError> {
     let mut r = Reader::new(bytes);
-    if r.string()? != TEST_FAILURE_SCHEMA {
+    if TEST_FAILURE_SCHEMA.expect(&r.string()?).is_err() {
         return Err(CodecError::Scheme);
     }
     if r.uvarint()? != FAILURE_ABI {

@@ -20,8 +20,8 @@ error Malformed(String)
 
 fn find_port(cfg, key) =
   match cfg of
-    Nil => throw NotFound(key)
-    Cons(pair, rest) =>
+    [] => throw NotFound(key)
+    pair :: rest =>
       let (k, v) = pair
       if k == key then
         v

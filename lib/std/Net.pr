@@ -11,7 +11,7 @@
 --
 -- A socket is reached only through a bracket. `with_tcp_listener`,
 -- `with_tcp_accept`, and `with_tcp_connection` each open one socket, pass it to
--- a body, and close it when the body returns. There is no public `close` and no
+-- a body, and close it when the body is left. There is no public `close` and no
 -- way to name a socket that was not handed to you, so the lifetime is the
 -- bracket's rather than the caller's bookkeeping. Each body takes its socket
 -- `@ noescape`, so a body that returns its socket, stores it in returned data,
@@ -31,14 +31,12 @@
 -- host, so a program that branches on an error is branching on what happened
 -- rather than on which libc it was built against.
 --
--- Ownership is lexical, not collected. The bracket closes when the body returns,
--- whether it returns `Ok` or `Err`. A body that leaves some other way, by
--- performing `fail()` or by being cancelled, abandons the continuation, so the
--- close does not run and the socket is released at process exit; put the bracket
--- inside `Concurrent.on_cancel` when a cancelled fiber has to close promptly.
--- Closing unconditionally would mean intercepting those effects here, which puts
--- them in the row of every program that touches the network to serve one rare
--- shape.
+-- Ownership is lexical, not collected. The close is each bracket's `finally`
+-- clause, so it runs on return and on abandonment: a body that answers `Ok` or
+-- `Err`, and one that leaves by performing `fail()` or by being cancelled, whose
+-- continuation a handler outside drops, both release the socket before the run
+-- goes on. The bracket intercepts none of those effects to do it, so they stay
+-- out of the row of a program that touches the network.
 --
 -- A handle outliving its bracket is not a hazard even where the escape check
 -- cannot see it, only a mistake with a deterministic answer: closing retires the
@@ -155,8 +153,8 @@ fn net_error(code : Int) : NetError = net_error_in(code, net_codes)
 
 fn net_error_in(code : Int, rows : List((Int, NetError))) : NetError =
   match rows of
-    Nil => Other
-    Cons((c, e), rest) =>
+    [] => Other
+    (c, e) :: rest =>
       if c == code then
         e
       else
@@ -268,9 +266,17 @@ pub fn split_address(address : String) : Result((String, Int), NetError) =
           str_slice(address, colon, str_len(address)),
         )
 
+-- Close a bracket's socket. A close that fails has nothing left to release, and
+-- a cleanup answers `Unit`, so its refusal is dropped here.
+fn release(h : Int) : Unit ! {Net} =
+  match net_close(h) of
+    Ok(u) => u
+    Err(_) => ()
+
 -- | Bind `address`, listen with the given accept-queue depth, and run `body`
--- with the listener; close it when `body` returns. The result is `body`'s
--- answer, or the reason the socket could not be opened.
+-- with the listener; close it when `body` is left, on return and on
+-- abandonment. The result is `body`'s answer, or the reason the socket could
+-- not be opened.
 --
 -- `backlog` is a request, not a guarantee: the host clamps it into the range it
 -- supports and may pick another depth entirely. Nothing a program can observe
@@ -297,13 +303,13 @@ pub fn with_tcp_listener(
       match net_listen(host, port, backlog) of
         Err(x) => Err(x)
         Ok(h) =>
-          let r = body(Listener(h))
-          let _closed = net_close(h)
-          Ok(r)
+          handle body(Listener(h)) with
+            return r => Ok(r)
+            finally => release(h)
 
 -- | Wait for the next connection on `l` and run `body` with it, closing it when
--- `body` returns. One connection: call it again for the next, which leaves the
--- accept loop the caller's to write and to bound.
+-- `body` is left, on return and on abandonment. One connection: call it again
+-- for the next, which leaves the accept loop the caller's to write and to bound.
 pub fn with_tcp_accept(
   l : Listener,
   body : (Stream @ noescape) -> a ! {Net | e}
@@ -313,12 +319,12 @@ pub fn with_tcp_accept(
       match net_accept(lh) of
         Err(x) => Err(x)
         Ok(h) =>
-          let r = body(Stream(h))
-          let _closed = net_close(h)
-          Ok(r)
+          handle body(Stream(h)) with
+            return r => Ok(r)
+            finally => release(h)
 
 -- | Connect to `address` and run `body` with the connection, closing it when
--- `body` returns.
+-- `body` is left, on return and on abandonment.
 pub fn with_tcp_connection(
   address : String,
   body : (Stream @ noescape) -> a ! {Net | e}
@@ -329,9 +335,9 @@ pub fn with_tcp_connection(
       match net_connect(host, port) of
         Err(x) => Err(x)
         Ok(h) =>
-          let r = body(Stream(h))
-          let _closed = net_close(h)
-          Ok(r)
+          handle body(Stream(h)) with
+            return r => Ok(r)
+            finally => release(h)
 
 -- | Read at most `max` bytes, blocking until at least one arrives. A stream
 -- delivers what it has rather than what was asked for, so a reader loops on

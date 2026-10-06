@@ -44,8 +44,8 @@ type Instr
 -- innermost first, so its length-position IS the de Bruijn depth.
 fn depth_of(name : String, cenv : List(String), i : Int) : Int =
   match cenv of
-    Nil => 0
-    Cons(n, rest) =>
+    [] => 0
+    n :: rest =>
       if n == name then
         i
       else
@@ -75,28 +75,28 @@ fn compile(e, cenv) : List(Instr) =
 -- stack that `Bind`/`Unbind` push and pop in lockstep with lexical scope.
 fn run_instrs(instrs, stack, frame) : Int =
   match instrs of
-    Nil =>
+    [] =>
       match stack of
-        Cons(v, _) => v
-        Nil => 0
-    Cons(op, rest) =>
+        v :: _ => v
+        [] => 0
+    op :: rest =>
       match op of
         Push(n) => run_instrs(rest, Cons(n, stack), frame)
         IAdd =>
           match stack of
-            Cons(y, Cons(x, s2)) => run_instrs(rest, Cons(x + y, s2), frame)
+            y :: x :: s2 => run_instrs(rest, Cons(x + y, s2), frame)
             _ => 0
         ISub =>
           match stack of
-            Cons(y, Cons(x, s2)) => run_instrs(rest, Cons(x - y, s2), frame)
+            y :: x :: s2 => run_instrs(rest, Cons(x - y, s2), frame)
             _ => 0
         IMul =>
           match stack of
-            Cons(y, Cons(x, s2)) => run_instrs(rest, Cons(x * y, s2), frame)
+            y :: x :: s2 => run_instrs(rest, Cons(x * y, s2), frame)
             _ => 0
         INeg =>
           match stack of
-            Cons(x, s2) => run_instrs(rest, Cons(-x, s2), frame)
+            x :: s2 => run_instrs(rest, Cons(-x, s2), frame)
             _ => 0
         Load(d) =>
           match nth(d, frame) of
@@ -104,11 +104,11 @@ fn run_instrs(instrs, stack, frame) : Int =
             None => run_instrs(rest, Cons(0, stack), frame)
         Bind =>
           match stack of
-            Cons(v, s2) => run_instrs(rest, s2, Cons(v, frame))
+            v :: s2 => run_instrs(rest, s2, Cons(v, frame))
             _ => run_instrs(rest, stack, frame)
         Unbind =>
           match frame of
-            Cons(_, f2) => run_instrs(rest, stack, f2)
+            _ :: f2 => run_instrs(rest, stack, f2)
             _ => run_instrs(rest, stack, frame)
 
 fn exec(code) : Int = run_instrs(code, Nil, Nil)

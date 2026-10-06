@@ -13,7 +13,7 @@ use crate::lineage::{BuildRequest, DocsLineage, DocsLineageInput};
 use crate::stdlib::STDLIB;
 use crate::{ModuleSource, Root};
 
-const DOCS_BACKEND: &str = "docs";
+const DOCS_BACKEND: crate::driver::ArtifactBackend = crate::driver::ArtifactBackend::Docs;
 const MDBOOK_LABEL: &str = "<mdbook>";
 const MDBOOK_SUPPORTS_COMMAND: &str = "supports";
 const STDIN_LABEL: &str = "<stdin>";

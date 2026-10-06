@@ -278,14 +278,14 @@ fn stages_for(slide : Slide, stage : Int, theme : Theme) : List(String) =
 
 fn render_slides(slides : List(Slide), theme : Theme) : List(String) =
   match slides of
-    Nil => Nil
-    Cons(slide, rest) =>
+    [] => Nil
+    slide :: rest =>
       append(stages_for(slide, 0, theme), render_slides(rest, theme))
 
 fn deck_assets(slides : List(Slide)) : List(String) =
   match slides of
-    Nil => Nil
-    Cons(slide, rest) => append(pict_assets(slide.body), deck_assets(rest))
+    [] => Nil
+    slide :: rest => append(pict_assets(slide.body), deck_assets(rest))
 
 -- | Pure, deterministic Typst lowering. Logical slides with reveals expand to
 -- one physical PDF page per stage.

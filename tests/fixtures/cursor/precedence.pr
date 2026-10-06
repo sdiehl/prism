@@ -86,3 +86,17 @@ fn e38() = a ?? b |> c ?? d
 fn e39() = -(a + b) ^ c
 
 fn e40() = a < b + c * d ^ e
+
+fn e41() = a </> b </> c
+
+fn e42() = a </> (b </> c)
+
+fn e43() = a </> b == c </> d
+
+fn e44() = a :: b </> c :: d
+
+fn e45() = a + b </> c * d
+
+fn e46() = a </> b |> c ?? d </> e
+
+fn e47() = a :: b :: c + d

@@ -65,8 +65,8 @@ fn prop_root_is_min(pairs : List((Int, Int))) : Bool =
 
 fn all_roots_min(uf : UnionFind(Int, Int), keys : List(Int)) : Bool =
   match keys of
-    Nil => true
-    Cons(k, rest) =>
+    [] => true
+    k :: rest =>
       match ufp_find(uf, k) of
         Some((r, _d)) => r <= k && all_roots_min(uf, rest)
         None => false
@@ -96,8 +96,8 @@ fn count_run(
   expected : Int
 ) : (UnionFind(Int, Int), Int) ! {State(Int)} =
   match pairs of
-    Nil => (uf, expected)
-    Cons((x, y), rest) =>
+    [] => (uf, expected)
+    (x, y) :: rest =>
       let a = key_of(x)
       let b = key_of(y)
       let fresh_join = ufp_equiv(uf, a, b) == Some(false)

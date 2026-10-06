@@ -1,5 +1,5 @@
 {
-  "schema": "prism-surface-syntax-v1",
+  "schema": "prism-surface-syntax-v2",
   "compiler": "<version>",
   "source": {
     "digest": "1a75ebd0c18a7e9c7e73bfe2a4459147b401efd68545e115ad927342c0ca5f44",
@@ -14,7 +14,11 @@
           "name": "ask",
           "ret": {
             "kind": "int"
-          }
+          },
+          "span": [
+            88,
+            91
+          ]
         }
       ],
       "span": [
@@ -36,7 +40,11 @@
           ],
           "ret": {
             "kind": "int"
-          }
+          },
+          "span": [
+            120,
+            124
+          ]
         },
         {
           "grade": "once",
@@ -48,7 +56,11 @@
           ],
           "ret": {
             "kind": "unit"
-          }
+          },
+          "span": [
+            146,
+            150
+          ]
         }
       ],
       "span": [

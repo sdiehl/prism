@@ -5,10 +5,11 @@
 // closure, cycle hashing for mutual recursion, and structural sharing of
 // identical definitions.
 
+use prism::DumpPhase;
 use std::collections::BTreeMap;
 
 fn hashes(src: &str) -> BTreeMap<String, String> {
-    prism::dump("core-hash", &prism::with_prelude(src))
+    prism::dump(DumpPhase::CoreHash, &prism::with_prelude(src))
         .expect("core-hash dump")
         .lines()
         .filter_map(|l| {

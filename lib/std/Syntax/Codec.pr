@@ -56,8 +56,8 @@ pub type TokensDoc = TokensDoc {
 -- Assoc lookup over a JSON object's parse-order fields.
 fn jget(fields : List((String, Json)), key : String) : Option(Json) =
   match fields of
-    Nil => None
-    Cons((k, v), rest) =>
+    [] => None
+    (k, v) :: rest =>
       if k == key then
         Some(v)
       else
@@ -223,7 +223,7 @@ fn render(j : Json, ind : Int) : String =
     JStr(s) => "\"{jesc(s)}\""
     JArr(items) =>
       match items of
-        Nil => "[]"
+        [] => "[]"
         _ =>
           let inner = str_join(
               ",\n",
@@ -232,7 +232,7 @@ fn render(j : Json, ind : Int) : String =
           "[\n{inner}\n{spaces(ind)}]"
     JObj(fields) =>
       match fields of
-        Nil => "\{\}"
+        [] => "\{\}"
         _ =>
           let inner =
             str_join(",\n", map(\(kv) -> render_field(kv, ind + 2), fields))
@@ -280,9 +280,14 @@ pub fn encode_tokens(d : TokensDoc) : String =
     )
 
 -- | The schema tag of the surface-syntax artifact.
-pub fn surface_schema() : String = "prism-surface-syntax-v1"
+pub fn surface_schema() : String = "prism-surface-syntax-v2"
 
--- | A decoded `prism-surface-syntax-v1` document: the envelope identity, the
+-- | The schema tag before constructors, effect operations, and class methods
+-- carried the span of their name. A document under it still decodes, upgraded:
+-- see `decode_surface`.
+pub fn surface_schema_v1() : String = "prism-surface-syntax-v1"
+
+-- | A decoded `prism-surface-syntax-v2` document: the envelope identity, the
 -- embedded source, and the ordered item list of the parsed file.
 -- lint: allow(L0203)
 pub type SurfaceDoc = SurfaceDoc {
@@ -444,6 +449,10 @@ fn tag_expr_comprehension() : String = "comprehension"
 
 fn tag_expr_default() : String = "default"
 
+fn tag_expr_cons() : String = "cons"
+
+fn tag_expr_path_join() : String = "path_join"
+
 fn tag_expr_transact() : String = "transact"
 
 fn tag_expr_probe() : String = "probe"
@@ -467,6 +476,8 @@ fn tag_harm_once() : String = "once"
 fn tag_harm_val() : String = "val"
 
 fn tag_harm_never() : String = "never"
+
+fn tag_harm_finally() : String = "finally"
 
 fn tag_qual_guard() : String = "guard"
 
@@ -555,13 +566,13 @@ fn arrf(key : String, xs : List(Json)) : (String, Json) = (key, JArr(xs))
 -- A list field omitted when empty (mirrors the exporter's `put_list`).
 fn omit_list(key : String, xs : List(Json)) : List((String, Json)) =
   match xs of
-    Nil => []
+    [] => []
     _ => [(key, JArr(xs))]
 
 -- A string-array field omitted when empty (mirrors `put_strs`).
 fn omit_strs(key : String, xs : List(String)) : List((String, Json)) =
   match xs of
-    Nil => []
+    [] => []
     _ => [(key, JArr(map(JStr, xs)))]
 
 -- A boolean flag field omitted when false (mirrors `put_flag`).
@@ -602,8 +613,8 @@ fn ins_field(
   acc : List((String, Json))
 ) : List((String, Json)) =
   match acc of
-    Nil => [kv]
-    Cons(h, t) =>
+    [] => [kv]
+    h :: t =>
       if field_key(kv) < field_key(h) then
         Cons(kv, acc)
       else
@@ -904,6 +915,10 @@ fn enc_expr_node(e : Expr) : List((String, Json)) =
         ])
     EDefault(b, f) =>
       [kf(tag_expr_default()), ("expr", enc_expr(b)), ("fallback", enc_expr(f))]
+    ECons(h, t) =>
+      [kf(tag_expr_cons()), ("head", enc_expr(h)), ("tail", enc_expr(t))]
+    EPathJoin(a, b) =>
+      [kf(tag_expr_path_join()), ("base", enc_expr(a)), ("rest", enc_expr(b))]
     ETransact(b, f) =>
       [
           kf(tag_expr_transact()),
@@ -981,6 +996,8 @@ fn enc_harm(a : HandlerArm) : Json =
           arrf("params", map(JStr, ps)),
           ("body", enc_expr(body)),
         ])
+    HFinally(body) =>
+      node_obj([kf(tag_harm_finally()), ("body", enc_expr(body))])
 
 fn enc_catch(a : CatchArm) : Json =
   node_obj(flatten([
@@ -1045,21 +1062,30 @@ fn enc_ctor(c : Ctor) : Json =
       node_obj(flatten([
           [("name", JStr(c.name))],
           omit_list("args", map(enc_ty, args)),
+          [("span", span_json(c.span))],
         ]))
     CRecord(fs) =>
-      node_obj([("name", JStr(c.name)), arrf("fields", map(enc_cfield, fs))])
+      node_obj([
+          ("name", JStr(c.name)),
+          arrf("fields", map(enc_cfield, fs)),
+          ("span", span_json(c.span)),
+        ])
 
 fn enc_deriving(d : Deriving) : Json =
   node_obj([("name", JStr(d.name)), ("span", span_json(d.span))])
 
 fn enc_method(m : Method) : Json =
-  node_obj([("name", JStr(m.name)), ("ty", enc_ty(m.ty))])
+  node_obj([
+      ("name", JStr(m.name)),
+      ("span", span_json(m.span)),
+      ("ty", enc_ty(m.ty)),
+    ])
 
 fn enc_effop(o : EffOp) : Json =
   node_obj(flatten([
       [("name", JStr(o.name))],
       omit_list("params", map(enc_ty, o.params)),
-      [("ret", enc_ty(o.ret))],
+      [("ret", enc_ty(o.ret)), ("span", span_json(o.span))],
       opt_str_field("grade", o.grade),
     ]))
 
@@ -1129,6 +1155,8 @@ fn enc_decl(d : Decl, kind : String) : List((String, Json)) =
       opt_str_field("fip", d.fip_word),
       flag_field("replayable", d.is_replayable),
       flag_field("no_alloc", d.is_no_alloc),
+      flag_field("bounded_stack", d.is_bounded_stack),
+      flag_field("linear", d.is_linear),
       [("span", span_json(d.span))],
     ])
 
@@ -1757,6 +1785,10 @@ fn dec_expr_node5(
     EComp(h, bnd, seq, list_at(fields, "quals", path, dec_qual))
   elif kind == tag_expr_default() then
     e2(fields, path, "expr", "fallback", EDefault)
+  elif kind == tag_expr_cons() then
+    e2(fields, path, "head", "tail", ECons)
+  elif kind == tag_expr_path_join() then
+    e2(fields, path, "base", "rest", EPathJoin)
   elif kind == tag_expr_transact() then
     e2(fields, path, "body", "fallback", ETransact)
   elif kind == tag_expr_probe() then
@@ -1821,6 +1853,8 @@ fn dec_harm(j : Json, path : String) : HandlerArm ! {Decode} =
     let op = str_at(fields, "op", path)
     let ps = strs_at(fields, "params", path)
     HNever(op, ps, req_at(fields, "body", path, dec_expr))
+  elif kind == tag_harm_finally() then
+    HFinally(req_at(fields, "body", path, dec_expr))
   else
     fail_decode(
         CodecError {
@@ -1964,16 +1998,19 @@ fn dec_pat_node2(
 fn dec_ctor(j : Json, path : String) : Ctor ! {Decode} =
   let fields = obj_at(j, path)
   let n = str_at(fields, "name", path)
+  let s = span_at(fields, path)
   match jget(fields, "fields") of
     Some(_v) =>
       Ctor {
         name = n,
-        shape = CRecord(list_at(fields, "fields", path, dec_cfield))
+        shape = CRecord(list_at(fields, "fields", path, dec_cfield)),
+        span = s
       }
     None =>
       Ctor {
         name = n,
-        shape = CPositional(list_at(fields, "args", path, dec_ty))
+        shape = CPositional(list_at(fields, "args", path, dec_ty)),
+        span = s
       }
 
 fn dec_deriving(j : Json, path : String) : Deriving ! {Decode} =
@@ -1984,7 +2021,8 @@ fn dec_method(j : Json, path : String) : Method ! {Decode} =
   let fields = obj_at(j, path)
   Method {
     name = str_at(fields, "name", path),
-    ty = req_at(fields, "ty", path, dec_ty)
+    ty = req_at(fields, "ty", path, dec_ty),
+    span = span_at(fields, path)
   }
 
 fn dec_effop(j : Json, path : String) : EffOp ! {Decode} =
@@ -1993,7 +2031,8 @@ fn dec_effop(j : Json, path : String) : EffOp ! {Decode} =
     name = str_at(fields, "name", path),
     params = list_at(fields, "params", path, dec_ty),
     ret = req_at(fields, "ret", path, dec_ty),
-    grade = opt_at(fields, "grade", path, str_of)
+    grade = opt_at(fields, "grade", path, str_of),
+    span = span_at(fields, path)
   }
 
 fn dec_rungfield(j : Json, path : String) : RungField ! {Decode} =
@@ -2089,6 +2128,8 @@ fn dec_decl_fields(
     fip_word = opt_at(fields, "fip", path, str_of),
     is_replayable = flagf(fields, "replayable"),
     is_no_alloc = flagf(fields, "no_alloc"),
+    is_bounded_stack = flagf(fields, "bounded_stack"),
+    is_linear = flagf(fields, "linear"),
     span = span_at(fields, path)
   }
 
@@ -2328,14 +2369,18 @@ fn dec_fndecl(
     dep = opt_at(fields, "deprecated", path, str_of)
   }
 
--- | Decode a `prism-surface-syntax-v1` document from its exact bytes. A wrong
+-- | Decode a `prism-surface-syntax-v2` document from its exact bytes. A wrong
 -- or missing schema tag, malformed JSON, missing field, or invalid span is a
--- structured `CodecError`, never a partial document.
+-- structured `CodecError`, never a partial document. A
+-- `prism-surface-syntax-v1` document is upgraded first: its constructors,
+-- effect operations, and class methods carry no name span, so each reads as
+-- the empty span at offset 0, and the result is a v2 document. Nothing is
+-- upgraded under the v2 tag, so a v2 document missing a member span is refused.
 pub fn decode_surface(text : String) : Result(SurfaceDoc, CodecError) =
   run_decode(\() -> decode_surface_doc(text))
 
 fn decode_surface_doc(text : String) : SurfaceDoc ! {Decode} =
-  let j = ok_or_bail(decode_or_codec_error(text))
+  let j = upgrade_surface(ok_or_bail(decode_or_codec_error(text)))
   let fields = obj_at(j, "$")
   SurfaceDoc {
     schema = schema_at(fields, surface_schema()),
@@ -2474,6 +2519,55 @@ fn need_at(
 fn span_at(fields : List((String, Json)), path : String) : Span ! {Decode} =
   span_of(need_at(fields, "span", path), "{path}.span")
 
+-- A v1 document as the v2 document it reads as; any other document unchanged.
+fn upgrade_surface(j : Json) : Json =
+  match j of
+    JObj(fields) =>
+      match jget(fields, "schema") of
+        Some(JStr(tag)) =>
+          if tag == surface_schema_v1() then
+            JObj(map(upgrade_envelope_field, fields))
+          else
+            j
+        _ => j
+    _ => j
+
+fn upgrade_envelope_field(field : (String, Json)) : (String, Json) =
+  let (key, value) = field
+  if key == "schema" then
+    (key, JStr(surface_schema()))
+  elif key == "items" then
+    (key, map_json_arr(upgrade_item, value))
+  else
+    field
+
+fn upgrade_item(item : Json) : Json =
+  match item of
+    JObj(fields) => JObj(map(upgrade_member_list, fields))
+    _ => item
+
+fn upgrade_member_list(field : (String, Json)) : (String, Json) =
+  let (key, value) = field
+  if key == "ctors" || key == "ops" || key == "methods" then
+    (key, map_json_arr(with_empty_span, value))
+  else
+    field
+
+-- An instance's `methods` are declarations that already carry a span, so only
+-- a member without one gains it.
+fn with_empty_span(member : Json) : Json =
+  match member of
+    JObj(fields) =>
+      match jget(fields, "span") of
+        Some(_s) => member
+        None => JObj(("span", JArr([JInt(0), JInt(0)])) :: fields)
+    _ => member
+
+fn map_json_arr(f : (Json) -> Json, j : Json) : Json =
+  match j of
+    JArr(xs) => JArr(map(f, xs))
+    _ => j
+
 fn schema_at(fields : List((String, Json)), want : String) : String ! {Decode} =
   let schema = str_at(fields, "schema", "$")
   if schema == want then
@@ -2503,7 +2597,7 @@ fn bool_of(j : Json, path : String) : Bool ! {Decode} =
 -- A `[lo, hi]` span array, checked well formed.
 fn span_of(j : Json, path : String) : Span ! {Decode} =
   match j of
-    JArr(Cons(jlo, Cons(jhi, Nil))) =>
+    JArr([jlo, jhi]) =>
       let s =
         Span { lo = int_of(jlo, "{path}[0]"), hi = int_of(jhi, "{path}[1]") }
       if span_valid(s) then
@@ -2546,8 +2640,8 @@ fn each_of_go(
   f : (Json, String) -> a ! {Decode}
 ) : List(a) ! {Decode} =
   match items of
-    Nil => []
-    Cons(x, rest) =>
+    [] => []
+    x :: rest =>
       let v = f(x, "{path}[{i}]")
       Cons(v, each_of_go(rest, path, i + 1, f))
 
@@ -2564,8 +2658,8 @@ fn each_at(
   f : (Json, String) -> a ! {Decode}
 ) : List(a) ! {Decode} =
   match items of
-    Nil => []
-    Cons(x, rest) => Cons(f(x, path), each_at(rest, path, f))
+    [] => []
+    x :: rest => Cons(f(x, path), each_at(rest, path, f))
 
 -- Required field, then decode with the effectful `f`. Mirrors `req`.
 fn req_at(
@@ -2659,7 +2753,7 @@ fn validate_resolved(d : ResolvedDoc) : ResolvedDoc ! {Decode} =
 -- an adjacent pair.
 fn check_unique_ids(ids : List(Int)) : Unit ! {Decode} =
   match ids of
-    Cons(a, Cons(b, rest)) =>
+    a :: b :: rest =>
       if a == b then
         fail_decode(
             CodecError {
@@ -2681,8 +2775,8 @@ fn check_span_ends(
   path : String
 ) : Unit ! {Decode} =
   match spans of
-    Nil => ()
-    Cons(s, rest) =>
+    [] => ()
+    s :: rest =>
       if s.hi <= len then
         check_span_ends(rest, len, path)
       else
@@ -2741,8 +2835,8 @@ fn rnode_json(n : RNode) : Json =
   let base =
     [("id", JInt(n.id)), ("kind", JStr(n.kind)), ("span", span_json(n.span))]
   match n.children of
-    Nil => JObj(base)
-    Cons(_, _) =>
+    [] => JObj(base)
+    _ :: _ =>
       JObj(append(base, [("children", JArr(map(rnode_json, n.children)))]))
 
 fn rfunction_json(f : RFunction) : Json =

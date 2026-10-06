@@ -20,6 +20,7 @@ Program {
                         Int,
                     ],
                     fields: None,
+                    span: 13..19,
                 },
                 Ctor {
                     name: "Square",
@@ -27,6 +28,7 @@ Program {
                         Int,
                     ],
                     fields: None,
+                    span: 27..33,
                 },
             ],
             deriving: [],

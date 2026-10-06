@@ -4,7 +4,7 @@ expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/list.pr
 ---
 == tokens ==
-VOpen Type UIdent("List") LParen Ident("a") RParen Eq UIdent("Nil") Bar UIdent("Cons") LParen Ident("a") Comma UIdent("List") LParen Ident("a") RParen RParen VSemi Fn Ident("length") LParen Ident("xs") RParen Eq VOpen Match Ident("xs") Of VOpen UIdent("Nil") FatArrow Int(IntLit { value: 0, suffix: None }) VSemi UIdent("Cons") LParen Ident("x") Comma Ident("rest") RParen FatArrow Int(IntLit { value: 1, suffix: None }) Plus Ident("length") LParen Ident("rest") RParen VClose VClose VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("length") LParen UIdent("Cons") LParen Int(IntLit { value: 1, suffix: None }) Comma UIdent("Cons") LParen Int(IntLit { value: 2, suffix: None }) Comma UIdent("Cons") LParen Int(IntLit { value: 3, suffix: None }) Comma UIdent("Nil") RParen RParen RParen RParen RParen VClose
+VOpen Type UIdent("List") LParen Ident("a") RParen Eq UIdent("Nil") Bar UIdent("Cons") LParen Ident("a") Comma UIdent("List") LParen Ident("a") RParen RParen VSemi Fn Ident("length") LParen Ident("xs") RParen Eq VOpen Match Ident("xs") Of VOpen LBracket RBracket FatArrow Int(IntLit { value: 0, suffix: None }) VSemi Ident("x") ColonColon Ident("rest") FatArrow Int(IntLit { value: 1, suffix: None }) Plus Ident("length") LParen Ident("rest") RParen VClose VClose VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("length") LParen UIdent("Cons") LParen Int(IntLit { value: 1, suffix: None }) Comma UIdent("Cons") LParen Int(IntLit { value: 2, suffix: None }) Comma UIdent("Cons") LParen Int(IntLit { value: 3, suffix: None }) Comma UIdent("Nil") RParen RParen RParen RParen RParen VClose
 
 == ast ==
 Program {
@@ -22,6 +22,7 @@ Program {
                     name: "Nil",
                     args: [],
                     fields: None,
+                    span: 15..18,
                 },
                 Ctor {
                     name: "Cons",
@@ -39,6 +40,7 @@ Program {
                         ),
                     ],
                     fields: None,
+                    span: 21..25,
                 },
             ],
             deriving: [],
@@ -80,7 +82,7 @@ Program {
                                     "Nil",
                                     [],
                                 ),
-                                span: 73..76,
+                                span: 73..75,
                             },
                             body: Spanned {
                                 node: Int(
@@ -89,7 +91,7 @@ Program {
                                         suffix: None,
                                     },
                                 ),
-                                span: 80..81,
+                                span: 79..80,
                             },
                         },
                         Arm {
@@ -101,17 +103,17 @@ Program {
                                             node: Var(
                                                 "x",
                                             ),
-                                            span: 91..92,
+                                            span: 85..86,
                                         },
                                         Spanned {
                                             node: Var(
                                                 "rest",
                                             ),
-                                            span: 94..98,
+                                            span: 90..94,
                                         },
                                     ],
                                 ),
-                                span: 86..99,
+                                span: 85..94,
                             },
                             body: Spanned {
                                 node: Bin(
@@ -123,7 +125,7 @@ Program {
                                                 suffix: None,
                                             },
                                         ),
-                                        span: 103..104,
+                                        span: 98..99,
                                     },
                                     Spanned {
                                         node: Call(
@@ -131,29 +133,29 @@ Program {
                                                 node: Var(
                                                     "length",
                                                 ),
-                                                span: 107..113,
+                                                span: 102..108,
                                             },
                                             [
                                                 Spanned {
                                                     node: Var(
                                                         "rest",
                                                     ),
-                                                    span: 114..118,
+                                                    span: 109..113,
                                                 },
                                             ],
                                         ),
-                                        span: 107..119,
+                                        span: 102..114,
                                     },
                                 ),
-                                span: 103..119,
+                                span: 98..114,
                             },
                         },
                     ],
                 ),
-                span: 57..119,
+                span: 57..114,
             },
             wheres: [],
-            span: 39..119,
+            span: 39..114,
         },
         Decl {
             name: "main",
@@ -167,7 +169,7 @@ Program {
                         node: Var(
                             "println",
                         ),
-                        span: 133..140,
+                        span: 128..135,
                     },
                     [
                         Spanned {
@@ -176,7 +178,7 @@ Program {
                                     node: Var(
                                         "length",
                                     ),
-                                    span: 141..147,
+                                    span: 136..142,
                                 },
                                 [
                                     Spanned {
@@ -185,7 +187,7 @@ Program {
                                                 node: Var(
                                                     "Cons",
                                                 ),
-                                                span: 148..152,
+                                                span: 143..147,
                                             },
                                             [
                                                 Spanned {
@@ -195,7 +197,7 @@ Program {
                                                             suffix: None,
                                                         },
                                                     ),
-                                                    span: 153..154,
+                                                    span: 148..149,
                                                 },
                                                 Spanned {
                                                     node: Call(
@@ -203,7 +205,7 @@ Program {
                                                             node: Var(
                                                                 "Cons",
                                                             ),
-                                                            span: 156..160,
+                                                            span: 151..155,
                                                         },
                                                         [
                                                             Spanned {
@@ -213,7 +215,7 @@ Program {
                                                                         suffix: None,
                                                                     },
                                                                 ),
-                                                                span: 161..162,
+                                                                span: 156..157,
                                                             },
                                                             Spanned {
                                                                 node: Call(
@@ -221,7 +223,7 @@ Program {
                                                                         node: Var(
                                                                             "Cons",
                                                                         ),
-                                                                        span: 164..168,
+                                                                        span: 159..163,
                                                                     },
                                                                     [
                                                                         Spanned {
@@ -231,36 +233,36 @@ Program {
                                                                                     suffix: None,
                                                                                 },
                                                                             ),
-                                                                            span: 169..170,
+                                                                            span: 164..165,
                                                                         },
                                                                         Spanned {
                                                                             node: Var(
                                                                                 "Nil",
                                                                             ),
-                                                                            span: 172..175,
+                                                                            span: 167..170,
                                                                         },
                                                                     ],
                                                                 ),
-                                                                span: 164..176,
+                                                                span: 159..171,
                                                             },
                                                         ],
                                                     ),
-                                                    span: 156..177,
+                                                    span: 151..172,
                                                 },
                                             ],
                                         ),
-                                        span: 148..178,
+                                        span: 143..173,
                                     },
                                 ],
                             ),
-                            span: 141..179,
+                            span: 136..174,
                         },
                     ],
                 ),
-                span: 133..180,
+                span: 128..175,
             },
             wheres: [],
-            span: 121..180,
+            span: 116..175,
         },
     ],
 }

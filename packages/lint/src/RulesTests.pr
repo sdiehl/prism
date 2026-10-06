@@ -16,6 +16,7 @@ import Rules (lint_doc, lint_report, rl_decl_rules, rl_family_prefix)
 import Syntax.Ast (..)
 import Syntax.Codec (SurfaceDoc)
 import Syntax.Source (SourceFile, Span)
+import Test (expect_equal)
 
 -- Fixture builders.
 
@@ -44,6 +45,8 @@ fn lt_decl(name : String, params : List(Param), body : Sp(Expr)) : Decl =
     fip_word = None,
     is_replayable = false,
     is_no_alloc = false,
+    is_bounded_stack = false,
+    is_linear = false,
     span = lt_span()
   }
 
@@ -322,7 +325,7 @@ fn lt_data(derivs : List(Deriving), field : Ty) : Item =
     name = "T",
     params = Nil,
     param_kinds = Nil,
-    ctors = [Ctor { name = "T", shape = CPositional([field]) }],
+    ctors = [Ctor { name = "T", shape = CPositional([field]), span = lt_span() }],
     derivs = derivs,
     span = lt_span(),
     vis = Some("pub"),
@@ -352,7 +355,7 @@ fn lt_family(names : List(String)) : List(Item) =
 
 test fn family_prefix_establishes() =
   let items = lt_family(["ab_w", "ab_x", "ab_y", "ab_z", "stray"])
-  guard(rl_family_prefix(items) == Some("ab_"))
+  expect_equal(Some("ab_"), rl_family_prefix(items))
 
 test fn family_drift_fires_on_stray() =
   let items = lt_family(["ab_w", "ab_x", "ab_y", "ab_z", "stray"])
@@ -370,7 +373,7 @@ test fn family_below_coverage_holds() =
 
 test fn pragma_line_parses_codes() =
   let codes = pg_line_codes("-- lint: allow(", "-- lint: allow(L0101, L0104)")
-  guard(codes == ["L0101", "L0104"])
+  expect_equal(["L0101", "L0104"], codes)
 
 test fn allow_suppresses_and_counts() =
   let text = "-- lint: allow(L0103)\nfn wide(a, b, c, d, e, f) = 0\n"

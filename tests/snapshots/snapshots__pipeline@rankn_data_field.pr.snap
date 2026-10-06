@@ -35,6 +35,7 @@ Program {
                         ),
                     ],
                     fields: None,
+                    span: 136..140,
                 },
             ],
             deriving: [],

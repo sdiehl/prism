@@ -62,6 +62,15 @@ impl Tc<'_> {
         v
     }
 
+    // The tails of the current row scope and every scope enclosing it.
+    pub(super) fn enclosing_tails(&self) -> Vec<u32> {
+        self.cur_row.as_ref().map_or_else(Vec::new, |scope| {
+            let mut tails = scope.outer.clone();
+            tails.push(scope.tail);
+            tails
+        })
+    }
+
     // Run `f` with extra parametric-effect instantiations in scope, restoring
     // the previous scope on exit.
     pub(super) fn in_row_scope<R>(
@@ -359,13 +368,6 @@ impl Tc<'_> {
         None
     }
 
-    fn assert_no_escape(&self, i: usize) {
-        if cfg!(debug_assertions) {
-            let escaped = self.scope_escape(i);
-            debug_assert!(escaped.is_none(), "scope escape: {escaped:?}");
-        }
-    }
-
     pub(super) fn drop_marker(&mut self, m: u32) -> Result<(), TcErr> {
         if let Some(i) = self
             .ctx
@@ -380,15 +382,18 @@ impl Tc<'_> {
         Ok(())
     }
 
-    pub(super) fn drop_uni(&mut self, n: Sym) {
+    pub(super) fn drop_uni(&mut self, n: Sym) -> Result<(), TcErr> {
         if let Some(i) = self
             .ctx
             .iter()
             .position(|e| matches!(e, Entry::Uni(w) if *w == n))
         {
-            self.assert_no_escape(i);
+            if let Some(msg) = self.scope_escape(i) {
+                return Err(TcErr::Ice(msg.into()));
+            }
             self.ctx.truncate(i);
         }
+        Ok(())
     }
 
     // Retire skolems without truncating: existentials minted in their scope
@@ -400,15 +405,18 @@ impl Tc<'_> {
             .retain(|e| !matches!(e, Entry::Uni(w) if ns.contains(w)));
     }
 
-    pub(super) fn drop_row_uni(&mut self, n: Sym) {
+    pub(super) fn drop_row_uni(&mut self, n: Sym) -> Result<(), TcErr> {
         if let Some(i) = self
             .ctx
             .iter()
             .position(|e| matches!(e, Entry::RowUni(w) if *w == n))
         {
-            self.assert_no_escape(i);
+            if let Some(msg) = self.scope_escape(i) {
+                return Err(TcErr::Ice(msg.into()));
+            }
             self.ctx.truncate(i);
         }
+        Ok(())
     }
 
     /// The zonk boundary: resolve every solved metavariable in `t` and package
@@ -1136,7 +1144,7 @@ impl GenVisit for RowNames<'_> {
     }
 }
 
-fn collect_row_names(t: &Type, out: &mut BTreeSet<String>) {
+pub(super) fn collect_row_names(t: &Type, out: &mut BTreeSet<String>) {
     walk_gen(t, &mut Vec::new(), &mut RowNames(out));
 }
 

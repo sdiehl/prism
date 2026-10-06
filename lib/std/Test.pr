@@ -1,4 +1,11 @@
--- | Per-type value generators for property testing.
+-- | Test assertions and per-type value generators for property testing.
+--
+-- `fail_with`, `expect`, `expect_equal`, and `expect_text` fail the running `test fn` with a
+-- structured payload: a message, and for `expect_equal` the expected and actual
+-- values with a line diff between them. The payload
+-- travels to `prism test` as the versioned `prism-test-failure-v1` envelope,
+-- written as the test's last output line just before the failure fires, and the
+-- runner reports its fields in place of a bare `test failed`.
 --
 -- A generator is the unwrapped `Quickcheck.Gen`: a size-bounded draw from the
 -- ambient `Random` capability. That makes a run deterministic under a seed (the
@@ -11,6 +18,132 @@
 -- Wrap an instance back into a `Gen` with `arb_gen` to feed it to `quickcheck`.
 
 import Quickcheck (..)
+import Wire (bytes_of_list, wire_cat, wire_tag)
+import Data.Bytes (Bytes, hex_encode, string_to_bytes)
+import Data.String (..)
+import Data.List (foldr, map)
+
+-- | Fail the running test with `message`.
+--
+-- ```prism,no_run
+-- test fn parses() =
+--   match parse_int("12") of
+--     Some(_) => ()
+--     None => fail_with("`12` did not parse")
+-- ```
+pub fn fail_with(message : String) : a ! {Fail, IO, Output} =
+  raise_failure(message, None, None, None)
+
+-- | Fail the running test with `message` unless `cond` holds.
+pub fn expect(cond : Bool, message : String) : Unit ! {Fail, IO, Output} =
+  if cond then
+    ()
+  else
+    raise_failure(message, None, None, None)
+
+-- | Fail the running test unless `actual` equals `expected`, reporting both
+-- values and a line diff between their renderings.
+--
+-- ```prism,no_run
+-- test fn adds() = expect_equal(4, 2 + 2)
+-- ```
+pub fn expect_equal(
+  expected : a,
+  actual : a
+) : Unit ! {Fail, IO, Output} given Eq(a), Show(a) =
+  if expected == actual then
+    ()
+  else
+    differ(show(expected), show(actual))
+
+-- | Fail the running test unless the text `actual` equals `expected`, reporting
+-- a line diff of the raw text. Prefer this to `expect_equal` for multi-line
+-- strings, whose `Show` rendering escapes the line breaks a diff needs.
+pub fn expect_text(expected : String, actual : String) : Unit ! {Fail, IO, Output} =
+  if expected == actual then
+    ()
+  else
+    differ(expected, actual)
+
+-- Report two differing renderings, with a line diff when either spans lines (a
+-- one-line diff would only repeat them).
+fn differ(want : String, got : String) : a ! {Fail, IO, Output} =
+  let want_lines = lines_of(want)
+  let got_lines = lines_of(got)
+  let diff =
+    if multi(want_lines) || multi(got_lines) then
+      Some(str_join("\n", line_diff(want_lines, got_lines)))
+    else
+      None
+  raise_failure("values differ", Some(want), Some(got), diff)
+
+fn multi(xs : List(String)) : Bool =
+  match xs of
+    _ :: _ :: _ => true
+    _ => false
+
+-- The envelope's line prefix. The runner honours it only on the final output
+-- line of a failing test, so a test that prints the prefix itself and passes is
+-- unaffected.
+let failure_frame : String = "prism-test-failure-v1:"
+
+fn raise_failure(
+  message : String,
+  expected : Option(String),
+  actual : Option(String),
+  diff : Option(String)
+) : a ! {Fail, IO, Output} =
+  let body = failure_bytes(message, expected, actual, diff)
+  println("{failure_frame}{hex_encode(body)}")
+  fail()
+
+-- The `prism-test-failure-v1` bytes: schema tag, ABI version, message, the
+-- optional expected, actual, diff, and site, then the context stack. No site and
+-- no context are attached here.
+fn failure_bytes(
+  message : String,
+  expected : Option(String),
+  actual : Option(String),
+  diff : Option(String)
+) : Bytes =
+  foldr(wire_cat, bytes_of_list([]), [
+      str_bytes("prism-test-failure-v1"),
+      wire_tag(1),
+      str_bytes(message),
+      opt_bytes(expected),
+      opt_bytes(actual),
+      opt_bytes(diff),
+      opt_bytes(None),
+      wire_tag(0),
+    ])
+
+fn str_bytes(s : String) : Bytes =
+  wire_cat(wire_tag(byte_len(s)), string_to_bytes(s))
+
+fn opt_bytes(o : Option(String)) : Bytes =
+  match o of
+    None => wire_tag(0)
+    Some(s) => wire_cat(wire_tag(1), str_bytes(s))
+
+-- The line feed code point, the separator a line diff splits on.
+let newline : Int = 10
+
+fn lines_of(s : String) : List(String) = split(newline, s)
+
+-- A positional line diff: a shared line is kept with two spaces, a differing
+-- pair is shown as `-` expected then `+` actual, and the longer side's tail is
+-- marked on its own.
+fn line_diff(want : List(String), got : List(String)) : List(String) =
+  match want of
+    [] => map(\(g) -> "+ {g}", got)
+    w :: ws =>
+      match got of
+        [] => map(\(x) -> "- {x}", want)
+        g :: gs =>
+          if w == g then
+            Cons("  {w}", line_diff(ws, gs))
+          else
+            Cons("- {w}", Cons("+ {g}", line_diff(ws, gs)))
 
 -- | A structural generator, sized by a fuel budget. `deriving (Arbitrary)` spends
 -- the budget on depth: at each recursive constructor it draws its fields a size

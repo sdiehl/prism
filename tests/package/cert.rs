@@ -54,8 +54,12 @@ impl Drop for TempDir {
 }
 
 // A syntactically valid content-hash stand-in: hex, wider than the shard prefix.
-const SUBJECT: &str = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b";
-const OTHER_SUBJECT: &str = "60303ae22b998861bce3b28f33eec1be758a213c";
+const SUBJECT: &str = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08";
+const OTHER_SUBJECT: &str = "60303ae22b998861bce3b28f33eec1be758a213c86c93c076dbe9f558c11c752";
+
+fn digest(hex: &str) -> Digest {
+    Digest::parse(hex).unwrap()
+}
 
 // A locked-root audit row for `subject` carrying `cert`, otherwise green.
 fn green_row(subject: &str, cert: CertStatus) -> RootAudit {
@@ -64,7 +68,7 @@ fn green_row(subject: &str, cert: CertStatus) -> RootAudit {
             origin: "demo".to_string(),
             name: "demo".to_string(),
             tag: "1.0".to_string(),
-            root: Digest::from(subject),
+            root: digest(subject),
             scheme: HASH_SCHEME.to_string(),
             kind: INDEX_KIND_NAMESPACE.to_string(),
         },
@@ -84,7 +88,7 @@ const fn report(rows: Vec<RootAudit>) -> AuditReport {
 
 #[test]
 fn the_envelope_round_trips() {
-    let cert = parity_cert(SUBJECT, (BACKEND_INTERP, BACKEND_LLVM));
+    let cert = parity_cert(&digest(SUBJECT), (BACKEND_INTERP, BACKEND_LLVM));
     let decoded = decode_cert(&encode_cert(&cert)).expect("decode");
     assert_eq!(decoded, cert);
     assert_eq!(decoded.subject.as_str(), SUBJECT);
@@ -102,7 +106,7 @@ enum DecodeFailure {
 
 impl DecodeFailure {
     fn bytes(self) -> Vec<u8> {
-        let cert = parity_cert(SUBJECT, (BACKEND_INTERP, BACKEND_LLVM));
+        let cert = parity_cert(&digest(SUBJECT), (BACKEND_INTERP, BACKEND_LLVM));
         let mut bytes = encode_cert(&cert);
         match self {
             Self::ForeignScheme => {
@@ -145,7 +149,7 @@ fn hostile_bytes_never_panic() {
     assert!(decode_cert(&[]).is_err());
     assert!(decode_cert(&[0xff]).is_err());
     // A truncated envelope: the header alone, no body.
-    let cert = parity_cert(SUBJECT, (BACKEND_INTERP, BACKEND_LLVM));
+    let cert = parity_cert(&digest(SUBJECT), (BACKEND_INTERP, BACKEND_LLVM));
     let full = encode_cert(&cert);
     for cut in 0..full.len() {
         // Every prefix decodes to an error, never a panic (and never the full cert).
@@ -157,7 +161,7 @@ fn hostile_bytes_never_panic() {
 fn the_gate_emits_exactly_one_cert_and_reruns_are_idempotent() {
     let tmp = TempDir::new("emit");
     let store = tmp.store();
-    let cert = parity_cert(SUBJECT, (BACKEND_INTERP, BACKEND_LLVM));
+    let cert = parity_cert(&digest(SUBJECT), (BACKEND_INTERP, BACKEND_LLVM));
 
     assert_eq!(emit(&store, &cert).unwrap(), Written::New);
     assert!(store.has_cert(SUBJECT));
@@ -174,7 +178,7 @@ fn a_conflicting_certificate_for_a_subject_is_refused() {
     let store = tmp.store();
     emit(
         &store,
-        &parity_cert(SUBJECT, (BACKEND_INTERP, BACKEND_LLVM)),
+        &parity_cert(&digest(SUBJECT), (BACKEND_INTERP, BACKEND_LLVM)),
     )
     .unwrap();
     // Different bytes for the same subject are corruption, never a silent overwrite.
@@ -186,7 +190,7 @@ fn attest_emits_then_reuses() {
     let tmp = TempDir::new("attest");
     let store = tmp.store();
     // The attest path's second backend is native LLVM against the interpreter.
-    let cert = parity_cert(SUBJECT, (BACKEND_LLVM, "interpreter"));
+    let cert = parity_cert(&digest(SUBJECT), (BACKEND_LLVM, "interpreter"));
     assert_eq!(emit(&store, &cert).unwrap(), Written::New);
     assert_eq!(emit(&store, &cert).unwrap(), Written::Hit);
 }
@@ -197,7 +201,7 @@ fn audit_verifies_and_prints_the_certificate() {
     let store = tmp.store();
     emit(
         &store,
-        &parity_cert(SUBJECT, (BACKEND_INTERP, BACKEND_LLVM)),
+        &parity_cert(&digest(SUBJECT), (BACKEND_INTERP, BACKEND_LLVM)),
     )
     .unwrap();
 
@@ -259,14 +263,15 @@ impl AuditFailure {
             Self::ForeignScheme => {
                 let foreign = Cert {
                     scheme: "prism-core-hash-v0".to_string(),
-                    ..parity_cert(SUBJECT, (BACKEND_INTERP, BACKEND_LLVM))
+                    ..parity_cert(&digest(SUBJECT), (BACKEND_INTERP, BACKEND_LLVM))
                 };
                 store.put_cert(SUBJECT, &encode_cert(&foreign)).unwrap();
             }
             Self::SubjectMismatch => {
                 // A certificate about OTHER_SUBJECT filed under SUBJECT's key: a
                 // swap attack.
-                let mismatched = parity_cert(OTHER_SUBJECT, (BACKEND_INTERP, BACKEND_LLVM));
+                let mismatched =
+                    parity_cert(&digest(OTHER_SUBJECT), (BACKEND_INTERP, BACKEND_LLVM));
                 store.put_cert(SUBJECT, &encode_cert(&mismatched)).unwrap();
             }
         }
@@ -303,7 +308,7 @@ fn a_reserved_claim_decodes_as_recognized_but_unverifiable() {
     // cannot verify it must report it as recognized-but-unverifiable, not corrupt.
     let reserved = Cert {
         claim: Claim::Reserved(CLAIM_LEAN_CHECKED),
-        ..parity_cert(SUBJECT, (BACKEND_INTERP, BACKEND_LLVM))
+        ..parity_cert(&digest(SUBJECT), (BACKEND_INTERP, BACKEND_LLVM))
     };
     let decoded = decode_cert(&encode_cert(&reserved)).expect("reserved decodes");
     assert_eq!(decoded.claim, Claim::Reserved(CLAIM_LEAN_CHECKED));

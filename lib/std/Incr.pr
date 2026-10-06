@@ -106,8 +106,8 @@ fn st_push(s : St(e), key : String) : St(e) =
 
 fn st_pop(s : St(e)) : St(e) =
   match s.stack of
-    Cons(_, rest) => St { ..s, stack = rest }
-    Nil => s
+    _ :: rest => St { ..s, stack = rest }
+    [] => s
 
 -- Take the next fresh node key and advance the counter.
 fn st_fresh(s : St(e)) : (St(e), String) =
@@ -134,8 +134,8 @@ fn vhash(bs) = blake3(bytes_str(bs))
 -- current hash, by prepending to the demander's in-progress dep list.
 fn record_edge(s : St(e), dep : String, dephash : String) : St(e) =
   match s.stack of
-    Nil => s
-    Cons(cur, _) =>
+    [] => s
+    cur :: _ =>
       match map_lookup(cur, s.tbl) of
         Some(MemoN(th, deps, res)) =>
           st_put(s, cur, MemoN(th, Cons((dep, dephash), deps), res))
@@ -159,8 +159,8 @@ fn demand(s : St(e), key : String) : (St(e), Bytes) =
 -- compare. Threads state, since a re-demand may itself recompute.
 fn verify(s : St(e), deps : List((String, String))) : (St(e), Bool) =
   match deps of
-    Nil => (s, true)
-    Cons((dk, dh), rest) =>
+    [] => (s, true)
+    (dk, dh) :: rest =>
       let (s2, dv) = demand(s, dk)
       if str_eq(vhash(dv), dh) then
         verify(s2, rest)
@@ -402,7 +402,7 @@ fn snap_header_of(nm, ver, tag, body) =
 -- error, so every caller can treat it as a cold start.
 fn snap_header_ok_of(nm, ver, header, tag, body) =
   match split(char_at(snap_sep, 0), header) of
-    Cons(hnm, Cons(hver, Cons(htg, Cons(hdg, Nil)))) =>
+    [hnm, hver, htg, hdg] =>
       str_eq(hnm, nm)
         && str_eq(hver, ver)
         && str_eq(htg, tag)
@@ -414,8 +414,8 @@ fn snap_header_ok_of(nm, ver, header, tag, body) =
 -- final comma), so a padded or truncated tail cannot inject a stray byte.
 fn snap_ints(pieces) =
   match pieces of
-    Nil => Nil
-    Cons(p, rest) =>
+    [] => Nil
+    p :: rest =>
       match parse_int(p) of
         Some(n) => Cons(n, snap_ints(rest))
         None => snap_ints(rest)
@@ -426,8 +426,8 @@ fn snap_parse_bytes(s) = bytes_of_list(snap_ints(split(char_at(",", 0), s)))
 -- result yet is dropped.
 fn snap_collect(s : St(e), keys : List(String)) : List(SnapEntry) =
   match keys of
-    Nil => Nil
-    Cons(key, rest) =>
+    [] => Nil
+    key :: rest =>
       let entries = snap_collect(s, rest)
       match map_lookup(key, s.tbl) of
         Some(MemoN(_, deps, Some((bytes, _h)))) =>
@@ -439,8 +439,8 @@ fn snap_encode(s : St(e)) : Bytes =
 
 fn snap_build(entries : List(SnapEntry)) : Map(String, Warm) =
   match entries of
-    Nil => map_empty
-    Cons(entry, rest) =>
+    [] => map_empty
+    entry :: rest =>
       map_insert(entry.key, Warm(entry.deps, entry.value), snap_build(rest))
 
 -- Decode complete entries and rebuild the cache. Runs under a Fail handler at
@@ -705,8 +705,8 @@ fn t_push(s : TSt(e), key : String) : TSt(e) =
 
 fn t_pop(s : TSt(e)) : TSt(e) =
   match s.stack of
-    Cons(_, rest) => TSt { ..s, stack = rest }
-    Nil => s
+    _ :: rest => TSt { ..s, stack = rest }
+    [] => s
 
 fn t_fresh(s : TSt(e)) : (TSt(e), String) =
   (TSt { ..s, next = s.next + 1 }, show_int(s.next))
@@ -723,8 +723,8 @@ fn t_root_prepend(s : TSt(e), frame : Frame) : TSt(e) =
 -- of the graph, where output lands on the root trace instead of any node.
 fn t_cur(s : TSt(e)) : Option(String) =
   match s.stack of
-    Cons(cur, _) => Some(cur)
-    Nil => None
+    cur :: _ => Some(cur)
+    [] => None
 
 fn t_prepend_frame(s : TSt(e), cur : String, frame : Frame) : TSt(e) =
   match map_lookup(cur, s.tbl) of
@@ -742,8 +742,8 @@ fn t_capture(s, frame) =
 
 fn t_record_edge(s : TSt(e), dep : String, dephash : String) : TSt(e) =
   match s.stack of
-    Nil => s
-    Cons(cur, _) =>
+    [] => s
+    cur :: _ =>
       match map_lookup(cur, s.tbl) of
         Some(TMemo(th, deps, res, tr, em)) =>
           t_put(s, cur, TMemo(th, Cons((dep, dephash), deps), res, tr, em))
@@ -803,8 +803,8 @@ fn t_demand(s : TSt(e), key : String, loud : Bool) : (TSt(e), Bytes) =
 
 fn t_verify(s : TSt(e), deps : List((String, String))) : (TSt(e), Bool) =
   match deps of
-    Nil => (s, true)
-    Cons((dk, dh), rest) =>
+    [] => (s, true)
+    (dk, dh) :: rest =>
       let (s2, dv) = t_demand(s, dk, false)
       if str_eq(vhash(dv), dh) then
         t_verify(s2, rest)
@@ -925,11 +925,11 @@ fn t_run_thunk(
 -- emit: a cold run and a warm run reach it with the same root trace.
 fn t_emit_frames(frames) =
   match frames of
-    Nil => ()
-    Cons(FPrintln(x), rest) =>
+    [] => ()
+    FPrintln(x) :: rest =>
       prim_println(x)
       t_emit_frames(rest)
-    Cons(FPrint(x), rest) =>
+    FPrint(x) :: rest =>
       prim_print(x)
       t_emit_frames(rest)
 
@@ -961,8 +961,8 @@ let t_snap_version : String = "2"
 -- lint: allow(L0105)
 fn t_snap_collect(s : TSt(e), keys : List(String)) : List(TSnapEntry) =
   match keys of
-    Nil => Nil
-    Cons(key, rest) =>
+    [] => Nil
+    key :: rest =>
       let entries = t_snap_collect(s, rest)
       match map_lookup(key, s.tbl) of
         Some(TMemo(_, deps, Some((bytes, _h)), trace, _em)) =>
@@ -986,8 +986,8 @@ fn t_snap_encode(s : TSt(e)) : Bytes =
 -- lint: allow(L0105)
 fn t_snap_build(entries : List(TSnapEntry)) : Map(String, TWarm) =
   match entries of
-    Nil => map_empty
-    Cons(entry, rest) =>
+    [] => map_empty
+    entry :: rest =>
       map_insert(
           entry.key,
           TWarm(entry.deps, entry.value, reverse(t_trace_decode(entry.trace))),

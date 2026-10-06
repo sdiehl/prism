@@ -4,7 +4,7 @@
 -- ```text
 -- prism build packages/spectra --out ./spectra
 -- ./spectra check examples/spectra-deck
--- ./spectra build examples/spectra-deck --output deck.pdf --open
+-- ./spectra build examples/spectra-deck --output deck.pdf --open --prism target/release/prism
 -- ```
 
 import Cli as C
@@ -16,8 +16,8 @@ let exit_bad_usage : Int = 2
 
 fn dispatch(command : SpectraCommand) : Int ! {FileSystem, IO, Output} =
   match command of
-    Check(path) => check_project(path)
-    Build(path, output, open) => build_project(path, output, open)
+    Check(path, prism) => check_project(path, prism)
+    Build(path, output, open, prism) => build_project(path, output, open, prism)
     Clean(path) => clean_project(path)
 
 fn main() =

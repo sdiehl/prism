@@ -1,5 +1,5 @@
 {
-  "schema": "prism-surface-syntax-v1",
+  "schema": "prism-surface-syntax-v2",
   "compiler": "<version>",
   "source": {
     "digest": "c4c274309273958eba2bb8f5bf75f63b47455c5d720cabc3e66e11bee4d86564",
@@ -47,13 +47,25 @@
     {
       "ctors": [
         {
-          "name": "Red"
+          "name": "Red",
+          "span": [
+            164,
+            167
+          ]
         },
         {
-          "name": "Green"
+          "name": "Green",
+          "span": [
+            170,
+            175
+          ]
         },
         {
-          "name": "Blue"
+          "name": "Blue",
+          "span": [
+            178,
+            182
+          ]
         }
       ],
       "deriving": [
@@ -88,7 +100,11 @@
               "kind": "int"
             }
           ],
-          "name": "MkToken"
+          "name": "MkToken",
+          "span": [
+            224,
+            231
+          ]
         }
       ],
       "kind": "data",
@@ -107,7 +123,11 @@
               "kind": "float"
             }
           ],
-          "name": "Meters"
+          "name": "Meters",
+          "span": [
+            255,
+            261
+          ]
         }
       ],
       "deriving": [
@@ -143,7 +163,11 @@
               }
             }
           ],
-          "name": "Point"
+          "name": "Point",
+          "span": [
+            297,
+            302
+          ]
         }
       ],
       "kind": "data",

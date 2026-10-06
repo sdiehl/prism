@@ -524,8 +524,8 @@ fn at_byte(s : String, i : Int) : Int =
 -- ```
 fn list_set(xs, i, v) =
   match xs of
-    Nil => Nil
-    Cons(x, rest) =>
+    [] => Nil
+    x :: rest =>
       if i == 0 then
         Cons(v, rest)
       else
@@ -717,8 +717,8 @@ fn srange(lo, hi) = \(_u) -> srange_go(lo, hi)
 -- | Helper for `sof`: emit each element of `xs`.
 fn sof_go(xs) =
   match xs of
-    Nil => ()
-    Cons(x, rest) =>
+    [] => ()
+    x :: rest =>
       emit(x)
       sof_go(rest)
 
@@ -890,8 +890,8 @@ fn eprintln(s) = eprint(concat(s, "\n"))
 -- above.
 fn push_all(arr, xs) =
   match xs of
-    Nil => arr
-    Cons(h, t) => push_all(array_push(arr, h), t)
+    [] => arr
+    h :: t => push_all(array_push(arr, h), t)
 
 -- | Build a growable `Array` from a list.
 -- Time complexity: amortized O(n).
@@ -957,8 +957,8 @@ fn hm_new() : HashMap(v) = HM { buckets = array_new(8, Nil), size = 0 }
 -- it keeps working in a program that defines its own `fst`/`snd`).
 fn assoc_get(pairs, k) =
   match pairs of
-    Nil => None
-    Cons(p, rest) =>
+    [] => None
+    p :: rest =>
       match p of
         (key, value) =>
           if str_eq(key, k) then
@@ -1014,8 +1014,8 @@ fn hm_get_or(d, hm : HashMap(v), k : String) : v =
 -- and 1 if the key was new (0 if it replaced a binding).
 fn assoc_put(pairs, k, x) =
   match pairs of
-    Nil => (Cons((k, x), Nil), 1)
-    Cons(p, rest) =>
+    [] => (Cons((k, x), Nil), 1)
+    p :: rest =>
       match p of
         (key, _) =>
           if str_eq(key, k) then
@@ -1055,8 +1055,8 @@ fn hm_to_list(hm : HashMap(v)) : List((String, v)) =
 -- | Helper: the keys of a list of pairs.
 fn pair_keys(ps) =
   match ps of
-    Nil => Nil
-    Cons(p, rest) =>
+    [] => Nil
+    p :: rest =>
       match p of
         (k, _) => Cons(k, pair_keys(rest))
 
@@ -1085,8 +1085,8 @@ fn hm_size(hm : HashMap(v)) : Int = hm.size
 -- | Helper for `hm_insert`: re-insert every pair into a fresh table.
 fn hm_reinsert(hm, pairs) =
   match pairs of
-    Nil => hm
-    Cons(p, rest) =>
+    [] => hm
+    p :: rest =>
       match p of
         (k, x) => hm_reinsert(hm_put_raw(hm, k, x), rest)
 
@@ -1133,8 +1133,8 @@ fn hm_delete(hm : HashMap(v), k : String) : HashMap(v) =
 -- if a binding was removed.
 fn assoc_del(pairs, k) =
   match pairs of
-    Nil => (Nil, 0)
-    Cons(p, rest) =>
+    [] => (Nil, 0)
+    p :: rest =>
       match p of
         (key, _) =>
           if str_eq(key, k) then
@@ -1146,8 +1146,8 @@ fn assoc_del(pairs, k) =
 -- | Helper: the values of a list of pairs.
 fn pair_values(ps) =
   match ps of
-    Nil => Nil
-    Cons(p, rest) =>
+    [] => Nil
+    p :: rest =>
       match p of
         (_, value) => Cons(value, pair_values(rest))
 
@@ -1165,8 +1165,8 @@ fn hm_values(hm : HashMap(v)) : List(v) = pair_values(hm_to_list(hm))
 -- | Helper for `hm_from_list`.
 fn hm_from_list_go(hm, ps) =
   match ps of
-    Nil => hm
-    Cons(p, rest) =>
+    [] => hm
+    p :: rest =>
       match p of
         (k, x) => hm_from_list_go(hm_insert(hm, k, x), rest)
 
@@ -1370,6 +1370,12 @@ class Plate(a)
 class Pow(a)
   pow : (a, a) -> a
 
+-- | Path join, the class `a </> b` desugars to. `Path` carries the instance, so
+-- `dir </> name` reads as "name, inside dir"; the operator is not arithmetic and
+-- has no instance at `String` or the number types.
+class PathJoin(a)
+  path_append : (a, a) -> a
+
 -- | The additive-multiplicative core of the numerical tower: `+`, `-`, `*`, and
 -- unary minus (`negated`) over one lane. A monomorphic operand keeps its direct
 -- lane primitive (the dictionary never survives specialization); a `given Num(a)`
@@ -1572,8 +1578,8 @@ instance showList : Show(List(a)) given Show(a)
 
 fn show_list_body(xs : List(a), first : Bool) : String given Show(a) =
   match xs of
-    Nil => ""
-    Cons(h, t) =>
+    [] => ""
+    h :: t =>
       concat(
           concat(if first then "" else ", ", show(h)),
           show_list_body(t, false),
@@ -1736,8 +1742,8 @@ instance traversableOption : Traversable(Option)
 -- ```
 fn insert_by_ord(x : a, xs : List(a)) : List(a) given Ord(a) =
   match xs of
-    Nil => Cons(x, Nil)
-    Cons(y, rest) =>
+    [] => Cons(x, Nil)
+    y :: rest =>
       if cmp(x, y) <= 0 then
         Cons(x, xs)
       else
@@ -1754,11 +1760,11 @@ fn insert_by_ord(x : a, xs : List(a)) : List(a) given Ord(a) =
 -- ```
 fn merge_by_ord(xs : List(a), ys : List(a)) : List(a) given Ord(a) =
   match xs of
-    Nil => ys
-    Cons(x, xr) =>
+    [] => ys
+    x :: xr =>
       match ys of
-        Nil => xs
-        Cons(y, yr) =>
+        [] => xs
+        y :: yr =>
           if cmp(x, y) <= 0 then
             Cons(x, merge_by_ord(xr, ys))
           else
@@ -1767,8 +1773,8 @@ fn merge_by_ord(xs : List(a), ys : List(a)) : List(a) given Ord(a) =
 -- | The generic stable merge sort behind `sort`, for any `Ord` element type.
 fn sort_by_ord(xs : List(a)) : List(a) given Ord(a) =
   match xs of
-    Nil => Nil
-    Cons(_, Nil) => xs
+    [] => Nil
+    [_] => xs
     _ =>
       let mid = length(xs) / 2
       let (l, r) = split_at(mid, xs)

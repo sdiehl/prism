@@ -20,6 +20,7 @@ is retired in writing, because a threshold quietly dropped is a threshold gamed.
 """
 
 import argparse
+import re
 import subprocess
 import sys
 import textwrap
@@ -54,6 +55,16 @@ def count(patterns):
                 if bare and not bare.startswith(marker):
                     code += 1
     return raw, code, paths
+
+
+# The lint package's rule codes, one `pub let fd_lNNNN` constant per rule in its
+# findings module, so the count is read from the rules rather than typed here.
+LINT_FINDINGS = ROOT / "packages" / "lint" / "src" / "Findings.pr"
+LINT_RULE = re.compile(r"^pub let fd_l\d{4} ", re.MULTILINE)
+
+
+def lint_rule_count():
+    return len(LINT_RULE.findall(LINT_FINDINGS.read_text()))
 
 
 class Row:
@@ -167,6 +178,26 @@ ROWS = [
         ),
         cost="executes, but no paired driver runs the same bytes through both"
         " sides, so the ratio is unmeasured rather than favorable",
+    ),
+    Row(
+        name="lint",
+        rust=[],
+        prism=[
+            "packages/lint/src/Findings.pr",
+            "packages/lint/src/Limits.pr",
+            "packages/lint/src/Lint.pr",
+            "packages/lint/src/Pragma.pr",
+            "packages/lint/src/Rules.pr",
+        ],
+        threshold="size published, not judged",
+        verdict=lambda _ratio: (
+            f"recorded with {lint_rule_count()} rules. The house-style linter"
+            " exists only in Prism, so there is no Rust side to divide by; the row"
+            " is here so the package's growth per rule stays public. Its own"
+            " tests are left out of the count"
+        ),
+        cost="runs in the interpreter on every `prism lint`; no native build of"
+        " the package has been timed against it, so the cost is unmeasured",
     ),
     Row(
         name="checker",
@@ -294,6 +325,28 @@ COST_NOTES = [
 
 # Thresholds that stopped describing their module. Retired in writing, never
 # deleted, since a board only means something if leaving it requires a sentence.
+# Public items each crate leaves undocumented, transcribed from one
+# `just docs-debt` run. Hand-recorded like the cost half: the count is
+# deterministic but a full check, too slow for the pre-commit hook.
+DOCS_DEBT_PROVENANCE = (
+    "Measured 2026-10-05 with `just docs-debt` (rustc 1.96.0): every library"
+    " checked with `-W missing_docs`, one count per warning. The lint is not in"
+    " the workspace table, because the pre-commit clippy run denies every"
+    " warning and a warn-level `missing_docs` would block each commit until the"
+    " debt reached zero. This is the baseline the next release ratchets: a count"
+    " may fall, and a rise is a regression to explain."
+)
+
+DOCS_DEBT_ROWS = [
+    ("prism", 746),
+    ("prism-common", 16),
+    ("prism-core", 556),
+    ("prism-lineage", 268),
+    ("prism-native", 112),
+    ("prism-store", 6),
+    ("prism-syntax", 1584),
+]
+
 RETIREMENTS = [
     (
         "`Syntax.Walk` under 60 lines once the arm table is derived",
@@ -410,6 +463,12 @@ def cost_table():
     return table(header, "llrrrrrr", [list(row) for row in COST_ROWS])
 
 
+def docs_debt_table():
+    rows = [[name, f"{n:,}"] for name, n in DOCS_DEBT_ROWS]
+    rows.append(["total", f"{sum(n for _, n in DOCS_DEBT_ROWS):,}"])
+    return table(["crate", "undocumented"], "lr", rows)
+
+
 def render():
     size, ratios = size_section()
     lines = [
@@ -482,6 +541,14 @@ def render():
     lines += ["Where the other pairs stand on cost:", ""]
     for row in ROWS:
         lines += bullet(f"**{row.name}**: {row.cost}.")
+    lines += [
+        "",
+        "## Documentation debt",
+        "",
+        *para(DOCS_DEBT_PROVENANCE),
+        "",
+        *docs_debt_table(),
+    ]
     lines += ["", "## Retirements", ""]
     for name, why in RETIREMENTS:
         lines += bullet(f"{name}. {why}")

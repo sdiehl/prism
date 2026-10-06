@@ -78,6 +78,7 @@ fn reuse_comp(comp: TypedComp) -> TypedComp {
                         body,
                         return_binder,
                         return_body,
+                        finally_body,
                         ops,
                     } => {
                         let TypedHandler { arms, forwarded } = ops;
@@ -93,14 +94,19 @@ fn reuse_comp(comp: TypedComp) -> TypedComp {
                             bodies.push(arm.body);
                         }
                         let has_return = return_body.is_some();
+                        let has_finally = finally_body.is_some();
                         work.push(ReuseFrame::FinishHandle {
                             sig,
                             return_binder,
                             has_return,
+                            has_finally,
                             metadata,
                             forwarded,
                         });
                         work.extend(bodies.into_iter().rev().map(ReuseFrame::Comp));
+                        if let Some(finally_body) = finally_body {
+                            work.push(ReuseFrame::Comp(*finally_body));
+                        }
                         if let Some(return_body) = return_body {
                             work.push(ReuseFrame::Comp(*return_body));
                         }
@@ -156,19 +162,23 @@ fn reuse_comp(comp: TypedComp) -> TypedComp {
                 sig,
                 return_binder,
                 has_return,
+                has_finally,
                 metadata,
                 forwarded,
             } => {
-                let body_count = 1 + usize::from(has_return) + metadata.len();
+                let body_count =
+                    1 + usize::from(has_return) + usize::from(has_finally) + metadata.len();
                 let start = results
                     .len()
                     .checked_sub(body_count)
                     .expect("each handler clause has a rewritten body");
-                let (body, return_body, arms) = {
+                let (body, return_body, finally_body, arms) = {
                     let mut bodies = results.drain(start..);
                     let body = Box::new(bodies.next().expect("a handled body exists"));
                     let return_body = has_return
                         .then(|| Box::new(bodies.next().expect("a return-clause body exists")));
+                    let finally_body = has_finally
+                        .then(|| Box::new(bodies.next().expect("a cleanup-clause body exists")));
                     let arms = metadata
                         .into_iter()
                         .map(|arm| TypedHandleOp {
@@ -181,7 +191,7 @@ fn reuse_comp(comp: TypedComp) -> TypedComp {
                         .collect();
                     let extra_body = bodies.next();
                     debug_assert!(extra_body.is_none());
-                    (body, return_body, arms)
+                    (body, return_body, finally_body, arms)
                 };
                 results.push(TypedComp::new(
                     sig,
@@ -189,6 +199,7 @@ fn reuse_comp(comp: TypedComp) -> TypedComp {
                         body,
                         return_binder,
                         return_body,
+                        finally_body,
                         ops: TypedHandler { arms, forwarded },
                     },
                 ));
@@ -223,6 +234,7 @@ enum ReuseFrame {
         sig: CompSig,
         return_binder: Option<TypedBinder>,
         has_return: bool,
+        has_finally: bool,
         metadata: Vec<HandleMetadata>,
         forwarded: Vec<TypedForward>,
     },

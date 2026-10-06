@@ -28,8 +28,8 @@ fn replay(artifact : String, mismatch : String) : Unit ! {FileSystem, IO} =
 
 fn replay_pairs(argv : List(String)) : Unit ! {FileSystem, IO} =
   match argv of
-    Nil => ()
-    Cons(artifact, Cons(mismatch, rest)) =>
+    [] => ()
+    artifact :: mismatch :: rest =>
       replay(artifact, mismatch)
       replay_pairs(rest)
     _ => println("expected artifact/mismatch argument pairs")

@@ -14,6 +14,7 @@
 // silent skip: these ratchets are worthless if they pass without ever building
 // natively.
 
+use prism::DumpPhase;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::path::Path;
@@ -74,7 +75,7 @@ fn boxed_machine_words_have_a_runtime_allocation_witness() {
         "machine-word results are fresh cells, not immediates"
     );
     let claimed = source.replace(": U64 =", ": U64 @ noalloc =");
-    let error = prism::dump("core", &prism::with_prelude(&claimed))
+    let error = prism::dump(DumpPhase::Core, &prism::with_prelude(&claimed))
         .expect_err("the runtime allocation must not receive a zero-allocation certificate");
     assert!(error.to_string().contains("allocation"), "{error}");
 }
@@ -963,7 +964,7 @@ fn byte_payload_decoding_extends_one_buffer_in_place() {
 #[test]
 fn container_encoder_threads_the_builder_fold() {
     let src = perf_src_n(PERF_WIRE_ENCODE, 8);
-    let core = prism::dump("core", &src).expect("wire encode compiles");
+    let core = prism::dump(DumpPhase::Core, &src).expect("wire encode compiles");
     assert!(
         core.contains("buf_append"),
         r"the derived list encoder does not reach `buf_append` in Core; the container fold regressed from the linear buffer builder to right-nested `wire_cat` concatenation"
@@ -1278,7 +1279,7 @@ fn guarded_match_fallthrough_is_shared_not_duplicated() {
     // regardless of how many guarded arms precede it: 2^N duplication would grow
     // this without bound.
     let copies = |n: usize| {
-        prism::dump("core", &guarded_match(n))
+        prism::dump(DumpPhase::Core, &guarded_match(n))
             .expect("guarded match compiles")
             .matches("31337")
             .count()
@@ -1294,7 +1295,7 @@ fn guarded_match_fallthrough_is_shared_not_duplicated() {
     // arms). A 3x bound on a 2x doubling leaves slack while failing the blowup by
     // a wide margin (the pre-join form was ~29x larger at 8 arms than at 4).
     let size = |n: usize| {
-        prism::dump("core", &guarded_match(n))
+        prism::dump(DumpPhase::Core, &guarded_match(n))
             .expect("guarded match compiles")
             .len()
     };

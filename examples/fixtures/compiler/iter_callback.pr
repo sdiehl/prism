@@ -11,8 +11,8 @@ import Data.List (..)
 
 fn sum_with(f : (Int) -> Int, xs : List(Int)) : Int =
   match xs of
-    Nil => 0
-    Cons(h, t) => f(h) + sum_with(f, t)
+    [] => 0
+    h :: t => f(h) + sum_with(f, t)
 
 fn main() : Unit ! {IO} =
   let xs = range(1, 10)

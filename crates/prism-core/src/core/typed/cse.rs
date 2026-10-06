@@ -238,6 +238,7 @@ impl Rewrite for Cse {
                 body,
                 return_binder,
                 return_body,
+                finally_body,
                 ops,
             } => {
                 let body2 = Box::new(self.comp(body, avail));
@@ -246,6 +247,9 @@ impl Rewrite for Cse {
                     let avail2 = narrow(avail, &names);
                     Box::new(self.comp(rb, &avail2))
                 });
+                let finally_body2 = finally_body
+                    .as_ref()
+                    .map(|fb| Box::new(self.comp(fb, avail)));
                 let ops2 = TypedHandler {
                     arms: ops
                         .arms
@@ -272,6 +276,7 @@ impl Rewrite for Cse {
                         body: body2,
                         return_binder: return_binder.clone(),
                         return_body: return_body2,
+                        finally_body: finally_body2,
                         ops: ops2,
                     },
                 )
@@ -769,6 +774,7 @@ mod tests {
                 body: Box::new(handled_op),
                 return_binder: None,
                 return_body: None,
+                finally_body: None,
                 ops: clauses,
             },
         );

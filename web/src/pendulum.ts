@@ -1,12 +1,12 @@
 // The double pendulum: two rods tumbling into chaos, dragged backward and forward
 // like a video. The whole trajectory is one deterministic run of the same
-// interpreter the playground uses, computed once in wasm (`pendulum_run`); every
+// interpreter the playground uses, computed once in wasm (`resident_run`); every
 // frame is a pure function of its step index, so positioning the playhead at step
 // N is literally replaying the integrator to N. The sensitive dependence on
 // initial conditions makes the motion look random, but it is bit-reproducible:
 // every sine and cosine is Prism's vendored libm, identical on every backend.
 // No dependencies beyond the wasm bundle.
-import init, { pendulum_run, tokens } from "../pkg/prism.js";
+import init, { resident_run, tokens } from "../pkg/prism.js";
 import { examples } from "./examples.js";
 import { highlight, initFaces, kernel } from "./showcase.js";
 import "./showcase.css";
@@ -19,7 +19,7 @@ const KERNEL_SPLIT = "-- @scrubber:main-below";
 const KERNEL_SRC = kernel(examples.pendulum, KERNEL_SPLIT);
 
 // How many frames of the pendulum to replay (each frame is 0.02 s of simulated
-// time, so this is ~6 s of motion). The single upfront `pendulum_run` computes
+// time, so this is ~6 s of motion). The single upfront `resident_run` computes
 // every frame 0..STEPS; scrubbing after that is pure array indexing.
 const STEPS = 300;
 // Playback advances at this many frames per second when Play is held.
@@ -62,7 +62,7 @@ let playing = false;
 // world coordinates map onto it, and the backing store is scaled for hi-dpi.
 let size = 0;
 
-// Parse the `pendulum_run` transcript: a header line with the reach, then one
+// Parse the `run_trace` transcript: a header line with the reach, then one
 // line per frame, each `x1,y1,x2,y2` (the two bob centers, pivot at origin).
 function parse(text: string): { reach: number; frames: Frame[] } {
   const lines = text.split("\n");
@@ -199,7 +199,7 @@ async function boot(): Promise<void> {
     // blocks. `setTimeout` rather than `requestAnimationFrame`, so a tab loaded
     // in the background (where rAF is paused) still starts the simulation.
     await new Promise((r) => setTimeout(r, 0));
-    const raw = pendulum_run(STEPS);
+    const raw = resident_run("pendulum", `run_trace(${STEPS})`);
     if (raw.startsWith("error:")) {
       statusEl.textContent = raw;
       statusEl.classList.add("err");

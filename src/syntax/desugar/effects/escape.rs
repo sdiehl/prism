@@ -59,7 +59,9 @@ fn free_resume_arm(a: &HandlerArm) -> Option<Span> {
         HandlerArm::Sugar(SugarArm::Once(_, ps, body) | SugarArm::Never(_, ps, body)) => {
             free_resume(body, ps.iter().any(|p| p == RESUME))
         }
-        HandlerArm::Sugar(SugarArm::Val(_, body)) => free_resume(body, false),
+        HandlerArm::Sugar(SugarArm::Val(_, body)) | HandlerArm::Finally(body) => {
+            free_resume(body, false)
+        }
     }
 }
 
@@ -70,9 +72,11 @@ fn free_resume_sugar(s: &Sugar<Surface>) -> Option<Span> {
         Sugar::NamedHandle(_, b, arms) => fr(b).or_else(|| arms.iter().find_map(free_resume_arm)),
         Sugar::Assign(_, b) | Sugar::OptChain(b, _) | Sugar::Probe(_, b) => fr(b),
         Sugar::IndexAssign(recv, key, v) => fr(recv).or_else(|| fr(key)).or_else(|| fr(v)),
-        Sugar::Default(a, b) | Sugar::Transact(a, b) | Sugar::Compose(_, a, b) => {
-            fr(a).or_else(|| fr(b))
-        }
+        Sugar::Default(a, b)
+        | Sugar::Transact(a, b)
+        | Sugar::Compose(_, a, b)
+        | Sugar::Cons(a, b)
+        | Sugar::PathJoin(a, b) => fr(a).or_else(|| fr(b)),
         Sugar::Throw(_, args) => args.iter().find_map(fr),
         Sugar::TryCatch(b, arms) => fr(b).or_else(|| {
             arms.iter()
@@ -117,8 +121,9 @@ fn taints(e: &S<Expr<Core>>, ops: &BTreeSet<String>, tainted: &BTreeSet<String>)
 }
 
 // Every name referenced anywhere in `e`, for the entry-point world-handler
-// call-graph scan in the parent desugar module.
-pub(in crate::syntax::desugar) fn referenced_names(e: &S<Expr<Core>>) -> BTreeSet<String> {
+// call-graph scan in the parent desugar module and the checker's question of
+// whether a handler clause re-performs what it handles.
+pub(crate) fn referenced_names(e: &S<Expr<Core>>) -> BTreeSet<String> {
     let mut out = BTreeSet::new();
     walk(e, &mut |x| {
         if let Expr::Var(n) = &x.node {

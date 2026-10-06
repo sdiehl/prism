@@ -1,6 +1,5 @@
 ---
 source: tests/snapshots.rs
-assertion_line: 14
 expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/kind_var_cross.pr
 ---
@@ -27,6 +26,7 @@ Program {
                         Int,
                     ],
                     fields: None,
+                    span: 467..472,
                 },
             ],
             deriving: [],

@@ -1,11 +1,11 @@
 // Branching timelines pause a deterministic boids swarm at any step, perturb one
-// boid, and fork through the run-from-state export (`boids_run_from`). A branch is
+// boid, and fork through the kernel's run-from-state function (`run_trace_from`). A branch is
 // a pure function of its forked state and
 // step count, so both branches persist AND each reproduces byte-for-byte: the
 // determinism claim, made playable. The whole trajectory (positions AND
 // velocities) is computed in wasm, so forking is just re-running the same
 // interpreter from a perturbed frame, never an undo log.
-import init, { boids_run_from, boids_run_full, tokens } from "../pkg/prism.js";
+import init, { resident_run, tokens } from "../pkg/prism.js";
 import { examples } from "./examples.js";
 import { highlight, initFaces, kernel } from "./showcase.js";
 import "./branch.css";
@@ -99,10 +99,15 @@ function parseTrajectory(text: string): { world: number; frames: Frame[] } {
   return { world: w, frames };
 }
 
-// Serialize a frame back to the "x,y,vx,vy ..." line `boids_run_from` parses, so
-// a forked (perturbed) frame round-trips into the kernel as its start state.
+// Serialize a frame back to the "x,y,vx,vy ..." line the full trajectory prints.
 function serializeFrame(f: Frame): string {
   return f.map((b) => `${b.x},${b.y},${b.vx},${b.vy}`).join(" ");
+}
+
+// The same frame as the Prism list literal `run_trace_from` takes, so a forked
+// (perturbed) frame round-trips into the kernel as its start state.
+function swarmLiteral(f: Frame): string {
+  return `[${f.map((b) => `(${b.x},${b.y},${b.vx},${b.vy})`).join(",")}]`;
 }
 
 // The perturbation: poke ONE boid. Reverse boid 0's velocity, leaving every
@@ -129,7 +134,7 @@ function firstDivergence(a: Frame[], b: Frame[]): number {
 // Returns null if the continuation errored (surfaced by the caller).
 function makeFork(parent: Branch, g: number, id: number): Branch | null {
   const perturbed = perturb(parent.frames[g]);
-  const raw = boids_run_from(serializeFrame(perturbed), STEPS - g);
+  const raw = resident_run("boids", `run_trace_from(${swarmLiteral(perturbed)}, ${STEPS - g})`);
   if (raw.startsWith("error:")) {
     proofEl.textContent = raw;
     proofEl.className = "branch-proof err";
@@ -507,7 +512,7 @@ async function boot(): Promise<void> {
     await init();
     highlight(codeEl, KERNEL_SRC, tokens);
     await new Promise((r) => setTimeout(r, 0));
-    const raw = boids_run_full(STEPS);
+    const raw = resident_run("boids", `run_trace_full(${STEPS})`);
     if (raw.startsWith("error:")) {
       grid.textContent = raw;
       return;

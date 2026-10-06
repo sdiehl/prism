@@ -18,9 +18,9 @@ Program {
             param: "a",
             supers: [],
             methods: [
-                (
-                    "loud",
-                    Fun(
+                ClassMethod {
+                    name: "loud",
+                    ty: Fun(
                         [
                             Var(
                                 "a",
@@ -29,7 +29,8 @@ Program {
                         Empty,
                         Int,
                     ),
-                ),
+                    span: 16..20,
+                },
             ],
             span: 0..33,
         },

@@ -18,8 +18,8 @@ pub fn singleton(x) = Cons(x, Nil)
 -- | True for the empty list. Time complexity: O(1).
 pub fn is_nil(borrow xs) : Bool @ noalloc =
   match xs of
-    Nil => true
-    Cons(_x, _rest) => false
+    [] => true
+    _x :: _rest => false
 
 -- | The first element as `Some`, or `None` when the list is empty.
 -- Time complexity: O(1).
@@ -32,15 +32,15 @@ pub fn is_nil(borrow xs) : Bool @ noalloc =
 -- ```
 pub fn head(borrow xs) =
   match xs of
-    Nil => None
-    Cons(x, _) => Some(x)
+    [] => None
+    x :: _ => Some(x)
 
 -- | Everything after the first element (`Nil` for the empty list).
 -- Time complexity: O(1).
 pub fn tail(borrow xs) =
   match xs of
-    Nil => Nil
-    Cons(_, rest) => rest
+    [] => Nil
+    _ :: rest => rest
 
 -- | The final element as `Some`, or `None` when the list is empty.
 -- Time complexity: O(n).
@@ -53,9 +53,9 @@ pub fn tail(borrow xs) =
 -- ```
 pub fn last(borrow xs) =
   match xs of
-    Nil => None
-    Cons(x, Nil) => Some(x)
-    Cons(_, rest) => last(rest)
+    [] => None
+    [x] => Some(x)
+    _ :: rest => last(rest)
 
 -- | The element at index `n` (zero-based) as `Some`, or `None` if out of range.
 -- Time complexity: O(min(l, n + 1)), where `l` is the list length.
@@ -71,8 +71,8 @@ pub fn nth(n, borrow xs) =
     head(xs)
   else
     match xs of
-      Nil => None
-      Cons(_, rest) => nth(n - 1, rest)
+      [] => None
+      _ :: rest => nth(n - 1, rest)
 
 -- | The first `n` elements (fewer if the list is shorter).
 -- Time complexity: O(min(l, n)), where `l` is the list length.
@@ -88,8 +88,8 @@ pub fn take(n, xs) =
     Nil
   else
     match xs of
-      Nil => Nil
-      Cons(x, rest) => Cons(x, take(n - 1, rest))
+      [] => Nil
+      x :: rest => Cons(x, take(n - 1, rest))
 
 -- | The list with its first `n` elements removed.
 -- Time complexity: O(min(l, n)), where `l` is the list length.
@@ -105,8 +105,8 @@ pub fn drop(n, xs) =
     xs
   else
     match xs of
-      Nil => Nil
-      Cons(_, rest) => drop(n - 1, rest)
+      [] => Nil
+      _ :: rest => drop(n - 1, rest)
 
 -- | The longest prefix of elements satisfying `p`.
 -- Time complexity: O(k), where `k` is the number of elements examined (at most
@@ -120,8 +120,8 @@ pub fn drop(n, xs) =
 -- ```
 pub fn take_while(p, xs) =
   match xs of
-    Nil => Nil
-    Cons(x, rest) =>
+    [] => Nil
+    x :: rest =>
       if p(x) then
         Cons(x, take_while(p, rest))
       else
@@ -139,8 +139,8 @@ pub fn take_while(p, xs) =
 -- ```
 pub fn drop_while(p, xs) =
   match xs of
-    Nil => Nil
-    Cons(x, rest) =>
+    [] => Nil
+    x :: rest =>
       if p(x) then
         drop_while(p, rest)
       else
@@ -153,8 +153,8 @@ pub fn split_at(n, xs) =
     (Nil, xs)
   else
     match xs of
-      Nil => (Nil, Nil)
-      Cons(x, rest) =>
+      [] => (Nil, Nil)
+      x :: rest =>
         match split_at(n - 1, rest) of
           (prefix, suffix) => (Cons(x, prefix), suffix)
 
@@ -169,8 +169,8 @@ pub fn split_at(n, xs) =
 -- ```
 pub fn map(f, xs) =
   match xs of
-    Nil => Nil
-    Cons(x, rest) => Cons(f(x), map(f, rest))
+    [] => Nil
+    x :: rest => Cons(f(x), map(f, rest))
 
 -- | Keep the elements satisfying `p`.
 -- Time complexity: O(n), excluding calls to `p`.
@@ -183,8 +183,8 @@ pub fn map(f, xs) =
 -- ```
 pub fn filter(p, xs) =
   match xs of
-    Nil => Nil
-    Cons(x, rest) =>
+    [] => Nil
+    x :: rest =>
       if p(x) then
         Cons(x, filter(p, rest))
       else
@@ -201,8 +201,8 @@ pub fn filter(p, xs) =
 -- ```
 pub fn foldr(f, z, xs) =
   match xs of
-    Nil => z
-    Cons(x, rest) => f(x, foldr(f, z, rest))
+    [] => z
+    x :: rest => f(x, foldr(f, z, rest))
 
 -- | Left fold: `f(... f(f(z, x0), x1) ..., xn)`. Tail-recursive.
 -- Time complexity: O(n), excluding calls to `f`.
@@ -215,8 +215,8 @@ pub fn foldr(f, z, xs) =
 -- ```
 pub fn foldl(f, z, xs) =
   match xs of
-    Nil => z
-    Cons(x, rest) => foldl(f, f(z, x), rest)
+    [] => z
+    x :: rest => foldl(f, f(z, x), rest)
 
 -- | Concatenate two lists.
 -- Time complexity: O(n), where `n` is the length of `xs`; `ys` is shared.
@@ -229,8 +229,8 @@ pub fn foldl(f, z, xs) =
 -- ```
 pub fn append(xs, ys) =
   match xs of
-    Nil => ys
-    Cons(x, rest) => Cons(x, append(rest, ys))
+    [] => ys
+    x :: rest => Cons(x, append(rest, ys))
 
 -- | The list in reverse order.
 -- Time complexity: O(n).
@@ -269,8 +269,8 @@ pub fn flatten(xss) = foldr(append, Nil, xss)
 -- lint: allow(L0201)
 pub fn concat_map(f, xs) =
   match xs of
-    Nil => Nil
-    Cons(x, rest) => append(f(x), concat_map(f, rest))
+    [] => Nil
+    x :: rest => append(f(x), concat_map(f, rest))
 
 -- | Combine two lists elementwise with `f`, stopping at the shorter length.
 -- Time complexity: O(min(n, m)), excluding calls to `f`.
@@ -283,11 +283,11 @@ pub fn concat_map(f, xs) =
 -- ```
 pub fn zip_with(f, xs, ys) =
   match xs of
-    Nil => Nil
-    Cons(x, xr) =>
+    [] => Nil
+    x :: xr =>
       match ys of
-        Nil => Nil
-        Cons(y, yr) => Cons(f(x, y), zip_with(f, xr, yr))
+        [] => Nil
+        y :: yr => Cons(f(x, y), zip_with(f, xr, yr))
 
 -- | Pair up two lists elementwise, stopping at the shorter length.
 -- Time complexity: O(min(n, m)).
@@ -311,8 +311,8 @@ pub fn zip(xs, ys) = zip_with(\(x, y) -> (x, y), xs, ys)
 -- ```
 pub fn unzip(ps) =
   match ps of
-    Nil => (Nil, Nil)
-    Cons((x, y), rest) =>
+    [] => (Nil, Nil)
+    (x, y) :: rest =>
       match unzip(rest) of
         (xs, ys) => (Cons(x, xs), Cons(y, ys))
 
@@ -329,15 +329,15 @@ pub fn count(p, xs) = count_go(p, xs, 0)
 
 fn count_go(p, xs, acc) =
   match xs of
-    Nil => acc
-    Cons(x, rest) => count_go(p, rest, if p(x) then acc + 1 else acc)
+    [] => acc
+    x :: rest => count_go(p, rest, if p(x) then acc + 1 else acc)
 
 -- | Helper for `position`: search from index `n`. Time complexity: O(k), where
 -- `k` is the number of elements examined, excluding calls to `p`.
 pub fn position_go(p, n, xs) =
   match xs of
-    Nil => None
-    Cons(x, rest) =>
+    [] => None
+    x :: rest =>
       if p(x) then
         Some(n)
       else
@@ -366,8 +366,8 @@ pub fn position(p, xs) = position_go(p, 0, xs)
 -- ```
 pub fn maximum(borrow xs) =
   match xs of
-    Nil => None
-    Cons(x, rest) => Some(foldl(max, x, rest))
+    [] => None
+    x :: rest => Some(foldl(max, x, rest))
 
 -- | The least element as `Some`, or `None` for the empty list.
 -- Time complexity: O(n) comparisons.
@@ -380,8 +380,8 @@ pub fn maximum(borrow xs) =
 -- ```
 pub fn minimum(borrow xs) =
   match xs of
-    Nil => None
-    Cons(x, rest) => Some(foldl(min, x, rest))
+    [] => None
+    x :: rest => Some(foldl(min, x, rest))
 
 -- | A list of `n` copies of `x`.
 -- Time complexity: O(n).
@@ -442,8 +442,8 @@ fn tabulate_go(i, n, f) =
 -- ```
 pub fn insert_sorted(x, xs) =
   match xs of
-    Nil => Cons(x, Nil)
-    Cons(y, rest) =>
+    [] => Cons(x, Nil)
+    y :: rest =>
       if x <= y then
         Cons(x, xs)
       else
@@ -453,8 +453,8 @@ pub fn insert_sorted(x, xs) =
 -- Time complexity: O(1).
 pub fn list_to_option(borrow xs) =
   match xs of
-    Nil => None
-    Cons(x, _) => Some(x)
+    [] => None
+    x :: _ => Some(x)
 
 -- | Split into `(matching, non-matching)` by predicate `p`.
 -- Time complexity: O(n), excluding calls to `p`.
@@ -467,8 +467,8 @@ pub fn list_to_option(borrow xs) =
 -- ```
 pub fn partition(p, xs) =
   match xs of
-    Nil => (Nil, Nil)
-    Cons(x, rest) =>
+    [] => (Nil, Nil)
+    x :: rest =>
       let keep = p(x)
       match partition(p, rest) of
         (yes, no) =>
@@ -505,10 +505,7 @@ pub fn chunks_of(n, xs) =
 -- [0, 1, 3, 6]
 -- ```
 pub fn scan_left(f, z, xs) =
-  Cons(
-      z,
-      match xs of { Nil => Nil, Cons(x, rest) => scan_left(f, f(z, x), rest) },
-    )
+  Cons(z, match xs of { [] => Nil, x :: rest => scan_left(f, f(z, x), rest) })
 
 -- | Applicative apply for lists: every function in `fs` applied to every `x`.
 -- Time complexity: O(nm), where `n` is the number of functions and `m` is the

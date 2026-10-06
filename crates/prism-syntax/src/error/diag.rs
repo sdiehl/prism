@@ -16,16 +16,36 @@ pub enum TypeError {
         found: String,
     },
     #[error("{msg}")]
-    ScopeFailure { span: Span, msg: String },
+    ScopeFailure {
+        span: Span,
+        msg: String,
+        origin: Option<Box<Origin>>,
+    },
     /// A located diagnostic from the structured, coded catalogue ([`ErrKind`]),
     /// with its provenance ([`Diag`]). This is the home every semantic checker
     /// failure is migrating to.
     #[error("{0}")]
     Kind(Box<Diag>),
     #[error("{msg}")]
-    TypeFailure { span: Span, msg: String },
+    TypeFailure {
+        span: Span,
+        msg: String,
+        origin: Option<Box<Origin>>,
+    },
     #[error("internal compiler error (please report): {msg}")]
     InternalInvariant { msg: String },
+}
+
+/// The imported module whose source an error's spans index.
+///
+/// A root-file error leaves it unset. An error raised while checking a
+/// declaration merged in from a module carries the module's dotted name, and
+/// the driver adds the module's text before the error leaves the front end, so
+/// a renderer can place the caret without knowing the search path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Origin {
+    pub module: String,
+    pub source: Option<String>,
 }
 
 /// One frame of an error's context stack: where the failure arose.
@@ -66,6 +86,7 @@ pub struct Diag {
     pub labels: Vec<(Span, String)>,
     pub help: Option<String>,
     pub notes: Vec<String>,
+    pub origin: Option<Box<Origin>>,
 }
 
 impl Diag {
@@ -78,6 +99,7 @@ impl Diag {
             labels: Vec::new(),
             help: None,
             notes: Vec::new(),
+            origin: None,
         }
     }
 
@@ -787,7 +809,7 @@ pub enum ErrKind {
     CoeffectUsageRowMisplaced { row: String },
     #[error("parameter `{param}` is marked `@ once` but may be used more than once in `{fn_name}`; a `@ once` closure must be called or passed at most once, and only directly (not aliased, captured, or reused)")]
     OnceUsedMoreThanOnce { fn_name: String, param: String },
-    #[error("a `@ portable` closure cannot capture `{subject}`: only top-level functions, constructors, and portable-typed parameters may be captured, so the closure can move to a fresh runtime")]
+    #[error("a `@ portable` closure cannot capture `{subject}`: only top-level functions, constructors, portable-typed parameters, and `let`s whose value has a portable type may be captured, so the closure can move to a fresh runtime")]
     PortableCapturesNonportable { subject: String },
     #[error("`{token}` is marked `@ noescape` and escapes the closure passed to `{callee}`: a scoped value may be used inside the closure but not returned, embedded in returned data, aliased, or captured by another closure")]
     NoescapeTokenEscapes { token: String, callee: String },
@@ -868,6 +890,23 @@ pub enum ErrKind {
     CallableCertificateMissing { name: String, detail: String },
     #[error("callable certificate `@ noalloc` unavailable in `{name}`: {detail}")]
     CallableCertificateOpaque { name: String, detail: String },
+    // A handler carrying a `finally` clause is left exactly once, so each of
+    // its operation clauses resumes at most once: a clause that may resume
+    // again would re-enter a scope whose cleanup has already run.
+    #[error(
+        "handler clause for `{op}` may resume more than once; a handler with a `finally` \
+         clause is left exactly once, so each of its clauses resumes at most once"
+    )]
+    CleanupHandlerClauseMany { op: String },
+    // A cleanup clause runs while a scope is torn down, so an operation that
+    // never resumes would abandon the cleanups still pending behind it.
+    #[error(
+        "`finally` clause performs `{op}` of effect `{effect}`, which never resumes; a cleanup \
+         clause runs to completion"
+    )]
+    CleanupClauseAborts { op: String, effect: String },
+    #[error("duplicate `finally` clause; a handler has at most one")]
+    DuplicateFinallyArm,
     #[error("`{fn_name}` has no parameter `{param}`")]
     NoParameter { fn_name: String, param: String },
     #[error("argument `{param}` to `{fn_name}` given more than once")]
@@ -1084,6 +1123,9 @@ impl ErrKind {
             Self::ClaimStackNotClosed { .. } => "E6084",
             Self::CallableCertificateMissing { .. } => "E6086",
             Self::CallableCertificateOpaque { .. } => "E6087",
+            Self::CleanupHandlerClauseMany { .. } => "E6088",
+            Self::CleanupClauseAborts { .. } => "E6089",
+            Self::DuplicateFinallyArm => "E6090",
             Self::NoParameter { .. } => "E6054",
             Self::ArgGivenTwice { .. } => "E6055",
             Self::PositionalAfterNamed { .. } => "E6056",
@@ -1192,12 +1234,16 @@ impl TypeError {
             },
             // Legacy string-carrying variants: prepend the context textually until
             // they too move onto the catalogue.
-            Self::UnboundVariable { span, .. } | Self::ScopeFailure { span, .. } => {
-                Self::ScopeFailure {
-                    span,
-                    msg: format!("in `{fn_name}`: {self}"),
-                }
-            }
+            Self::UnboundVariable { span, .. } => Self::ScopeFailure {
+                span,
+                msg: format!("in `{fn_name}`: {self}"),
+                origin: None,
+            },
+            Self::ScopeFailure { span, msg, origin } => Self::ScopeFailure {
+                span,
+                msg: format!("in `{fn_name}`: {msg}"),
+                origin,
+            },
             // The core type mismatch migrates onto the catalogue as it gains
             // context: routing it through `ErrKind::TypeMismatch` keeps its
             // dedicated code and records the descent as a real frame, instead of
@@ -1210,10 +1256,83 @@ impl TypeError {
             } => ErrKind::TypeMismatch { expected, found }
                 .at(span)
                 .in_fn(fn_name),
-            Self::TypeFailure { span, .. } => Self::TypeFailure {
+            Self::TypeFailure { span, msg, origin } => Self::TypeFailure {
                 span,
-                msg: format!("in `{fn_name}`: {self}"),
+                msg: format!("in `{fn_name}`: {msg}"),
+                origin,
             },
+        }
+    }
+
+    /// Mark the error as raised inside imported module `module`, whose source
+    /// its spans index. A root declaration (`module` empty) and an error that
+    /// already names its module are left alone, as is one with no span.
+    #[must_use]
+    pub fn in_module(self, module: &str) -> Self {
+        if module.is_empty() || self.origin().is_some() {
+            return self;
+        }
+        let origin = || {
+            Some(Box::new(Origin {
+                module: module.to_string(),
+                source: None,
+            }))
+        };
+        match self {
+            Self::Kind(mut diag) => {
+                diag.origin = origin();
+                Self::Kind(diag)
+            }
+            Self::UnboundVariable { span, .. } => Self::ScopeFailure {
+                span,
+                msg: self.to_string(),
+                origin: origin(),
+            },
+            Self::ScopeFailure { span, msg, .. } => Self::ScopeFailure {
+                span,
+                msg,
+                origin: origin(),
+            },
+            Self::TypeFailure { span, msg, .. } => Self::TypeFailure {
+                span,
+                msg,
+                origin: origin(),
+            },
+            Self::TypeMismatch {
+                span,
+                expected,
+                found,
+            } => ErrKind::TypeMismatch { expected, found }
+                .at(span)
+                .in_module(module),
+            Self::InternalInvariant { .. } => self,
+        }
+    }
+
+    /// The imported module this error's spans index, when it is not the root.
+    #[must_use]
+    pub fn origin(&self) -> Option<&Origin> {
+        match self {
+            Self::Kind(diag) => diag.origin.as_deref(),
+            Self::ScopeFailure { origin, .. } | Self::TypeFailure { origin, .. } => {
+                origin.as_deref()
+            }
+            Self::UnboundVariable { .. }
+            | Self::TypeMismatch { .. }
+            | Self::InternalInvariant { .. } => None,
+        }
+    }
+
+    /// Mutable access to [`Self::origin`], for the driver to attach the source.
+    pub fn origin_mut(&mut self) -> Option<&mut Origin> {
+        match self {
+            Self::Kind(diag) => diag.origin.as_deref_mut(),
+            Self::ScopeFailure { origin, .. } | Self::TypeFailure { origin, .. } => {
+                origin.as_deref_mut()
+            }
+            Self::UnboundVariable { .. }
+            | Self::TypeMismatch { .. }
+            | Self::InternalInvariant { .. } => None,
         }
     }
 }
@@ -1568,6 +1687,9 @@ mod tests {
             },
             CallableCertificateMissing { name, detail },
             CallableCertificateOpaque { name, detail },
+            CleanupHandlerClauseMany { op },
+            CleanupClauseAborts { op, effect },
+            DuplicateFinallyArm,
             NoParameter { fn_name, param },
             ArgGivenTwice { param, fn_name },
             PositionalAfterNamed { fn_name },
@@ -1629,6 +1751,7 @@ mod tests {
         let legacy_failure = TypeError::TypeFailure {
             span: Span::default(),
             msg: String::new(),
+            origin: None,
         };
         assert_ne!(dedicated, legacy_mismatch.error_code().as_str());
         assert_ne!(dedicated, legacy_failure.error_code().as_str());

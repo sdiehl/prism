@@ -6,6 +6,7 @@
 //! moves only downstream state, never the shared past), and forking from a grid
 //! reproduces exactly (so a branch is real, not painted).
 
+use prism::DumpPhase;
 use std::fs;
 
 // Mirrors the sentinel in examples/world.pr and src/wasm/mod.rs: the pure kernel the
@@ -29,7 +30,7 @@ fn run(main: &str) -> String {
         .term
 }
 
-// The trajectory driver the wasm `world_run` export builds: evolve a seed under
+// The trajectory driver the world page hands `resident_run`: evolve a seed under
 // a law for `ticks` generations, one `<hash> <bits>` line per tick.
 fn trace(law: &str, seed: &str, ticks: usize) -> String {
     run(&format!(
@@ -48,11 +49,11 @@ fn seed() -> String {
     String::from_utf8(g).unwrap()
 }
 
-// The content hash of a law's step function, exactly as `world_law_hash` reports
+// The content hash of a law's step function, exactly as `resident_hash` reports
 // it: the `hash  name` line from the core-hash dump.
 fn law_hash(law: &str) -> String {
     let full = prism::with_prelude(&kernel());
-    let dump = prism::dump("core-hash", &full).expect("core-hash dump");
+    let dump = prism::dump(DumpPhase::CoreHash, &full).expect("core-hash dump");
     let name = format!("step_{law}");
     dump.lines()
         .find_map(|l| {

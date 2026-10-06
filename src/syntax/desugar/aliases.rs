@@ -27,8 +27,8 @@ pub(super) fn expand_aliases(prog: &mut Program) -> Result<(), TypeError> {
         expand_decl(d, &map);
     }
     for c in &mut prog.classes {
-        for (_, t) in &mut c.methods {
-            expand_ty(t, &map);
+        for m in &mut c.methods {
+            expand_ty(&mut m.ty, &map);
         }
     }
     for i in &mut prog.instances {

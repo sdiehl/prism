@@ -11,8 +11,8 @@
 
 fn mark_all(seen : Array(Bool), xs : List(Int), n : Int) : Array(Bool) =
   match xs of
-    Nil => seen
-    Cons(x, rest) =>
+    [] => seen
+    x :: rest =>
       if x >= 0 && x <= n then
         mark_all(array_set(seen, x, true), rest, n)
       else

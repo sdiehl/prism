@@ -10,9 +10,7 @@ use clap::ValueEnum;
 use crate::cli::{render_cli_error, resolve_input, CmdError, CmdResult};
 use crate::debug::durable::write_atomic;
 use crate::error::Error;
-use crate::lineage::{
-    replay_relation, BuildRequest, RunLineage, RunLineageInput, BACKEND_INTERPRETER,
-};
+use crate::lineage::{replay_relation, BuildRequest, RunLineage, RunLineageInput};
 
 const DEFAULT_EXAMPLE_ATTEMPTS: usize = 1;
 const EXAMPLE_ATTEMPTS_KEY: &str = "attempts=";
@@ -118,7 +116,7 @@ pub fn run_file_cmd(
             source: &full,
             roots: &roots,
             cfg,
-            backend: BACKEND_INTERPRETER,
+            backend: crate::driver::ArtifactBackend::Interpreter,
             argv: args,
             events: &recorded.events,
             observations: &recorded.canonical_trace,

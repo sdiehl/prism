@@ -1,7 +1,7 @@
 fn print_list(xs : List(Int)) =
   match xs of
-    Nil => ()
-    Cons(x, rest) =>
+    [] => ()
+    x :: rest =>
       println(x)
       print_list(rest)
 

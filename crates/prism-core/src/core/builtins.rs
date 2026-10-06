@@ -506,6 +506,17 @@ builtins! {
     // socket boundary's is; `Teleport.pr` maps a code to the failure it names.
     KontEncode "prim_kont_encode" "KontEncode" 147 RAW surface 1 Str "forall a. ((() -> a ! {IO}) @ {once, portable}) -> Result(Buf, Int) ! {IO}" flags [OffPlatform];
     KontResume "prim_kont_resume" "KontResume" 148 RAW surface 1 Str "(Buf) -> Result(Unit, Int) ! {IO}" flags [OffPlatform];
+    // One child process behind `Std.Proc`: the argument is an encoded request
+    // (program, arguments, directory, environment, stdin, output policy,
+    // deadline) and the answer an encoded outcome with both captured streams.
+    // The host spawns, feeds, drains, and reaps in this one call, so no child
+    // outlives it and a recorded trace holds the whole exchange as one frame.
+    ProcCollect "prim_proc_collect" "ProcCollect" 151 RAW surface 1 Str "(Buf) -> Buf ! {IO}" flags [OffPlatform];
+    // A pipeline of children behind `Std.Proc`: the request is every stage's
+    // command plus one deadline, and the answer every stage's status, the last
+    // stage's output, and each stage's error stream. The host owns every pipe
+    // between stages, so none of them is a value a program can hold.
+    ProcPipeline "prim_proc_pipeline" "ProcPipeline" 152 RAW surface 1 Str "(Buf) -> Buf ! {IO}" flags [OffPlatform];
     ShowInt "show_int" "ShowInt" 24 RAW surface 1 Str "(Int) -> String";
     ShowI64 "show_i64" "ShowI64" 25 RAW surface 1 Str "(I64) -> String";
     ShowU64 "show_u64" "ShowU64" 26 RAW surface 1 Str "(U64) -> String";
@@ -839,6 +850,8 @@ mod tag_tests {
                 (Builtin::NetPeerAddr, "NetPeerAddr"),
                 (Builtin::KontEncode, "KontEncode"),
                 (Builtin::KontResume, "KontResume"),
+                (Builtin::ProcCollect, "ProcCollect"),
+                (Builtin::ProcPipeline, "ProcPipeline"),
                 (Builtin::ShowInt, "ShowInt"),
                 (Builtin::ShowI64, "ShowI64"),
                 (Builtin::ShowU64, "ShowU64"),

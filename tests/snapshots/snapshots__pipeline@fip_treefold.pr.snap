@@ -18,6 +18,7 @@ Program {
                     name: "Leaf",
                     args: [],
                     fields: None,
+                    span: 538..542,
                 },
                 Ctor {
                     name: "Node",
@@ -33,6 +34,7 @@ Program {
                         ),
                     ],
                     fields: None,
+                    span: 545..549,
                 },
             ],
             deriving: [],

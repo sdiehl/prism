@@ -167,6 +167,11 @@ jobs:
           - name: wasm
             command: cargo clippy --no-default-features --features wasm --target wasm32-unknown-unknown --lib -- -D warnings
             wasm: true
+          # The language server's configuration: manifests and the package
+          # layout without the native backend.
+          - name: project
+            command: cargo clippy --no-default-features --features project --lib -- -D warnings
+            wasm: false
           - name: mlir
             command: cargo check --features mlir
             wasm: false
@@ -351,6 +356,12 @@ jobs:
       - name: Lint stdlib and packages
         run: ./target/release/prism lint lib/std packages
 
+      # The examples are reported, not gated: their findings count is visible
+      # in the log while the corpus is brought under the rules.
+      - name: Lint examples (advisory)
+        shell: bash
+        run: ./target/release/prism lint --advisory examples | tail -n 1
+
       # The committed generated artifacts whose currency no ordinary test
       # asserts. Several of them (the frozen parser corpus, the production
       # manifest, the generated Type parser, the book figures) had no CI gate at
@@ -437,8 +448,9 @@ jobs:
   # Whole-corpus relational gates are individually too large for hash partitioning:
   # one test id still lands on one runner. Partition their sorted inputs instead,
   # then fan the independent relations out as a second matrix axis. For every
-  # oracle the four shard jobs are an exact cover; release latency is the slowest
-  # quarter-corpus relation rather than the sum of all four relations.
+  # oracle the shard jobs are an exact cover, balanced by measured per-program
+  # cost (tests/shard_weights.txt); release latency is the slowest shard rather
+  # than the sum of all the relations.
   corpus-oracles:
     name: Corpus ${{ matrix.oracle }} (shard ${{ matrix.shard }})
     runs-on: ubuntu-latest
@@ -447,6 +459,12 @@ jobs:
       matrix:
         oracle: [fusion, tier, optimizer, tier-equiv, typed-spine]
         shard: [0, 1, 2, 3]
+        # The tier relations are the long pole, so they get eight shards.
+        include:
+          - { oracle: tier, shard: 4 }
+          - { oracle: tier, shard: 5 }
+          - { oracle: tier, shard: 6 }
+          - { oracle: tier, shard: 7 }
     env:
       LLVM_SYS_221_PREFIX: /usr/lib/llvm-22
       PRISM_REAL_CC: /usr/lib/llvm-22/bin/clang
@@ -454,8 +472,11 @@ jobs:
       RUSTC_WRAPPER: sccache
       PRISM_GATE_CACHE: "1"
       PRISM_GATE_FINGERPRINT: source
-      PRISM_SHARD_TOTAL: "4"
+      PRISM_SHARD_TOTAL: ${{ matrix.oracle == 'tier' && '8' || '4' }}
       PRISM_SHARD_INDEX: ${{ matrix.shard }}
+      # Per-case wall time, uploaded below; `scripts/shard_weights.py` folds
+      # these logs into tests/shard_weights.txt.
+      PRISM_CASE_TIMINGS: ${{ github.workspace }}/target/case-timings.tsv
     steps:
       - uses: actions/checkout@v7
 
@@ -488,7 +509,7 @@ jobs:
         if: ${{ matrix.oracle == 'fusion' }}
         run: cargo nextest run --profile ci --test native -E 'test(fuse_on_matches_interpreter_llvm)'
 
-      - name: Effect-tier relations (shard ${{ matrix.shard }} of 4)
+      - name: Effect-tier relations (shard ${{ matrix.shard }} of 8)
         if: ${{ matrix.oracle == 'tier' }}
         run: cargo nextest run --profile ci --test native -E 'test(/tier_parity::(forced_|disabled_erasures|slowest_lowering)/) | test(tier_cross::tiers_match_each_other_on_the_corpus)'
 
@@ -503,6 +524,14 @@ jobs:
       - name: Typed-spine relations (shard ${{ matrix.shard }} of 4)
         if: ${{ matrix.oracle == 'typed-spine' }}
         run: cargo nextest run --profile ci --test differential -E 'test(typed_erasure_preserves_corpus_core_identity) | test(full_front_crosses_typed_newtype_prefix_across_corpus)'
+
+      - name: Upload case timings
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: case-timings-${{ matrix.oracle }}-${{ matrix.shard }}
+          path: target/case-timings.tsv
+          if-no-files-found: ignore
 
   # Branch-protection anchor: one "Test" check that is green only when Checks and
   # every test shard passed, so the required-status-check config need not
@@ -682,21 +711,6 @@ jobs:
           # assertion on top of `lake build --wfail`.
           lint: "true"
 
-      # The fixture oracle above is curated. Exercise the same compiler-to-JSON
-      # boundary on deterministic generated pure/effectful programs as well, with
-      # final-value mains so a Unit result from println cannot pass vacuously.
-      # Each case costs two full prelude compiles (an in-process interpret plus
-      # `dump core-json` and `oracle eval -` subprocesses), measured at 6.2s per
-      # case in this profile on an M-series laptop and 7-18s per case on this
-      # runner. The default corpus of 256 therefore needs roughly an hour, and
-      # the previous 30-minute cap killed the step mid-sweep rather than
-      # reporting a divergence. Budget for the slow end of the observed range;
-      # trimming PRISM_LEAN_FUZZ_CASES instead would buy time by shrinking the
-      # corpus this job exists to sweep.
-      - name: Generated Lean differential fuzz
-        timeout-minutes: 90
-        run: cargo test --test differential lean_fuzz::generated_programs_match_lean_final_values -- --ignored --exact --nocapture
-
       # Runs the whole fixture corpus through both the verified CEK machine (via
       # `dump core-json` piped to the `oracle` exe) and `prism run`, and fails on
       # any divergence. This couples the proven model to the live compiler on every
@@ -712,6 +726,52 @@ jobs:
           models/gen_fixtures.sh
           git diff --exit-code -- models/fixtures/core-hashes.tsv \
             || { echo "models/fixtures/core-hashes.tsv drifted; run 'just fixtures' and commit"; exit 1; }
+
+  # The generated Lean differential fuzz, split from the model job because it is
+  # the long pole: each case costs two full prelude compiles (an in-process
+  # interpret plus `dump core-json` and `oracle eval -` subprocesses), 7-18s on
+  # this runner. Cases run on the corpus worker pool and are split by index
+  # across the matrix, which together is an exact cover of the fixed-seed
+  # corpus; trimming PRISM_LEAN_FUZZ_CASES instead would buy time by shrinking
+  # the corpus this job exists to sweep.
+  lean-fuzz:
+    name: Lean fuzz (shard ${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1]
+    env:
+      LLVM_SYS_221_PREFIX: /usr/lib/llvm-22
+      PRISM_SHARD_TOTAL: "2"
+      PRISM_SHARD_INDEX: ${{ matrix.shard }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Rust toolchain
+        run: rustup show
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "v1-libm"
+
+      - name: Install LLVM 22
+        uses: ./.github/actions/setup-llvm
+
+      - name: Build prism
+        run: cargo build
+
+      - name: Build Lean model
+        uses: leanprover/lean-action@v1
+        with:
+          lake-package-directory: models
+          build-args: --wfail
+          lint: "false"
+
+      - name: Generated Lean differential fuzz (shard ${{ matrix.shard }} of 2)
+        timeout-minutes: 60
+        run: cargo test --test differential lean_fuzz::generated_programs_match_lean_final_values -- --ignored --exact --nocapture
 
   mlir:
     name: MLIR backend
@@ -850,9 +910,9 @@ jobs:
 
   # The heavy native-parity corpus, split across N shards that run in parallel so
   # wall-clock is corpus/N rather than the whole thing serially in the Test job
-  # (which delegates it here via PRISM_CORPUS_SHARDED). Each shard takes positions
-  # (mod N) from the sorted candidate list before its runnable check; together the
-  # filtered partitions cover every runnable case exactly once.
+  # (which delegates it here via PRISM_CORPUS_SHARDED). Each shard takes its
+  # cost-balanced slice of the sorted candidate list before its runnable check;
+  # together the filtered partitions cover every runnable case exactly once.
   parity:
     name: Native parity (shard ${{ matrix.shard }})
     runs-on: ubuntu-latest

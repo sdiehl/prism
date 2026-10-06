@@ -327,6 +327,7 @@ fn push_rebuild_comp_children<'a, C>(
             body,
             return_var,
             return_body,
+            finally_body,
             ops,
         } => {
             for op in ops.iter().rev() {
@@ -337,6 +338,9 @@ fn push_rebuild_comp_children<'a, C>(
                     Rc::clone(cx),
                     depth,
                 );
+            }
+            if let Some(finally_body) = finally_body {
+                frames.push(child(finally_body));
             }
             if let Some(return_body) = return_body {
                 if let Some(return_var) = return_var {
@@ -444,10 +448,12 @@ fn rebuild_comp(source: &Comp, rebuilt: &mut Vec<Rebuilt>) -> Comp {
         Comp::Handle {
             return_var,
             return_body,
+            finally_body,
             ops,
             ..
         } => {
             let bodies = take_comps(rebuilt, ops.len());
+            let finally_body = finally_body.as_ref().map(|_| Box::new(pop_comp(rebuilt)));
             let return_body = return_body.as_ref().map(|_| Box::new(pop_comp(rebuilt)));
             let body = Box::new(pop_comp(rebuilt));
             let mut bodies = bodies.into_iter();
@@ -463,6 +469,7 @@ fn rebuild_comp(source: &Comp, rebuilt: &mut Vec<Rebuilt>) -> Comp {
                 body,
                 return_var: *return_var,
                 return_body,
+                finally_body,
                 ops,
             }
         }
@@ -722,6 +729,7 @@ fn push_comp_children<'a>(stack: &mut Vec<Frame<'a>>, comp: &'a Comp, depth: u64
             body,
             return_var,
             return_body,
+            finally_body,
             ops,
         } => {
             for op in ops.iter().rev() {
@@ -731,6 +739,9 @@ fn push_comp_children<'a>(stack: &mut Vec<Frame<'a>>, comp: &'a Comp, depth: u64
                     &op.body,
                     depth,
                 );
+            }
+            if let Some(finally_body) = finally_body {
+                stack.push(Frame::Comp(finally_body, depth));
             }
             if let Some(return_body) = return_body {
                 if let Some(return_var) = return_var {

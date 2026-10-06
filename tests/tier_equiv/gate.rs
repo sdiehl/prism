@@ -26,10 +26,13 @@
 //! the same relation and greedily shrinks any divergence to a minimal
 //! reproducer.
 
+use prism::DumpPhase;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
+use prism::core::traverse::{Rewrite, Visit};
+use prism::core::{Comp, Core, Value};
 use prism::driver::ArtifactField;
 use prism::{default_roots, Config, EffectTier, Observation, ObservationTrace};
 
@@ -41,7 +44,7 @@ use crate::support::{
 
 /// The tier axis only exists after effect lowering, so engagement scans dump
 /// this phase alone: pre-lowering Core is tier-independent by construction.
-const ENGAGEMENT_PHASE: &str = "lowered";
+const ENGAGEMENT_PHASE: DumpPhase = DumpPhase::Lowered;
 
 /// Adjacent positions on the forced ladder, plus default versus reification.
 /// Each pair must change lowered Core somewhere in the corpus, otherwise the
@@ -64,6 +67,19 @@ const FIXTURE_CASES: &[&str] = &[
     "tests/fixtures/tier_cross/convention_split_map.pr",
     "tests/fixtures/tier_cross/convention_split_map_unrolled.pr",
 ];
+
+/// Programs where work that must run once announces itself with a `shared`
+/// line. Equal results alone cannot show that a tier shared a value rather than
+/// recomputing it; a replayed prefix shows up here as an extra observation.
+/// Each case names how many announcements a correct run prints.
+const SHARED_WORK_CASES: &[(&str, usize)] = &[
+    ("tests/fixtures/tier_equiv/shared_before_multishot.pr", 1),
+    ("tests/fixtures/tier_equiv/shared_across_finally.pr", 1),
+    ("tests/fixtures/tier_equiv/fold_accumulator_state.pr", 3),
+];
+
+/// The prefix every shared-work announcement starts with.
+const SHARED_MARK: &str = "shared";
 
 /// Corpus programs scanned first by the engagement discovery, one per rung the
 /// blind alphabetical order reaches late. The local-partial rung in particular
@@ -462,4 +478,144 @@ fn generated_programs_have_identical_observation_traces_across_tiers() {
         let changed = activity[slot].load(Ordering::Relaxed);
         eprintln!("tier-fuzz: {label} changed {changed} generated cases");
     }
+}
+
+/// Every position runs the shared work exactly as often as the source
+/// interpreter does. The relation alone would let every tier replay alike, so
+/// the default position is also held to the interpreter.
+#[test]
+fn shared_work_runs_once_on_every_tier() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let cases = SHARED_WORK_CASES
+        .iter()
+        .map(|(case, _)| root.join(case))
+        .collect::<Vec<_>>();
+    run_cases(&cases, false);
+
+    let roots = default_roots(Path::new("."));
+    let config = &variants()[0].config;
+    for (case, (_, expected)) in cases.iter().zip(SHARED_WORK_CASES) {
+        let full = source(case);
+        let (lowered, _) = prism::driver::observe_lowered_run_on(&full, &roots, config)
+            .unwrap_or_else(|error| panic!("{}: {error}", case.display()));
+        let interpreted = interpreted_trace(&full, &roots, config);
+        assert_eq!(
+            lowered,
+            interpreted,
+            "{}: the default position and the interpreter disagree",
+            case.display()
+        );
+        assert_eq!(
+            shared_marks(&interpreted),
+            *expected,
+            "{}: the interpreter ran the shared work a different number of times",
+            case.display()
+        );
+    }
+}
+
+/// The negative control: plant a replay in one position's lowered Core and the
+/// gate must see it. Every bind whose bound computation announces shared work
+/// runs that computation a second time before its body, which is what a tier
+/// that recomputes a captured prefix does.
+#[test]
+fn a_replayed_shared_prefix_diverges_the_trace() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let roots = default_roots(Path::new("."));
+    for variant in variants() {
+        for (case, _) in SHARED_WORK_CASES {
+            let full = source(&root.join(case));
+            let (honest, _) = prism::driver::observe_lowered_run_on(&full, &roots, &variant.config)
+                .unwrap_or_else(|error| panic!("{case} at {}: {error}", variant.label));
+            let mut planted = 0;
+            let (replayed, _) = prism::driver::observe_lowered_run_rewritten_on(
+                &full,
+                &roots,
+                &variant.config,
+                |core| planted = replay_shared_work(core),
+            )
+            .unwrap_or_else(|error| panic!("{case} at {}: {error}", variant.label));
+            assert!(
+                planted > 0,
+                "{case} at {}: no bind announces shared work, so the control is vacuous",
+                variant.label
+            );
+            assert!(
+                shared_marks(&replayed) > shared_marks(&honest),
+                "{case} at {}: a replayed shared prefix left the trace unchanged",
+                variant.label
+            );
+        }
+    }
+}
+
+fn interpreted_trace(full: &str, roots: &[prism::Root], config: &Config) -> ObservationTrace {
+    let mut out = Vec::new();
+    let mut input = std::io::Cursor::new(Vec::new());
+    prism::driver::observe_run_on(full, roots, &mut out, &mut input, config, Vec::new())
+        .expect("fixture interprets")
+        .canonical_trace
+}
+
+fn stdout_of(trace: &ObservationTrace) -> String {
+    let bytes = trace
+        .observations
+        .iter()
+        .filter_map(|observation| match observation {
+            Observation::Stdout(bytes) => Some(bytes.as_slice()),
+            _ => None,
+        })
+        .flatten()
+        .copied()
+        .collect::<Vec<u8>>();
+    String::from_utf8(bytes).expect("fixture output is UTF-8")
+}
+
+fn shared_marks(trace: &ObservationTrace) -> usize {
+    stdout_of(trace)
+        .lines()
+        .filter(|line| line.starts_with(SHARED_MARK))
+        .count()
+}
+
+fn replay_shared_work(core: &mut Core) -> usize {
+    let mut replay = ReplayShared { planted: 0 };
+    for function in &mut core.fns {
+        function.body = replay.rewrite_comp(&function.body, &());
+    }
+    replay.planted
+}
+
+struct ReplayShared {
+    planted: usize,
+}
+
+impl Rewrite for ReplayShared {
+    type Ctx = ();
+
+    fn leave_comp(&mut self, _source: &Comp, rewritten: Comp, _cx: &()) -> Comp {
+        match rewritten {
+            Comp::Bind(bound, binder, body) if announces_shared(&bound) => {
+                self.planted += 1;
+                let again = Comp::Bind(bound.clone(), binder, body);
+                Comp::Bind(bound, binder, Box::new(again))
+            }
+            other => other,
+        }
+    }
+}
+
+fn announces_shared(comp: &Comp) -> bool {
+    struct Find(bool);
+    impl Visit for Find {
+        fn value(&mut self, value: &Value) -> bool {
+            if let Value::Str(text) = value {
+                self.0 |= text.starts_with(SHARED_MARK);
+            }
+            !self.0
+        }
+    }
+    let mut find = Find(false);
+    find.walk_comp(comp);
+    find.0
 }

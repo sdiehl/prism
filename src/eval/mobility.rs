@@ -23,7 +23,7 @@
 
 use std::rc::Rc;
 
-use super::kont::{decode_kont, encode_kont, Kont, KontState, Portability};
+use super::kont::{decode_kont, encode_kont, Kont, KontState, Portability, SuspendError};
 use super::{Frame, Machine, Outcome, Rv, State};
 
 // The classification codes, in step with the `#define`s in
@@ -34,6 +34,7 @@ const MALFORMED: i64 = 2;
 const FOREIGN: i64 = 3;
 const UNSUPPORTED: i64 = 4;
 const UNCERTIFIED: i64 = 5;
+const BRACKETED: i64 = 6;
 
 fn ok(v: Rv) -> Rv {
     Rv::Data("Ok".into(), vec![v].into())
@@ -105,8 +106,13 @@ pub(super) fn seal(m: &mut Machine<'_>, work: &Rv) -> Result<Rv, String> {
     // programmer needs to be told which capture was at fault. What a program can
     // act on is the classification, and `MoveError` carries no payload on purpose,
     // because a reason string would have to mean the same thing on a host that
-    // never built this envelope.
-    Ok(encode_kont(&kont).map_or_else(|_| err(UNPORTABLE), |bytes| ok(Rv::Buf(Rc::new(bytes)))))
+    // never built this envelope. A cleanup still owed is its own class: the
+    // captures were fine, but the obligation belongs to this process.
+    Ok(match encode_kont(&kont) {
+        Ok(bytes) => ok(Rv::Buf(Rc::new(bytes))),
+        Err(SuspendError::PendingCleanup) => err(BRACKETED),
+        Err(SuspendError::NonSerializable(_)) => err(UNPORTABLE),
+    })
 }
 
 /// Decode `envelope`, check it belongs to this program, and run it to

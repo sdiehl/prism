@@ -1,0 +1,14 @@
+effect Quit
+  never quit(Unit) : Int
+
+-- The cleanup reads the argument count, an observation the tape records.
+fn go() : Int ! {Quit, Env, IO} =
+  handle quit(()) with
+    return x => x
+    finally => println("cleanup with {show_int(args_count())} arguments")
+
+fn main() : Unit ! {IO} =
+  println(handle go() with {
+    never quit(u) => 7,
+    return r => r
+  })

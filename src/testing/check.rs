@@ -7,7 +7,7 @@
 //! `pub test` or a `test` on a non-fn item is already rejected before here. This
 //! module owns the remaining semantic rules.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::error::{SourceMap, TypeError};
 use crate::names::{bare_name, ENTRY_POINT};
@@ -17,10 +17,11 @@ use crate::syntax::ast::{Core as CorePhase, Program};
 use crate::types::{Checked, DeclInfo, Type};
 
 /// A validated test function, reduced to what discovery needs: its canonical
-/// name.
+/// name and the source offset its declaration starts at.
 #[derive(Clone, Debug)]
 pub(crate) struct TestSignature {
     pub name: String,
+    pub start: usize,
 }
 
 /// The name of a test declared more than once in the user region of `full_src`,
@@ -60,20 +61,21 @@ pub(crate) fn signatures_from(
     // declarations keep bare canonical names. A test pulled in through an import
     // carries a `Module.`/`Module@` qualifier and belongs to that other module;
     // it is discovered when that module is compiled as its own unit, not here.
-    let test_names: BTreeSet<&str> = program
+    let test_starts: BTreeMap<&str, usize> = program
         .fns
         .iter()
         .filter(|d| d.test && bare_name(&d.name) == d.name)
-        .map(|d| d.name.as_str())
+        .map(|d| (d.name.as_str(), d.span.start))
         .collect();
     let mut out = Vec::new();
     for decl in &checked.defs.decls {
-        if !test_names.contains(decl.name.as_str()) {
+        let Some(&start) = test_starts.get(decl.name.as_str()) else {
             continue;
-        }
+        };
         check_signature(decl)?;
         out.push(TestSignature {
             name: decl.name.clone(),
+            start,
         });
     }
     Ok(out)
@@ -167,5 +169,6 @@ fn fail(name: &str, rule: &str) -> TypeError {
     TypeError::TypeFailure {
         span: marginalia::Span::empty(0),
         msg: format!("test function `{name}` {rule}"),
+        origin: None,
     }
 }

@@ -14,6 +14,13 @@ pub const ENTRY_POINT: &str = "main";
 // wherever a binder can. It names nothing, and nothing may refer to it.
 pub const WILD: &str = "_";
 
+// The wired-in list type and its constructors. The prelude defines them; the
+// parser builds `[..]` and `x :: xs` patterns from them and the formatter
+// recognizes them to print that sugar back.
+pub const LIST: &str = "List";
+pub const CONS: &str = "Cons";
+pub const NIL: &str = "Nil";
+
 // The internal function a string-interpolation hole lowers to. It renders its
 // value through the total, type-directed display printer (raw for a top-level
 // string) rather than the quoting `Show` method, so `"{s}"` inserts `s` verbatim.
@@ -202,6 +209,8 @@ pub const REBUILD_METHOD: &str = "rebuild";
 // signatures by the same drift guard.
 pub const FMAP_METHOD: &str = "fmap";
 pub const POW_METHOD: &str = "pow";
+// The prelude `PathJoin` method the `</>` operator desugars to.
+pub const PATH_APPEND_METHOD: &str = "path_append";
 // The numeric operator methods: the arithmetic operators dispatch
 // through these when an operand is `Num`/`Div`-polymorphic, and the prelude
 // instance bodies define them. Names deliberately avoid `add`/`mul`/`negate`,
@@ -452,7 +461,8 @@ pub fn split_family_member(path: &str) -> Option<(&str, &str, &str)> {
 // manifest format tag versions the committed lock file itself.
 pub const STABLE_MIGRATION_EDGE_SCHEME: &str = "prism-stable-migration-edge-v1";
 pub const STABLE_MIGRATION_ROUTE_SCHEME: &str = "prism-stable-migration-route-v1";
-pub const STABLE_LOCK_MANIFEST_FORMAT: &str = "prism-stable-lock-manifest-v1";
+pub const STABLE_LOCK_MANIFEST_FORMAT: prism_common::format::FormatTag =
+    prism_common::format::FormatTag::new("prism-stable-lock-manifest-v1");
 
 // The property-generator combinators a derived `Arbitrary` composes: the runner
 // (`gen_run`), the applicative pieces (`gen_const`/`gen_bind`), the sum picker
@@ -1294,11 +1304,11 @@ mod tests {
         ENTROPY_EFFECT, EQ_METHOD, FMAP_METHOD, FORCE_FN, FOREVER, FROM_JSON_METHOD, GUARD_FN,
         HASH_METHOD, INCR_REPLAY_DRIVERS, INPUT_CAPABILITY_EFFECTS, INT_CMP, JSON_FIELD_FN,
         JSON_OBJ, JSON_STR, LENS_FN, NUM_ADD_METHOD, NUM_FROMINT_METHOD, NUM_MUL_METHOD,
-        NUM_NEG_METHOD, NUM_SUB_METHOD, OPTIC_MK_LENS, ORD_METHOD, POW_METHOD, QC_ARB_GEN,
-        QC_GEN_BIND, QC_GEN_CHOOSE, QC_GEN_CONST, QC_GEN_RESIZE, QC_GEN_RUN, REBUILD_METHOD,
-        REPEAT_WHILE, REPLAY_DRIVERS, RUN_IO, SCOLLECT_FN, SHAPE_DIGEST_METHOD, SHOW_METHOD,
-        SMAP_FN, SORT_BY_ORD_FN, SORT_FN, SORT_PRIM_INSTANCES, STR_ESCAPE_FN, SUCCEEDS_FN,
-        TO_JSON_METHOD, WIRE_CAT, WIRE_DECODE_VALUE_WITH_DIGEST, WIRE_EMPTY,
+        NUM_NEG_METHOD, NUM_SUB_METHOD, OPTIC_MK_LENS, ORD_METHOD, PATH_APPEND_METHOD, POW_METHOD,
+        QC_ARB_GEN, QC_GEN_BIND, QC_GEN_CHOOSE, QC_GEN_CONST, QC_GEN_RESIZE, QC_GEN_RUN,
+        REBUILD_METHOD, REPEAT_WHILE, REPLAY_DRIVERS, RUN_IO, SCOLLECT_FN, SHAPE_DIGEST_METHOD,
+        SHOW_METHOD, SMAP_FN, SORT_BY_ORD_FN, SORT_FN, SORT_PRIM_INSTANCES, STR_ESCAPE_FN,
+        SUCCEEDS_FN, TO_JSON_METHOD, WIRE_CAT, WIRE_DECODE_VALUE_WITH_DIGEST, WIRE_EMPTY,
         WIRE_ENCODE_VALUE_WITH_DIGEST, WIRE_GET_TAG, WIRE_IS_EMPTY, WIRE_OPEN_VALUE_ANY, WIRE_TAG,
     };
 
@@ -1481,6 +1491,7 @@ mod tests {
             REBUILD_METHOD,
             FMAP_METHOD,
             POW_METHOD,
+            PATH_APPEND_METHOD,
             NUM_ADD_METHOD,
             NUM_SUB_METHOD,
             NUM_MUL_METHOD,

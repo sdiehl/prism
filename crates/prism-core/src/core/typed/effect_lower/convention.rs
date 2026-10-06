@@ -257,9 +257,13 @@ impl<'a> Facts<'a> {
                 body,
                 return_binder,
                 return_body,
+                finally_body,
                 ops,
             } => {
                 self.result_demand(body, loc, returns, requested);
+                if let Some(finally_body) = finally_body {
+                    self.result_demand(finally_body, loc, returns, requested);
+                }
                 if let Some(return_body) = return_body {
                     let mut next = loc.clone();
                     if let Some(binder) = return_binder {
@@ -559,9 +563,13 @@ impl Rewrite for Rewriter<'_> {
                 body,
                 return_binder,
                 return_body,
+                finally_body,
                 ops,
             } => {
                 let body = Box::new(self.comp(body, loc));
+                let finally_body = finally_body
+                    .as_ref()
+                    .map(|body| Box::new(self.comp(body, loc)));
                 let return_body = return_body.as_ref().map(|body| {
                     let mut next = loc.clone();
                     if let Some(binder) = return_binder {
@@ -594,6 +602,7 @@ impl Rewrite for Rewriter<'_> {
                         body,
                         return_binder: return_binder.clone(),
                         return_body,
+                        finally_body,
                         ops: handler,
                     },
                 )

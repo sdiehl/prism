@@ -1,4 +1,4 @@
--- | The typed surface syntax that the `prism-surface-syntax-v1` artifact
+-- | The typed surface syntax that the `prism-surface-syntax-v2` artifact
 -- decodes into.
 --
 -- Constructor prefixes name the family (`I` items, `E` expressions, `P`
@@ -124,6 +124,8 @@ pub type Expr
   | EReturn(Sp(Expr))
   | EComp(Sp(Expr), String, Sp(Expr), List(Qual))
   | EDefault(Sp(Expr), Sp(Expr))
+  | ECons(Sp(Expr), Sp(Expr))
+  | EPathJoin(Sp(Expr), Sp(Expr))
   | ETransact(Sp(Expr), Sp(Expr))
   | EProbe(String, Sp(Expr))
   | EReflect(String, String)
@@ -138,7 +140,8 @@ pub type Expr
 pub type Arm = Arm { pat: Sp(Pat), guard: Option(Sp(Expr)), body: Sp(Expr) }
 
 -- | One arm of an effect handler: the return clause, a full operation clause
--- binding the resumption, or the `once`, `val`, and `never` sugars.
+-- binding the resumption, the `once`, `val`, and `never` sugars, or the
+-- `finally` cleanup clause.
 -- lint: allow(L0203)
 pub type HandlerArm
   = HReturn(String, Sp(Expr))
@@ -146,6 +149,7 @@ pub type HandlerArm
   | HOnce(String, List(String), Sp(Expr))
   | HVal(String, Sp(Expr))
   | HNever(String, List(String), Sp(Expr))
+  | HFinally(Sp(Expr))
 
 -- | One catch arm of a try-catch: the error name, the binders for its payload,
 -- and the handler body.
@@ -243,6 +247,8 @@ pub type Decl = Decl {
   fip_word: Option(String),
   is_replayable: Bool,
   is_no_alloc: Bool,
+  is_bounded_stack: Bool,
+  is_linear: Bool,
   span: Span
 }
 
@@ -256,26 +262,29 @@ pub type Ensure = Ensure { binder: String, expr: Sp(Expr) }
 -- lint: allow(L0203)
 pub type CtorShape = CPositional(List(Ty)) | CRecord(List(CField))
 
--- | One data constructor: its name and its argument shape.
+-- | One data constructor: its name, its argument shape, and the span of the
+-- name.
 -- lint: allow(L0203)
-pub type Ctor = Ctor { name: String, shape: CtorShape }
+pub type Ctor = Ctor { name: String, shape: CtorShape, span: Span }
 
 -- | One derived class on a data declaration: the class name and its span.
 -- lint: allow(L0203)
 pub type Deriving = Deriving { name: String, span: Span }
 
--- | One class method signature: the method name and its declared type.
+-- | One class method signature: the method name, its declared type, and the
+-- span of the name.
 -- lint: allow(L0203)
-pub type Method = Method { name: String, ty: Ty }
+pub type Method = Method { name: String, ty: Ty, span: Span }
 
 -- | One operation of an effect declaration: its name, parameter types, result
--- type, and optional resumption grade.
+-- type, optional resumption grade, and the span of the name.
 -- lint: allow(L0203)
 pub type EffOp = EffOp {
   name: String,
   params: List(Ty),
   ret: Ty,
-  grade: Option(String)
+  grade: Option(String),
+  span: Span
 }
 
 -- | One rung of a stable type: the version name, an optional base to inherit

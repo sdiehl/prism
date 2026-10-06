@@ -16,7 +16,7 @@ use super::TEST_MANIFEST_SCHEMA;
 
 /// The manifest ABI version folded into the bytes. A format change bumps this so
 /// an old reader rejects new bytes rather than misreading them.
-const MANIFEST_ABI: u64 = 1;
+const MANIFEST_ABI: u64 = 2;
 
 /// A decode error for the manifest wire format.
 pub type ManifestError = CodecError;
@@ -29,7 +29,7 @@ pub type ManifestError = CodecError;
 #[must_use]
 pub fn encode_manifest(descriptors: &[TestDescriptor]) -> Vec<u8> {
     let mut out = Vec::new();
-    put_str(&mut out, TEST_MANIFEST_SCHEMA);
+    put_str(&mut out, TEST_MANIFEST_SCHEMA.as_str());
     put_uvarint(&mut out, MANIFEST_ABI);
     put_uvarint(&mut out, descriptors.len() as u64);
     for d in descriptors {
@@ -39,6 +39,17 @@ pub fn encode_manifest(descriptors: &[TestDescriptor]) -> Vec<u8> {
         put_str(&mut out, &d.definition_id);
         put_str(&mut out, &d.test_core_digest);
         put_str(&mut out, &d.dependency_closure_digest);
+        put_uvarint(&mut out, d.tags.len() as u64);
+        for tag in &d.tags {
+            put_str(&mut out, tag);
+        }
+        match &d.skip {
+            Some(reason) => {
+                put_uvarint(&mut out, 1);
+                put_str(&mut out, reason);
+            }
+            None => put_uvarint(&mut out, 0),
+        }
     }
     out
 }
@@ -54,7 +65,7 @@ pub fn encode_manifest(descriptors: &[TestDescriptor]) -> Vec<u8> {
 /// length, or trailing bytes.
 pub fn decode_manifest(bytes: &[u8]) -> Result<Vec<TestDescriptor>, CodecError> {
     let mut r = Reader::new(bytes);
-    if r.string()? != TEST_MANIFEST_SCHEMA {
+    if TEST_MANIFEST_SCHEMA.expect(&r.string()?).is_err() {
         return Err(CodecError::Scheme);
     }
     if r.uvarint()? != MANIFEST_ABI {
@@ -63,13 +74,28 @@ pub fn decode_manifest(bytes: &[u8]) -> Result<Vec<TestDescriptor>, CodecError> 
     let count = r.bounded_len()?;
     let mut out = Vec::with_capacity(count);
     for _ in 0..count {
+        let logical_id = r.string()?;
+        let defining_module_id = r.string()?;
+        let definition_id = r.string()?;
+        let test_core_digest = r.string()?;
+        let dependency_closure_digest = r.string()?;
+        let tags = (0..r.bounded_len()?)
+            .map(|_| r.string())
+            .collect::<Result<_, _>>()?;
+        let skip = match r.uvarint()? {
+            0 => None,
+            1 => Some(r.string()?),
+            _ => return Err(CodecError::Kind),
+        };
         out.push(TestDescriptor {
-            logical_id: r.string()?,
-            defining_module_id: r.string()?,
-            definition_id: r.string()?,
-            test_core_digest: r.string()?,
-            dependency_closure_digest: r.string()?,
+            logical_id,
+            defining_module_id,
+            definition_id,
+            test_core_digest,
+            dependency_closure_digest,
             diagnostic_location: String::new(),
+            tags,
+            skip,
         });
     }
     if !r.at_end() {
@@ -90,6 +116,8 @@ mod tests {
             test_core_digest: "aa".to_string(),
             dependency_closure_digest: "bb".to_string(),
             diagnostic_location: "/abs/path.pr".to_string(),
+            tags: vec!["slow".to_string()],
+            skip: Some("flaky".to_string()),
         }
     }
 

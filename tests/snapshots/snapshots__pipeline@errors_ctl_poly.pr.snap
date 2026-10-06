@@ -1,6 +1,5 @@
 ---
 source: tests/snapshots.rs
-assertion_line: 14
 expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/errors_ctl_poly.pr
 ---
@@ -24,6 +23,7 @@ Program {
                         "a",
                     ),
                     grade: Many,
+                    span: 14..18,
                 },
             ],
             span: 0..30,

@@ -91,6 +91,30 @@ fn project_prelude_override_replaces_builtin() {
     assert_eq!(out, ["42"]);
 }
 
+// The editor entry point: a file nested in a project resolves the project's
+// prelude and dependencies, so it checks exactly as `prism check` does.
+#[test]
+fn search_path_finds_the_enclosing_project() {
+    let cfg = prism::Config::default();
+    let entry = customprelude().join("src/main.pr");
+    let search = prism::search_path(&entry, cfg.flags()).expect("resolves");
+    assert_eq!(
+        search.project.as_ref().map(|p| p.name.as_str()),
+        Some("customprelude")
+    );
+    let full = search.with_prelude(&fs::read_to_string(&entry).expect("entry reads"));
+    prism::check_validated_on_in(&full, &search.roots, &cfg).expect("custom prelude checks");
+
+    let entry = withdep().join("src/main.pr");
+    let search = prism::search_path(&entry, cfg.flags()).expect("resolves");
+    let full = search.with_prelude(&fs::read_to_string(&entry).expect("entry reads"));
+    prism::check_validated_on_in(&full, &search.roots, &cfg).expect("path dependency checks");
+
+    let loose = env::temp_dir().join(format!("prism-search-path-{}.pr", process::id()));
+    let search = prism::search_path(&loose, cfg.flags()).expect("resolves");
+    assert!(search.project.is_none() && search.prelude.is_none());
+}
+
 #[test]
 fn modlib_project_interprets() {
     let project = load_project(modlib()).expect("manifest loads");
@@ -542,6 +566,22 @@ fn project_handler_clause_names_an_imported_library_operation() {
     let out: Vec<String> = run.out.iter().map(Rv::show).collect();
     assert_eq!(out, ["42"], "the imported `Beeper.beep` clause must run");
     assert_native_matches_interp(libeffect());
+}
+
+// A field spelled `Map(k, v)` takes the `Canonical` brand on every path. The
+// modular checker a project build runs converts a module's fields before it
+// merges the prelude's datatypes, so it must still see `Map`'s full arity there
+// or it leaves the field at arity 2 and refuses the `map_empty` that `prism
+// check` and `prism run` accept.
+#[test]
+fn modular_check_brands_an_under_applied_map_field() {
+    let full = with_prelude(include_str!("../cases/run/map_newtype.pr"));
+    prism::check_modules_on(
+        &full,
+        &prism::default_roots(Path::new(".")),
+        &prism::Config::default(),
+    )
+    .expect("a `Map(k, v)` field checks in the modular checker");
 }
 
 fn have_git() -> bool {

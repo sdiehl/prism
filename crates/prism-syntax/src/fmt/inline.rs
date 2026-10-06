@@ -7,7 +7,8 @@ use super::call::{
 use super::decl::fmt_ty;
 use super::lit::{escape_str, fmt_char, fmt_float};
 use super::ops::{
-    binop_prec, needs_left_paren, needs_paren_at, needs_right_paren, neg_operand_needs_paren, Level,
+    binop_prec, cons_operand_needs_paren, needs_left_paren, needs_paren_at, needs_right_paren,
+    neg_operand_needs_paren, path_operand_needs_paren, Level,
 };
 use super::pat::fmt_pat_inline;
 use super::{
@@ -417,11 +418,11 @@ impl Fmt<'_> {
                 arm_strs.map(|a| format!("{} {s} {} {{ {} }}", kw::MATCH, kw::OF, a.join(", ")))
             }
             Expr::FieldAccess(e, field) => {
-                let e_s = self.fmt_expr_inline(e, mode)?;
+                let e_s = paren_if(dot_recv_parens(&e.node), self.fmt_expr_inline(e, mode)?);
                 Some(format!("{e_s}.{field}"))
             }
             Expr::UnboxedField(e, field) => {
-                let e_s = self.fmt_expr_inline(e, mode)?;
+                let e_s = paren_if(dot_recv_parens(&e.node), self.fmt_expr_inline(e, mode)?);
                 Some(format!("{e_s}.#{field}"))
             }
             Expr::UnboxedTuple(elems) => {
@@ -536,6 +537,24 @@ impl Fmt<'_> {
                 let a_s = paren_if(needs_paren_at(&a.node, Level::Pipe), a_s);
                 let b_s = paren_if(needs_paren_at(&b.node, Level::Default), b_s);
                 Some(format!("{a_s} {} {b_s}", kw::QUESTION_QUESTION))
+            }
+            Sugar::Cons(h, t) => {
+                let h_paren = cons_operand_needs_paren(&h.node, true);
+                let t_paren = cons_operand_needs_paren(&t.node, false);
+                let h_s = self.fmt_expr_inline(h, if h_paren { Mode::Flat } else { mode })?;
+                let t_s = self.fmt_expr_inline(t, if t_paren { Mode::Flat } else { mode })?;
+                let h_s = paren_if(h_paren, h_s);
+                let t_s = paren_if(t_paren, t_s);
+                Some(format!("{h_s} {} {t_s}", kw::COLON_COLON))
+            }
+            Sugar::PathJoin(a, b) => {
+                let a_paren = path_operand_needs_paren(&a.node, true);
+                let b_paren = path_operand_needs_paren(&b.node, false);
+                let a_s = self.fmt_expr_inline(a, if a_paren { Mode::Flat } else { mode })?;
+                let b_s = self.fmt_expr_inline(b, if b_paren { Mode::Flat } else { mode })?;
+                let a_s = paren_if(a_paren, a_s);
+                let b_s = paren_if(b_paren, b_s);
+                Some(format!("{a_s} {} {b_s}", kw::PATH_JOIN))
             }
             Sugar::Compose(forward, f, g) => {
                 let f_s = self.fmt_expr_inline(f, mode)?;

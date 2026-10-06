@@ -211,7 +211,7 @@ fn artifact_verification_preserves_recorded_subdirectories() {
     fs::write(tmp.path.join("out"), b"artifact bytes").unwrap();
     let digest = blake3::hash(b"artifact bytes").to_hex().to_string();
     let graph = LineageGraph {
-        format: LINEAGE_GRAPH_FORMAT.to_string(),
+        format: LINEAGE_GRAPH_FORMAT,
         variant: Variant::Build,
         nodes: vec![Node {
             id: NodeId(format!("blake3:{digest}")),
@@ -296,7 +296,7 @@ fn sample_lineage(std_root: &str, package_root: &str, artifact: &Path) -> BuildL
         source: TRIVIAL_SOURCE,
         roots: &roots,
         cfg: &cfg,
-        backend: "llvm",
+        backend: prism::driver::ArtifactBackend::Llvm,
         artifacts: vec![("native-binary", artifact.to_path_buf())],
         cache: None,
         diagnostics: Vec::new(),
@@ -308,12 +308,16 @@ fn lineage_roots(std_root: &str, package_root: &str) -> Vec<Root> {
     vec![
         Root::identified_source_bundle(
             "<package StorePkg>".to_string(),
-            SourceBundleIdentity::package("StorePkg", HASH_SCHEME, package_root),
+            SourceBundleIdentity::package(
+                "StorePkg",
+                HASH_SCHEME,
+                prism::core::hash_str(package_root),
+            ),
             BTreeMap::new(),
         ),
         Root::identified_source_bundle(
             "<stdlib>".to_string(),
-            SourceBundleIdentity::stdlib(HASH_SCHEME, std_root),
+            SourceBundleIdentity::stdlib(HASH_SCHEME, prism::core::hash_str(std_root)),
             BTreeMap::new(),
         ),
     ]

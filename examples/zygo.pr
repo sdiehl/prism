@@ -23,8 +23,8 @@ fn map_layer(f : (a) -> b, layer : ListF(a)) : ListF(b) =
 
 fn from_list(xs : List(Int)) : MuList =
   match xs of
-    Nil => Roll(NilF)
-    Cons(x, rest) => Roll(ConsF(x, from_list(rest)))
+    [] => Roll(NilF)
+    x :: rest => Roll(ConsF(x, from_list(rest)))
 
 -- Apply one natural transformation throughout a fixed point. `descend` calls
 -- this before every recursive step, so a node is transformed once per ancestor:

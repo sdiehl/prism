@@ -51,6 +51,14 @@ h2 live
 h3 -
 ";
 
+// The first line is Net's own bracket, abandoned, after which its port binds
+// again; the second is the control, a bind closed only on return, whose port
+// stays held until the run ends.
+const ABANDONED: &str = "\
+bracket rebound
+none Net.AddressInUse
+";
+
 fn fixture(name: &str) -> PathBuf {
     Path::new("examples/fixtures/net").join(name)
 }
@@ -92,6 +100,13 @@ fn classified_refusals_match_interpreter() {
 #[test]
 fn handle_numbering_matches_interpreter() {
     both_tiers("handles.pr", HANDLES);
+}
+
+/// Each bracket closes in its `finally` clause, so a body abandoned by an
+/// operation a handler outside drops still releases its socket within the run.
+#[test]
+fn an_abandoned_bracket_releases_its_port_within_the_run() {
+    both_tiers("abandoned.pr", ABANDONED);
 }
 
 /// A second run on the same thread starts from an empty table and numbers its

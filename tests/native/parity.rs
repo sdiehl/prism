@@ -31,8 +31,8 @@ use prism::{build_on, default_roots, Config};
 #[cfg(feature = "mlir")]
 use crate::support::have;
 use crate::support::{
-    check_native_parity_costed, cleanup_bin, corpus_drops, interpreted, leak_free,
-    parallel_collect, require_cc, shard_by, sharded_corpus, source, temp_bin, CaseCost,
+    check_native_parity_costed, cleanup_bin, corpus_candidates, corpus_drops, interpreted,
+    leak_free, parallel_collect, require_cc, shard_by, sharded_corpus, source, temp_bin, CaseCost,
     CHECK_LEAKS, CORPUS_SKIPS,
 };
 #[cfg(feature = "mlir")]
@@ -305,26 +305,24 @@ fn main() = println(logged(answered()))
 }
 
 // The shards must tile the corpus: disjoint and covering every case exactly once,
-// so the sharded `parity` CI matrix loses no coverage. `SHARDS` must match the
-// matrix length in ci.yml.
+// so no sharded CI matrix loses coverage. The counts are the matrix widths in
+// ci.yml, and the real corpus is split, so the committed weights steer it.
 #[test]
 fn shards_tile_the_corpus() {
-    const SHARDS: usize = 4;
-    // A count not divisible by SHARDS, so uneven tails are exercised.
-    let full: Vec<PathBuf> = (0..37)
-        .map(|i| PathBuf::from(format!("case{i}.pr")))
-        .collect();
-    let mut seen: BTreeSet<PathBuf> = BTreeSet::new();
-    for k in 0..SHARDS {
-        for p in shard_by(full.clone(), SHARDS, k) {
-            assert!(seen.insert(p), "a case landed in two shards");
+    let full = corpus_candidates();
+    for shards in [2, 4, 5, 8] {
+        let mut seen: BTreeSet<PathBuf> = BTreeSet::new();
+        for k in 0..shards {
+            for p in shard_by(full.clone(), shards, k) {
+                assert!(seen.insert(p), "a case landed in two of {shards} shards");
+            }
         }
+        assert_eq!(
+            seen.len(),
+            full.len(),
+            "{shards} shards must cover every case exactly once"
+        );
     }
-    assert_eq!(
-        seen.len(),
-        full.len(),
-        "shards must cover every case exactly once"
-    );
 }
 
 #[cfg(feature = "mlir")]

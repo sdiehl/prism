@@ -11,13 +11,16 @@
 //!
 //! The vocabulary lives in `Cause`, one claim per fact, so a definition's
 //! sentence and the program's sentence say the same words about the same fact.
+//!
+//! Under each definition that carries a costing fact goes the chain from `main`
+//! that reaches it, so a tier cliff names the path as well as the fact.
 
 use std::collections::BTreeSet;
 use std::fmt::Write;
 
 use prism_common::sym::Sym;
 
-use crate::core::EffectStrategy;
+use crate::core::{Core, EffectStrategy};
 
 use super::super::TypedCoreFn;
 use super::analysis;
@@ -91,6 +94,9 @@ pub fn explain(
         program_cause(plan, declined)
     )
     .unwrap();
+    let reach = crate::core::cbpv::reach(&Core {
+        fns: functions.iter().cloned().map(TypedCoreFn::erase).collect(),
+    });
     let mut names: Vec<Sym> = plan.functions().collect();
     names.sort_unstable_by_key(|name| name.as_str());
     for name in names {
@@ -116,8 +122,39 @@ pub fn explain(
             )
             .unwrap();
         }
+        if costly(plan, name).is_some() {
+            if let Some(chain) = reach.chain(name) {
+                writeln!(out, "  via {}", witness(plan, &chain)).unwrap();
+            }
+        }
     }
     out
+}
+
+/// The chain from `main` to a costing definition, with the edge into the first
+/// definition on it that carries a costing fact drawn `=>`: that edge is where
+/// the cost enters the path, so it is the one to cut.
+fn witness(plan: &EffectPlan, chain: &[Sym]) -> String {
+    let forced = chain.iter().position(|&name| costly(plan, name).is_some());
+    let mut out = chain[0].as_str().to_string();
+    for (i, name) in chain.iter().enumerate().skip(1) {
+        let arrow = if forced == Some(i) { "=>" } else { "->" };
+        write!(out, " {arrow} {}", name.as_str()).unwrap();
+    }
+    out
+}
+
+/// The first costing fact a definition carries, widest first: the facts a rung
+/// other than the cheapest is paid for.
+fn costly(plan: &EffectPlan, name: Sym) -> Option<Cause> {
+    [
+        (plan.escaping(), Cause::Escapes),
+        (plan.opaque_captures(), Cause::OpaqueCapture),
+        (plan.tracked_captures(), Cause::TrackedCapture),
+        (plan.genuine(), Cause::Performs),
+    ]
+    .into_iter()
+    .find_map(|(set, cause)| set.contains(&name).then_some(cause))
 }
 
 /// The definitions this rung lowers, when it lowers only some of them.
@@ -164,15 +201,8 @@ fn program_cause(plan: &EffectPlan, declined: Option<Decline>) -> String {
 
 /// The clause for one definition: the first fact it carries, widest first.
 fn definition_cause(plan: &EffectPlan, name: Sym) -> String {
-    for (set, cause) in [
-        (plan.escaping(), Cause::Escapes),
-        (plan.opaque_captures(), Cause::OpaqueCapture),
-        (plan.tracked_captures(), Cause::TrackedCapture),
-        (plan.genuine(), Cause::Performs),
-    ] {
-        if set.contains(&name) {
-            return clause(plan, name, cause);
-        }
+    if let Some(cause) = costly(plan, name) {
+        return clause(plan, name, cause);
     }
     // Nothing survives here, but the reach set still separates a definition that
     // runs no operation from one that runs operations and handles them all: the

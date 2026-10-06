@@ -38,7 +38,7 @@ type GeneratedFieldReceipt = GFShorthand | GFExplicit(GeneratedPatternReceipt)
 
 ### `generated_pattern_note_receipt`
 
-```prism,sig,h-8f3b03c2a062bd15562f90e47103119d629cdecc18067131f2bedfac4f5cc5f5
+```prism,sig,h-643ad033bde5debd1ece6ffeac1aa8c0426a4492098ac29d14dbcdc303d0174e
 generated_pattern_note_receipt : (Syntax.Cursor.Cursor, Syntax.Parse.GeneratedPattern.GeneratedPatternReceipt) -> Syntax.Cursor.Cursor
 ```
 
@@ -50,12 +50,12 @@ generated_let_note_receipt : (Syntax.Cursor.Cursor, Syntax.Parse.GeneratedPatter
 
 ### `generated_parse_pattern`
 
-```prism,sig,h-0085d3545dd5a5c63f1dbd9f1add7657dd1dfbac038e4871fa85dfff899c178c
+```prism,sig,h-b7b59e903315ba2c00ece61e680d613220d5276be386fd9598aa3bbe6073a597
 generated_parse_pattern : (Syntax.Cursor.Cursor, Int) -> Syntax.Parse.Support.Parsed(Syntax.Parse.GeneratedPattern.GeneratedPatternDone)
 ```
 
 ### `generated_parse_let_pattern`
 
-```prism,sig,h-88301927173c8c70c92242752e090cde69ede3c6fbcdb2ea51b0b1e3a1c7e56b
+```prism,sig,h-485c00b8fcfcaeedf45fda5bc08f1c311de842d0c39a50394e6304c05f32493e
 generated_parse_let_pattern : (Syntax.Cursor.Cursor, Int) -> Syntax.Parse.Support.Parsed(Syntax.Parse.GeneratedPattern.GeneratedLetDone)
 ```

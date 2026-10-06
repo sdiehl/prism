@@ -50,6 +50,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use prism_common::digest::SCHEME as HASH_SCHEME;
+use prism_common::format::FormatTag;
 
 mod census;
 mod certs;
@@ -77,7 +78,7 @@ pub use verified::VerifiedRecord;
 // means the directory shape or an index file format changed; an old store is
 // refused rather than misread. The hash scheme tag lives in the hash module and
 // is never re-typed here.
-const STORE_FORMAT: &str = "prism-store-v1";
+const STORE_FORMAT: FormatTag = FormatTag::new("prism-store-v1");
 
 const VERSION_FILE: &str = "VERSION";
 const OBJECTS_DIR: &str = "objects";
@@ -164,7 +165,7 @@ pub const TEMP_PREFIX: &str = ".tmp.";
 // resumption never parses facts back out of a directory name.
 const RETIRED_PREFIX: &str = ".retired.";
 const RETIRED_MANIFEST: &str = ".retired-manifest";
-const RETIRED_FORMAT: &str = "prism-store-retired-v1";
+const RETIRED_FORMAT: FormatTag = FormatTag::new("prism-store-retired-v1");
 
 // Line-oriented flat-file conventions shared by every index. A record is one
 // line. Fields within a record are tab-separated. A list within a field is
@@ -697,7 +698,7 @@ fn check_stamp(version: &Path) -> io::Result<()> {
     let mut lines = text.lines();
     let scheme = lines.next().unwrap_or_default();
     let format = lines.next().unwrap_or_default();
-    if scheme != HASH_SCHEME || format != STORE_FORMAT {
+    if scheme != HASH_SCHEME || STORE_FORMAT.expect(format).is_err() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!(

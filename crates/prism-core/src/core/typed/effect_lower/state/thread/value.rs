@@ -136,7 +136,7 @@ impl Threader<'_> {
                         ));
                     }
                     let sv = TypedBinder::new(self.mint("sv"), step.ty());
-                    let guard = self.value_guard(&step, &sv, x2, tn)?;
+                    let guard = self.value_guard(&step, &sv, x2, tn, None)?;
                     Self::bind(tm, sv, guard)
                 } else {
                     Self::bind(tm, x2, tn)
@@ -358,6 +358,7 @@ impl Threader<'_> {
             ops: clauses,
             return_binder,
             return_body,
+            finally_body,
         } = c.kind()
         else {
             return None;
@@ -495,12 +496,25 @@ impl Threader<'_> {
             Some(b) => self.rewrite(b, loc, &outer)?,
             None => Self::returning(binder_var(&rv), rv.ty().clone()),
         };
+        // The cleanup runs outside the handle like the return clause, once on
+        // whichever arm leaves it: after the return clause on the normal path,
+        // and on the abandoned one before the payload is answered or handed on.
+        let cleanup = match finally_body {
+            Some(f) if produces(f, loc, &outer_ops, self.latent, self.flow) => {
+                return self.bail(
+                    "a cleanup clause that performs an operation the enclosing scope threads",
+                )
+            }
+            Some(f) => Some(self.rewrite(f, loc, &outer)?),
+            None => None,
+        };
+        let rb = self.closing(rb, cleanup.as_ref());
         let out = match abort_arm {
             None if passes => {
                 let step = StepAt::of(threaded.sig().result())?;
                 let sv = TypedBinder::new(self.mint("sv"), step.ty());
                 let more = self.lift(rb, true, false)?;
-                let guard = self.value_guard(&step, &sv, rv, more)?;
+                let guard = self.value_guard(&step, &sv, rv, more, cleanup.as_ref())?;
                 Self::bind(threaded, sv, guard)
             }
             None if resumed.is_some() => {
@@ -531,6 +545,7 @@ impl Threader<'_> {
                 let step = StepAt::of(threaded.sig().result())?;
                 let fin = TypedBinder::new(self.mint("fin"), step.ty());
                 let (pattern, on_done) = self.payload_arm(&step, arm.params(), on_done);
+                let on_done = self.closing(on_done, cleanup.as_ref());
                 let answer = TypedComp::new(
                     CompSig::new(
                         c.sig().result().clone(),
@@ -568,6 +583,7 @@ impl Threader<'_> {
             ops,
             return_binder,
             return_body,
+            finally_body: None,
         } = c.kind()
         else {
             return None;
@@ -736,10 +752,12 @@ impl Threader<'_> {
         sv: &TypedBinder,
         x: TypedBinder,
         tn: TypedComp,
+        cleanup: Option<&TypedComp>,
     ) -> Option<TypedComp> {
         let scope = StepAt::of(tn.sig().result())?;
         let d = TypedBinder::new(self.mint("d"), CoreType::Source(step.done.clone()));
         let reraise = Self::returning(scope.sdone(binder_var(&d)), scope.ty());
+        let reraise = self.closing(reraise, cleanup);
         Some(TypedComp::new(
             tn.sig().clone(),
             TypedCompKind::Case(
@@ -747,6 +765,17 @@ impl Threader<'_> {
                 vec![(step.more_pattern(x), tn), (step.done_pattern(d), reraise)],
             ),
         ))
+    }
+
+    /// Run a handler's cleanup after `c`, keeping `c`'s answer.
+    fn closing(&mut self, c: TypedComp, cleanup: Option<&TypedComp>) -> TypedComp {
+        let Some(fin) = cleanup else {
+            return c;
+        };
+        let a = TypedBinder::new(self.mint("a"), c.sig().result().clone());
+        let u = TypedBinder::new(self.mint("u"), fin.sig().result().clone());
+        let answer = Self::returning(binder_var(&a), a.ty().clone());
+        Self::bind(c, a, Self::bind(fin.clone(), u, answer))
     }
 
     /// Lift a head into the scope's step convention: a head that cannot abort,

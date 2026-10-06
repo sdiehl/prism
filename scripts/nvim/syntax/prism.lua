@@ -49,7 +49,7 @@ cmd([[syntax match prismStringEscape "\\." contained]])
 
 -- Operators: arrows, the effect bang, pipes, dot-chaining, var assign, failure
 -- fallback / optional chaining, and arithmetic/comparison.
-cmd([[syntax match prismOperator "\%(->\|<-\|=>\|:=\|??\|?\.\|>>\|<<\|||\||>\|&&\|==\.\?\|/=\.\?\|<=\.\?\|>=\.\?\|[-+*/%<>=!|?.^~]\)"]])
+cmd([[syntax match prismOperator "\%(->\|<-\|=>\|:=\|::\|<\/>\|??\|?\.\|>>\|<<\|||\||>\|&&\|==\.\?\|/=\.\?\|<=\.\?\|>=\.\?\|[-+*/%<>=!|?.^~]\)"]])
 
 -- Line comments, with the usual TODO/FIXME callouts.
 cmd([[syntax keyword prismTodo TODO FIXME XXX NOTE contained]])

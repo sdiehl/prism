@@ -94,6 +94,11 @@ pub struct Monadic<'a> {
     latent: Option<&'a Latent>,
     flow: Option<&'a ThunkFlow>,
     native_enabled: bool,
+    /// Whether the program holds a `finally` clause. Every operation then
+    /// carries the cleanups it leaves pending beside its argument, so the
+    /// handler that catches it can run the ones its clause abandons; a program
+    /// without the clause keeps the bare argument and is lowered unchanged.
+    cleanups: bool,
 }
 
 #[cfg(test)]

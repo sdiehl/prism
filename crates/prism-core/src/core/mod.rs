@@ -44,7 +44,7 @@ pub use json::core_to_json;
 pub use opt::{
     effective_passes, lint as lint_core, newtype_ctors, optimization_fingerprint, pass_fingerprint,
     CorePass, OptLevel, OptimizationPlan, OptimizerOptions, PassPipeline, PassSet, PassSpec,
-    PassStage, PassStats,
+    PassStage, PassStats, PipelineError,
 };
 pub use pretty::{pp_comp, pp_core, pp_core_pretty, pp_value};
 pub use shape::{class_digests, contract_digest, instance_digest, shape_digests};

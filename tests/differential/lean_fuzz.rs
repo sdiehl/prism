@@ -6,6 +6,7 @@
 //! and invoke this test explicitly; once invoked, a missing oracle or an empty,
 //! stuck, undecodable, or zero-case run is a hard failure.
 
+use std::cell::RefCell;
 use std::fs;
 use std::io::{Read, Write as _};
 use std::path::{Path, PathBuf};
@@ -17,7 +18,7 @@ use num_bigint::BigInt;
 use prism::eval::Rv;
 
 use crate::support::fuzzgen::{generate, shrink, Program, ProgramFamily};
-use crate::support::TempDir;
+use crate::support::{in_shard, parallel_each, TempDir};
 
 // The generated-program corpus size. Overridable via PRISM_LEAN_FUZZ_CASES so CI
 // sweeps a large deterministic corpus while a quick local run can ask for fewer;
@@ -354,39 +355,56 @@ fn generated_programs_match_lean_final_values() {
          pure={pure}, full-handler={full}, partial-handler={partial}"
     );
     let scratch = TempDir::new("lean-fuzz", "cases");
-    let path = scratch.join("candidate.pr");
-    let mut ran = 0;
-    for (index, program) in programs.into_iter().enumerate() {
-        ran += 1;
-        match compare(&program, &path) {
-            Comparison::Match => {}
-            Comparison::HarnessFailure(failure) => panic!(
+    let mine: Vec<(usize, Program)> = programs
+        .into_iter()
+        .enumerate()
+        .filter(|(index, _)| in_shard(*index))
+        .collect();
+    let (fails, ran) = parallel_each(&mine, |(index, program)| {
+        let path = scratch.join(format!("case-{index}.pr"));
+        match compare(program, &path) {
+            Comparison::Match => Ok(()),
+            Comparison::HarnessFailure(failure) => Err(format!(
                 "Lean fuzz harness failed at seed {SEED:#018x}, case {index}:\n\
                  {failure}\n\ngenerated source:\n{}",
                 program.render_oracle()
-            ),
+            )),
             Comparison::Mismatch(failure) => {
-                let (minimal, failure) = shrink(program, failure, |candidate| {
-                    match compare(candidate, &path) {
-                        Comparison::Match => None,
-                        Comparison::Mismatch(reason) => Some(reason),
-                        Comparison::HarnessFailure(reason) => panic!(
+                let harness = RefCell::new(None);
+                let (minimal, failure) =
+                    shrink(program.clone(), failure, |candidate| {
+                        match compare(candidate, &path) {
+                            Comparison::Match => None,
+                            Comparison::Mismatch(reason) => Some(reason),
+                            Comparison::HarnessFailure(reason) => {
+                                harness.borrow_mut().get_or_insert(reason);
+                                None
+                            }
+                        }
+                    });
+                Err(harness.into_inner().map_or_else(
+                    || {
+                        format!(
+                            "Lean differential mismatch at seed {SEED:#018x}, case {index}, \
+                             after shrinking:\n{failure}\n\nminimal reproducer:\n{}",
+                            minimal.render_oracle()
+                        )
+                    },
+                    |reason| {
+                        format!(
                             "Lean fuzz harness failed while shrinking seed {SEED:#018x}, \
-                             case {index}:\n{reason}\n\ncandidate source:\n{}",
-                            candidate.render_oracle()
-                        ),
-                    }
-                });
-                panic!(
-                    "Lean differential mismatch at seed {SEED:#018x}, case {index}, \
-                     after shrinking:\n{failure}\n\nminimal reproducer:\n{}",
-                    minimal.render_oracle()
-                );
+                             case {index}:\n{reason}"
+                        )
+                    },
+                ))
             }
         }
-    }
+    });
+    assert!(fails.is_empty(), "{}", fails.join("\n\n"));
+    let ran = ran.len();
     assert_eq!(
-        ran, cases,
+        ran,
+        mine.len(),
         "Lean fuzz did not execute its complete deterministic corpus"
     );
     println!(

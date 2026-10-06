@@ -9,6 +9,7 @@
 // A wrong tag makes native disagree with the interpreter; a silently dropped
 // specialization is caught by the `sort_prim` assertion on the lowered core.
 
+use prism::DumpPhase;
 use std::path::Path;
 use std::process::Command;
 use std::{env, fs};
@@ -49,7 +50,7 @@ fn native_sort_kind_matches_interpreter() {
         // Guard against a vacuous pass: the program must actually lower to the
         // native kernel, or native and interpreter would agree via the generic
         // merge sort without ever exercising a kind tag.
-        let core = prism::dump("core", &full).expect("core dump");
+        let core = prism::dump(DumpPhase::Core, &full).expect("core dump");
         assert!(
             core.contains("sort_prim"),
             "{label}: sort did not specialize to the native kernel; the tag gate would be vacuous"

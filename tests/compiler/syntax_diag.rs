@@ -14,6 +14,7 @@
 // variant; the covers test below fails if a new malformed lex fixture is added
 // without a gate entry.
 
+use prism::DumpPhase;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -24,7 +25,7 @@ use serde_json::Value;
 const FIXTURE_DIR: &str = "tests/fixtures/syntax";
 const HARNESS: &str = "consumers/diag_check.pr";
 const ACCEPT: &str = "PRISM_ACCEPT_SYNTAX_FIXTURES";
-const PHASE: &str = "syntax-diagnostics";
+const PHASE: DumpPhase = DumpPhase::SyntaxDiagnostics;
 const SCHEMA: &str = "prism-syntax-diagnostics-v1";
 
 // One negative fixture per lexical error variant (E7000 through E7004), so the

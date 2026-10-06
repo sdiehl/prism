@@ -186,7 +186,7 @@ pub fn attest_on(src: &str, roots: &[Root], cfg: &Config) -> Result<String, Erro
 // simply yields no line, so a certificate failure never fails the attestation the
 // byte-identity check already established.
 #[cfg(feature = "native")]
-fn attest_cert_line(root: &str, second_name: &str, cfg: &Config) -> String {
+fn attest_cert_line(root: &crate::core::Digest, second_name: &str, cfg: &Config) -> String {
     let store_root = store::resolve_store_path(cfg.flags().store_path.as_deref());
     let Ok(store) = store::Store::open_or_create(&store_root) else {
         return String::new();
@@ -475,7 +475,11 @@ pub(super) fn replayable_check(
                 },
                 offending.join("`, `")
             );
-            return Err(Error::Type(TypeError::TypeFailure { span: d.span, msg }));
+            return Err(Error::Type(TypeError::TypeFailure {
+                span: d.span,
+                msg,
+                origin: None,
+            }));
         }
     }
     Ok(())

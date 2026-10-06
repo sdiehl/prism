@@ -11,11 +11,13 @@ use std::path::Path;
 
 use crate::cli::test::TestOptions;
 use crate::cli::CmdResult;
+use prism_common::format::FormatTag;
 
 mod check;
 mod discovery;
 mod events;
 mod failure;
+mod junit;
 mod manifest;
 mod report;
 mod runner;
@@ -25,14 +27,14 @@ pub use failure::{decode_failure, encode_failure, Failure};
 pub use manifest::{decode_manifest, encode_manifest, ManifestError};
 
 /// The versioned test manifest schema tag.
-pub const TEST_MANIFEST_SCHEMA: &str = "prism-test-manifest-v1";
+pub const TEST_MANIFEST_SCHEMA: FormatTag = FormatTag::new("prism-test-manifest-v1");
 
 /// The versioned test event stream schema tag.
-pub const TEST_EVENTS_SCHEMA: &str = "prism-test-events-v1";
+pub const TEST_EVENTS_SCHEMA: FormatTag = FormatTag::new("prism-test-events-v1");
 
 /// The versioned structured-failure test-ABI schema tag. The wire envelope a
 /// structured failure crosses from the stdlib assertion layer to the harness.
-pub const TEST_FAILURE_SCHEMA: &str = "prism-test-failure-v1";
+pub const TEST_FAILURE_SCHEMA: FormatTag = FormatTag::new("prism-test-failure-v1");
 
 /// The effect names the test world observes: `Fail` is a test failure and
 /// `IO` is the ambient output channel captured per test. This is the complete
@@ -78,6 +80,8 @@ pub enum TestStatus {
     Exit,
     /// The harness could not be built or run.
     Infrastructure,
+    /// A `skip` pragma kept the test from running.
+    Skipped,
 }
 
 /// Discover, select, and run tests for a project or a single file, returning
@@ -94,7 +98,7 @@ pub fn run_results(
         .into_iter()
         .map(|(id, outcome)| TestResult {
             id,
-            status: runner::public_status(outcome.kind),
+            status: runner::public_status(&outcome),
             output: outcome.output,
         })
         .collect())

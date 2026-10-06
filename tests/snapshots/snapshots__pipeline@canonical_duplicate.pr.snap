@@ -18,9 +18,9 @@ Program {
             param: "a",
             supers: [],
             methods: [
-                (
-                    "cmp",
-                    Fun(
+                ClassMethod {
+                    name: "cmp",
+                    ty: Fun(
                         [
                             Var(
                                 "a",
@@ -32,7 +32,8 @@ Program {
                         Empty,
                         Int,
                     ),
-                ),
+                    span: 15..18,
+                },
             ],
             span: 0..34,
         },

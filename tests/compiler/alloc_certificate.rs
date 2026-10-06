@@ -1,3 +1,4 @@
+use prism::DumpPhase;
 use std::fmt::Write;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -9,7 +10,7 @@ fn allocation_certificate_accepts_expected_programs(
     #[files("tests/cases/alloc_certificate/accept/*.pr")] path: PathBuf,
 ) {
     let src = fs::read_to_string(&path).unwrap();
-    let got = prism::dump("core", &src);
+    let got = prism::dump(DumpPhase::Core, &src);
     assert!(
         got.is_ok(),
         "allocation certificate unexpectedly rejected `{}`:\n{got:?}",
@@ -22,7 +23,7 @@ fn allocation_certificate_rejects_expected_programs(
     #[files("tests/cases/alloc_certificate/reject/*.pr")] path: PathBuf,
 ) {
     let src = fs::read_to_string(&path).unwrap();
-    let got = prism::dump("core", &src);
+    let got = prism::dump(DumpPhase::Core, &src);
     assert!(
         got.is_err(),
         "allocation certificate unexpectedly accepted `{}`",
@@ -45,10 +46,10 @@ fn runtime_allocation_rejections_are_valid_programs_without_the_claim() {
         let source = fs::read_to_string(path).unwrap();
         let plain = source.replace(" @ noalloc", "");
         assert!(
-            prism::dump("core", &plain).is_ok(),
+            prism::dump(DumpPhase::Core, &plain).is_ok(),
             "{name}: unannotated program must be valid"
         );
-        let error = prism::dump("core", &source)
+        let error = prism::dump(DumpPhase::Core, &source)
             .expect_err("runtime allocation needs a certificate")
             .to_string();
         assert!(
@@ -72,7 +73,8 @@ fn allocation_certificate_diagnostics_are_snapshotted() {
         writeln!(
             out,
             "{}",
-            prism::dump("core", &src).expect_err("case must fail the allocation certificate")
+            prism::dump(DumpPhase::Core, &src)
+                .expect_err("case must fail the allocation certificate")
         )
         .unwrap();
     }

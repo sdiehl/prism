@@ -7,6 +7,7 @@
 //! fresh-world isolation, canonical JSON events, byte-identical repeated
 //! manifests, and both project and single-file invocation.
 
+use prism::DumpPhase;
 use std::path::{Path, PathBuf};
 
 use prism::cli::test::TestOptions;
@@ -97,7 +98,8 @@ fn production_build_excludes_tests_and_is_neutral() {
     assert_eq!(a, b, "adding a test moved the production namespace root");
 
     // The test symbol is absent from the production build's symbols.
-    let dump = prism::dump("core-hash", &prism::with_prelude(with_test)).expect("core-hash");
+    let dump =
+        prism::dump(DumpPhase::CoreHash, &prism::with_prelude(with_test)).expect("core-hash");
     assert!(
         !dump.contains("inc_adds_one"),
         "test symbol leaked into production core-hash"
@@ -474,7 +476,8 @@ fn test_only_edit_leaves_emitted_artifact_identical() {
     let roots = prism::default_roots(Path::new("."));
     let cfg = Config::default();
     let lower = |src: &str| {
-        prism::dump_on("lowered", &prism::with_prelude(src), &roots, &cfg).expect("lowered dump")
+        prism::dump_on(DumpPhase::Lowered, &prism::with_prelude(src), &roots, &cfg)
+            .expect("lowered dump")
     };
     assert_eq!(
         lower(base),
@@ -841,4 +844,105 @@ entry = "src/main.pr"
     )
     .unwrap();
     dir
+}
+
+// The stdlib assertion layer crosses the structured-failure ABI end to end: each
+// `expect` form reports its message and values, the envelope line is stripped
+// from the captured output, a bare `fail()` keeps the payload-free event, and a
+// `skip` pragma reports its reason without running the test.
+#[test]
+fn expect_forms_report_structured_failures() {
+    let file = case("assertions.pr");
+    let results = run_results(Some(&file), &opts(), &Config::default()).expect("run");
+    let status = |id: &str| status_of(&results, &format!("assertions::{id}")).status;
+    assert_eq!(status("equal_passes"), TestStatus::Passed);
+    assert_eq!(status("tagged"), TestStatus::Passed);
+    assert_eq!(status("skipped"), TestStatus::Skipped);
+    for id in [
+        "equal_fails",
+        "text_fails",
+        "expect_fails",
+        "fail_with_fails",
+        "bare_fail",
+    ] {
+        assert_eq!(status(id), TestStatus::Failed, "{id}");
+    }
+    assert_eq!(
+        status_of(&results, "assertions::text_fails").output,
+        "before the assertion\n",
+        "the failure envelope leaked into the captured output"
+    );
+
+    let events = event_bytes(Some(&file), &opts(), &Config::default()).expect("events");
+    accept_or_check(&events, "assertions.events.ndjson");
+    let text = String::from_utf8(events).unwrap();
+    for needle in [
+        "{\"event\":\"test_failed\",\"id\":\"assertions::equal_fails\",\"kind\":\"fail\",\"message\":\"values differ\",\"expected\":\"[1, 2]\",\"actual\":\"[1, 3]\"}",
+        "\"diff\":\"  a\\n- b\\n+ c\"",
+        "\"message\":\"one is not above two\"}",
+        "\"message\":\"custom reason\"}",
+        "{\"event\":\"test_failed\",\"id\":\"assertions::bare_fail\",\"kind\":\"fail\",\"message\":\"test failed\"}",
+        "{\"event\":\"test_skipped\",\"id\":\"assertions::skipped\",\"reason\":\"waiting on the network lane\"}",
+        "\"skipped\":1,",
+    ] {
+        assert!(text.contains(needle), "events missing {needle}: {text}");
+    }
+}
+
+// `--tag` keeps only the tests carrying a requested tag, and the pragmas reach
+// the manifest's canonical bytes.
+#[test]
+fn tags_select_and_enter_the_manifest() {
+    let file = case("assertions.pr");
+    let net = TestOptions {
+        tags: vec!["net".to_string()],
+        ..TestOptions::default()
+    };
+    let results = run_results(Some(&file), &net, &Config::default()).expect("run");
+    assert_eq!(ids(&results), ["assertions::tagged"]);
+
+    let descriptors = descriptors_for_file(&file, &Config::default()).expect("discover");
+    let back = decode_manifest(&encode_manifest(&descriptors)).expect("decode");
+    let tagged = back
+        .iter()
+        .find(|d| d.logical_id == "assertions::tagged")
+        .unwrap();
+    assert_eq!(tagged.tags, ["net", "slow"]);
+    let skipped = back
+        .iter()
+        .find(|d| d.logical_id == "assertions::skipped")
+        .unwrap();
+    assert_eq!(skipped.skip.as_deref(), Some("waiting on the network lane"));
+}
+
+// A malformed `-- test:` pragma is a discovery error, not a silently ignored line.
+#[test]
+fn malformed_test_pragma_is_rejected() {
+    let err = descriptors_for_file(&case("bad_pragma.pr"), &Config::default())
+        .expect_err("a pragma without a reason must be rejected");
+    assert!(err.to_string().contains("test pragma"), "{err}");
+}
+
+// `--junit` writes a deterministic projection of the results: failures, the
+// skipped test with its reason, and captured output on a failure.
+#[test]
+fn junit_report_projects_the_results() {
+    let path = std::env::temp_dir().join(format!("prism_junit_{}.xml", std::process::id()));
+    let options = TestOptions {
+        junit: Some(path.clone()),
+        ..TestOptions::default()
+    };
+    let outcome = test_cmd(Some(&case("assertions.pr")), &options, &Config::default());
+    assert!(outcome.is_err(), "failing tests must fail the command");
+    let xml = std::fs::read(&path).expect("junit written");
+    let _ = std::fs::remove_file(&path);
+    accept_or_check(&xml, "assertions.junit.xml");
+    let xml = String::from_utf8(xml).unwrap();
+    for needle in [
+        "<testsuites name=\"prism test\" tests=\"8\" failures=\"5\" errors=\"0\" skipped=\"1\">",
+        "<skipped message=\"waiting on the network lane\"/>",
+        "<system-out>before the assertion\n</system-out>",
+    ] {
+        assert!(xml.contains(needle), "junit missing {needle}: {xml}");
+    }
 }

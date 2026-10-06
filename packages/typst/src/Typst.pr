@@ -37,6 +37,7 @@
 import Data.String (split)
 import Data.Bytes (Bytes, bytes_index, bytes_length, bytes_slice, bytes_to_string, string_to_bytes)
 import Data.Pretty as Pretty
+import Test (expect_equal, expect_text)
 import Typst.Value (Length, Pt, Em, Fr, Percent, Color, Rgb, Alignment, AHorizon, Dir, Ttb, show_length, show_color, show_alignment, show_dir)
 pub import Typst.Value (..)
 
@@ -60,13 +61,13 @@ fn eunwrap(e : Expr) : Pretty.Doc =
 
 fn unwrap_docs(docs : List(Doc)) : List(Pretty.Doc) =
   match docs of
-    Nil => Nil
-    Cons(doc, rest) => Cons(unwrap(doc), unwrap_docs(rest))
+    [] => Nil
+    doc :: rest => Cons(unwrap(doc), unwrap_docs(rest))
 
 fn eunwrap_all(es : List(Expr)) : List(Pretty.Doc) =
   match es of
-    Nil => Nil
-    Cons(e, rest) => Cons(eunwrap(e), eunwrap_all(rest))
+    [] => Nil
+    e :: rest => Cons(eunwrap(e), eunwrap_all(rest))
 
 -- The markup layer.
 
@@ -83,8 +84,8 @@ pub fn raw(source : String) : Doc = lines(raw_lines(split(10, source)))
 
 fn raw_lines(values : List(String)) : List(Doc) =
   match values of
-    Nil => Nil
-    Cons(value, rest) => Cons(atom(value), raw_lines(rest))
+    [] => Nil
+    value :: rest => Cons(atom(value), raw_lines(rest))
 
 -- | A line of prose with Typst's markup control characters escaped, so any
 -- Prism string renders as itself.
@@ -186,9 +187,9 @@ pub fn concat_exprs(es : List(Expr)) : Expr =
 -- one content value out of many.
 pub fn sum(es : List(Expr)) : Expr =
   match es of
-    Nil => none_expr()
-    Cons(e, Nil) => e
-    Cons(e, rest) => concat_exprs([e, sym(" + "), sum(rest)])
+    [] => none_expr()
+    [e] => e
+    e :: rest => concat_exprs([e, sym(" + "), sum(rest)])
 
 -- | A braced code suite with stable indentation.
 pub fn suite(es : List(Expr)) : Expr =
@@ -346,31 +347,21 @@ pub fn render_expr(width : Int, e : Expr) : String =
 pub fn document(docs : List(Doc)) : String = render(96, lines(docs))
 
 test fn strings_are_escaped() =
-  if render_expr(96, string("a\"b\\c\n")) == "\"a\\\"b\\\\c\\n\"" then
-    ()
-  else
-    fail()
+  expect_equal("\"a\\\"b\\\\c\\n\"", render_expr(96, string("a\"b\\c\n")))
 
 test fn markup_text_is_escaped() =
-  if (render(96, text_line("# not a heading")) == "\\# not a heading") then
-    ()
-  else
-    fail()
+  expect_equal("\\# not a heading", render(96, text_line("# not a heading")))
 
 test fn calls_break_deterministically() =
   let doc = call("f", [named("left", sym("1")), named("right", sym("2"))])
-  if render_expr(80, doc) == "f(left: 1, right: 2)" then
-    ()
-  else
-    fail()
+  expect_equal("f(left: 1, right: 2)", render_expr(80, doc))
 
 test fn content_bodies_remain_one_code_expression() =
   let body = sum([call("text", [string("a")]), call("raw", [string("b")])])
-  if (render_expr(80, content_call("box", Nil, body))
-      == "box()[#(text(\"a\") + raw(\"b\"))]") then
-    ()
-  else
-    fail()
+  expect_equal(
+      "box()[#(text(\"a\") + raw(\"b\"))]",
+      render_expr(80, content_call("box", Nil, body)),
+    )
 
 test fn typed_values_own_their_spelling() =
   let args = [
@@ -379,11 +370,10 @@ test fn typed_values_own_their_spelling() =
       named("dir", direction(Ttb)),
       named("align", alignment(AHorizon)),
     ]
-  if (render_expr(96, call("box", args))
-      == "box(width: 100%, fill: rgb(255, 0, 40), dir: ttb, align: horizon)") then
-    ()
-  else
-    fail()
+  expect_equal(
+      "box(width: 100%, fill: rgb(255, 0, 40), dir: ttb, align: horizon)",
+      render_expr(96, call("box", args)),
+    )
 
 test fn rendering_is_deterministic_and_stable() =
   let doc = lines([
@@ -392,7 +382,5 @@ test fn rendering_is_deterministic_and_stable() =
       text_line("prose with # inside"),
     ])
   let once = render(96, doc)
-  if once == render(96, doc) && render(96, atom(once)) == once then
-    ()
-  else
-    fail()
+  expect_text(once, render(96, doc))
+  expect_text(once, render(96, atom(once)))

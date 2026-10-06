@@ -12,7 +12,7 @@ The pipeline mirrors the compiler exactly: `lex_raw` (Syntax.Lex) yields the dec
 
 ### `layout`
 
-```prism,sig,h-209f44e2f65991cdf71cd4e2e65d378a282093f7cbabf76153969e1b6398fc3a
+```prism,sig,h-92daeee08b1ae9f989fb9d2aff657362f06b307ff112d6a17cb7d5c8b26b9650
 layout : (String) -> Result(List(Syntax.Token.Token), Syntax.Lex.LexError)
 ```
 

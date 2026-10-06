@@ -8,7 +8,9 @@
 
 use std::collections::BTreeMap;
 
-pub(crate) const SCHEMA: &str = "prism-verification-interface-v1";
+use prism_common::format::FormatTag;
+
+pub(crate) const SCHEMA: FormatTag = FormatTag::new("prism-verification-interface-v1");
 
 /// Domain separator so the interface digest can never collide with a query or
 /// contract digest built from a coincidentally identical byte stream.
@@ -51,7 +53,7 @@ impl VerificationInterface {
     /// is what `dump verify` prints.
     pub(crate) fn render(&self) -> String {
         let mut out = String::new();
-        out.push_str(SCHEMA);
+        out.push_str(SCHEMA.as_str());
         out.push('\n');
         out.push_str("digest ");
         out.push_str(&self.digest);

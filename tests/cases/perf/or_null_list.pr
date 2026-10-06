@@ -16,8 +16,8 @@ fn build(n : Int, acc : List(OrNull(Int))) : List(OrNull(Int)) =
 
 fn total(xs : List(OrNull(Int))) : Int =
   match xs of
-    Nil => 0
-    Cons(o, t) =>
+    [] => 0
+    o :: t =>
       match o of
         This(x) => x + total(t)
         Null => total(t)

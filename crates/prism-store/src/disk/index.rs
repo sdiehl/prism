@@ -33,6 +33,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use prism_common::format::FormatTag;
 #[cfg(unix)]
 use rustix::fs::{flock, FlockOperation};
 
@@ -48,10 +49,10 @@ const DEPS_FILE: &str = "deps";
 const CANONICAL_FILE: &str = "canonical";
 const REFS_FILE: &str = "refs";
 
-const NAMES_HEADER: &str = "prism-store-names\tv1";
-const DEPS_HEADER: &str = "prism-store-deps\tv1";
-const CANONICAL_HEADER: &str = "prism-store-canonical\tv1";
-const REFS_HEADER: &str = "prism-store-refs\tv1";
+const NAMES_HEADER: FormatTag = FormatTag::new("prism-store-names\tv1");
+const DEPS_HEADER: FormatTag = FormatTag::new("prism-store-deps\tv1");
+const CANONICAL_HEADER: FormatTag = FormatTag::new("prism-store-canonical\tv1");
+const REFS_HEADER: FormatTag = FormatTag::new("prism-store-refs\tv1");
 
 /// A `(class, type-head)` pair identifying a canonical instance binding. This is
 /// the on-disk key shape; coherence enforcement owns the semantics.
@@ -122,17 +123,17 @@ const fn lock_exclusive(_file: &fs::File) -> io::Result<()> {
 
 // Read a line-oriented index file, skipping the header, returning the data
 // lines. A missing file is an empty index.
-fn read_lines(path: &Path, header: &str) -> io::Result<Vec<String>> {
+fn read_lines(path: &Path, header: &FormatTag) -> io::Result<Vec<String>> {
     let text = match fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(e) => return Err(e),
     };
     let mut lines = text.lines();
-    if lines.next() != Some(header) {
+    if let Err(e) = header.expect(lines.next().unwrap_or_default()) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            format!("malformed index header at {}", path.display()),
+            format!("malformed index header at {}: {e}", path.display()),
         ));
     }
     Ok(lines.map(str::to_string).collect())
@@ -140,7 +141,7 @@ fn read_lines(path: &Path, header: &str) -> io::Result<Vec<String>> {
 
 pub(super) fn load_names(root: &Path) -> io::Result<BTreeMap<String, String>> {
     let mut map = BTreeMap::new();
-    for line in read_lines(&index_dir(root).join(NAMES_FILE), NAMES_HEADER)? {
+    for line in read_lines(&index_dir(root).join(NAMES_FILE), &NAMES_HEADER)? {
         if let Some((name, hash)) = line.split_once(FIELD_SEP) {
             map.insert(name.to_string(), checked_hash(hash)?);
         }
@@ -149,7 +150,7 @@ pub(super) fn load_names(root: &Path) -> io::Result<BTreeMap<String, String>> {
 }
 
 fn write_names(root: &Path, map: &BTreeMap<String, String>) -> io::Result<()> {
-    let mut body = String::from(NAMES_HEADER);
+    let mut body = String::from(NAMES_HEADER.as_str());
     body.push('\n');
     for (name, hash) in map {
         let _ = writeln!(body, "{name}{FIELD_SEP}{hash}");
@@ -168,7 +169,7 @@ pub(super) fn bind_names(root: &Path, bindings: &BTreeMap<String, String>) -> io
 
 pub(super) fn load_deps(root: &Path) -> io::Result<BTreeMap<String, BTreeSet<String>>> {
     let mut map: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    for line in read_lines(&index_dir(root).join(DEPS_FILE), DEPS_HEADER)? {
+    for line in read_lines(&index_dir(root).join(DEPS_FILE), &DEPS_HEADER)? {
         if let Some((hash, deps)) = line.split_once(FIELD_SEP) {
             let set = map.entry(checked_hash(hash)?).or_default();
             for d in deps.split(LIST_SEP).filter(|s| !s.is_empty()) {
@@ -180,7 +181,7 @@ pub(super) fn load_deps(root: &Path) -> io::Result<BTreeMap<String, BTreeSet<Str
 }
 
 fn write_deps(root: &Path, map: &BTreeMap<String, BTreeSet<String>>) -> io::Result<()> {
-    let mut body = String::from(DEPS_HEADER);
+    let mut body = String::from(DEPS_HEADER.as_str());
     body.push('\n');
     for (hash, deps) in map {
         let list: Vec<&str> = deps.iter().map(String::as_str).collect();
@@ -209,7 +210,7 @@ pub(super) fn add_dependents(
 
 fn load_canonical(root: &Path) -> io::Result<BTreeMap<(String, String), String>> {
     let mut map = BTreeMap::new();
-    for line in read_lines(&index_dir(root).join(CANONICAL_FILE), CANONICAL_HEADER)? {
+    for line in read_lines(&index_dir(root).join(CANONICAL_FILE), &CANONICAL_HEADER)? {
         let mut fields = line.splitn(3, FIELD_SEP);
         if let (Some(class), Some(head), Some(hash)) = (fields.next(), fields.next(), fields.next())
         {
@@ -220,7 +221,7 @@ fn load_canonical(root: &Path) -> io::Result<BTreeMap<(String, String), String>>
 }
 
 fn write_canonical(root: &Path, map: &BTreeMap<(String, String), String>) -> io::Result<()> {
-    let mut body = String::from(CANONICAL_HEADER);
+    let mut body = String::from(CANONICAL_HEADER.as_str());
     body.push('\n');
     for ((class, head), hash) in map {
         let _ = writeln!(body, "{class}{FIELD_SEP}{head}{FIELD_SEP}{hash}");
@@ -277,7 +278,7 @@ pub(super) fn canonical(root: &Path, key: &CanonicalKey) -> io::Result<Option<St
 // and a caller tag can never collide on one slot.
 fn load_refs(root: &Path) -> io::Result<BTreeMap<String, String>> {
     let mut map = BTreeMap::new();
-    for line in read_lines(&index_dir(root).join(REFS_FILE), REFS_HEADER)? {
+    for line in read_lines(&index_dir(root).join(REFS_FILE), &REFS_HEADER)? {
         if let Some((name, hash)) = line.split_once(FIELD_SEP) {
             map.insert(name.to_string(), checked_hash(hash)?);
         }
@@ -286,7 +287,7 @@ fn load_refs(root: &Path) -> io::Result<BTreeMap<String, String>> {
 }
 
 fn write_refs(root: &Path, map: &BTreeMap<String, String>) -> io::Result<()> {
-    let mut body = String::from(REFS_HEADER);
+    let mut body = String::from(REFS_HEADER.as_str());
     body.push('\n');
     for (name, hash) in map {
         let _ = writeln!(body, "{name}{FIELD_SEP}{hash}");

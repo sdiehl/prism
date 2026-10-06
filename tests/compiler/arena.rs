@@ -6,11 +6,12 @@
 //! These tests read the two committed corpus examples and check the structural
 //! outcome directly in the lowered Core (`init_at` is the reification marker).
 
+use prism::DumpPhase;
 use std::fs;
 
 fn lowered(path: &str) -> String {
     let src = fs::read_to_string(path).unwrap();
-    prism::dump("lowered", &prism::with_prelude(&src))
+    prism::dump(DumpPhase::Lowered, &prism::with_prelude(&src))
         .unwrap_or_else(|e| panic!("lowering `{path}` failed: {e:?}"))
 }
 
@@ -74,7 +75,8 @@ fn reified_installer_is_bracketed_with_region_hooks() {
 #[test]
 fn non_installer_program_has_no_region_hooks() {
     let src = "fn main() : Unit ! {IO} = println(1 + 2)";
-    let out = prism::dump("lowered", &prism::with_prelude(src)).expect("lowering succeeds");
+    let out =
+        prism::dump(DumpPhase::Lowered, &prism::with_prelude(src)).expect("lowering succeeds");
     assert!(
         !out.contains("arena_enter") && !out.contains("arena_exit"),
         "region hooks leaked into a program without an `Alloc` handler:\n{out}"

@@ -1,0 +1,83 @@
+-- A recursive datatype mirrored as a parametric, multi-operation effect and
+-- driven through `Control.Recursion`. The algebra performs one `Fold` operation
+-- per constructor, the coalgebra asks an `Unfold` handler for each layer, and
+-- both handlers resume in tail position. A materialized `cata(ana(seed))` and a
+-- direct `hylo(seed)` over the same pure coalgebra and algebra must agree; the
+-- direct form never builds the intermediate tree.
+
+import Control.Recursion (ana, cata, hylo)
+
+type Tree = Leaf(Int) | Node(Tree, Tree)
+
+type TreeF(r) = LeafF(Int) | NodeF(r, r)
+
+effect Fold(a)
+  leaf(Int) : a
+  node(a, a) : a
+
+effect Unfold(s)
+  expand(s) : TreeF(s)
+
+fn project(t : Tree) : TreeF(Tree) =
+  match t of
+    Leaf(n) => LeafF(n)
+    Node(l, r) => NodeF(l, r)
+
+fn embed(layer : TreeF(Tree)) : Tree =
+  match layer of
+    LeafF(n) => Leaf(n)
+    NodeF(l, r) => Node(l, r)
+
+fn map_layer(f : (r) -> s ! {| e}, layer : TreeF(r)) : TreeF(s) ! { | e} =
+  match layer of
+    LeafF(n) => LeafF(n)
+    NodeF(l, r) =>
+      let l1 = f(l)
+      let r1 = f(r)
+      NodeF(l1, r1)
+
+-- The seed is `(label, depth)`: a full tree whose leaves count up from `label`.
+fn grow(seed : (Int, Int)) : TreeF((Int, Int)) =
+  match seed of
+    (label, depth) =>
+      if depth <= 0 then
+        LeafF(label)
+      else
+        NodeF((label, depth - 1), (label + pow(2, depth - 1), depth - 1))
+
+fn weigh(layer : TreeF(Int)) : Int =
+  match layer of
+    LeafF(n) => n * n
+    NodeF(l, r) => l + r
+
+fn fold_op(layer : TreeF(a)) : a ! {Fold(a)} =
+  match layer of
+    LeafF(n) => leaf(n)
+    NodeF(l, r) => node(l, r)
+
+fn unfold_op(seed : s) : TreeF(s) ! {Unfold(s)} = expand(seed)
+
+fn build(seed : (Int, Int)) : Tree =
+  handle ana(unfold_op, map_layer, embed, seed) with
+    expand(s) resume k => k(grow(s))
+    return t => t
+
+fn total(tree : Tree) : Int =
+  handle cata(project, map_layer, fold_op, tree) with
+    leaf(n) resume k => k(weigh(LeafF(n)))
+    node(l, r) resume k => k(weigh(NodeF(l, r)))
+    return w => w
+
+fn direct(seed : (Int, Int)) : Int = hylo(grow, map_layer, weigh, seed)
+
+fn report(depth : Int) =
+  let seed = (1, depth)
+  let materialized = total(build(seed))
+  let fused = direct(seed)
+  println("{depth}: {materialized} {fused} {materialized == fused}")
+
+fn main() =
+  report(0)
+  report(1)
+  report(4)
+  report(12)

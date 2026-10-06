@@ -169,7 +169,7 @@ compose : forall e0 a b c. ((b) -> a ! {e0}, (c) -> b ! {e0}, c) -> a ! {e0}
 concat_all : (List(String)) -> String
 concat_map : forall e0 a b. ((a) -> List(b) ! {e0}, List(a)) -> List(b) ! {e0}
 const : forall a b. (a, b) -> a
-default : forall e0 a. (() -> a ! {e0}, a) -> a ! {e0}
+default : forall e0 a. (() -> a ! {Fail, e0}, a) -> a ! {e0}
 entropy : () -> Int ! {Entropy} ! {Entropy}
 enum_from_then_to : (Int, Int, Int) -> List(Int)
 enum_from_to : (Int, Int) -> List(Int)
@@ -218,7 +218,7 @@ min : (Int, Int) -> Int
 mod : (Int, Int) -> Int
 not : (Bool) -> Bool
 odd : (Int) -> Bool
-optional : forall e0 a. (() -> a ! {e0}) -> Option(a) ! {e0}
+optional : forall e0 a. (() -> a ! {Fail, e0}) -> Option(a) ! {e0}
 or : (Bool, Bool) -> Bool
 pair_keys : forall a b. (List((a, b))) -> List(a)
 pair_map : forall e0 a b c d. ((b) -> a ! {e0}, (d) -> c ! {e0}, (b, d)) -> (a, c) ! {e0}

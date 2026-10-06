@@ -22,8 +22,8 @@ fn edits() : List(List((String, Int))) =
 
 fn ins_desc(p : (String, Int), xs : List((String, Int))) : List((String, Int)) =
   match xs of
-    Nil => Cons(p, Nil)
-    Cons(q, rest) =>
+    [] => Cons(p, Nil)
+    q :: rest =>
       if cmp(snd(p), snd(q)) > 0 then
         Cons(p, Cons(q, rest))
       else
@@ -45,8 +45,8 @@ fn drive(
   kvs_list : List(List((String, Int)))
 ) =
   match kvs_list of
-    Nil => (get(total), get(ranking))
-    Cons(kvs, rest) =>
+    [] => (get(total), get(ranking))
+    kvs :: rest =>
       set(scores, map_from_list(kvs))
       let _r = (get(total), get(ranking))
       drive(scores, total, ranking, rest)
@@ -61,8 +61,8 @@ fn run_incremental() : (Int, List(String)) =
 
 fn head_or(xs : List(a), d : a) : a =
   match xs of
-    Nil => d
-    Cons(x, _) => x
+    [] => d
+    x :: _ => x
 
 fn run_scratch() : (Int, List(String)) =
   let last_edit = last_or(edits(), Nil)
@@ -71,9 +71,9 @@ fn run_scratch() : (Int, List(String)) =
 
 fn last_or(xs : List(a), d : a) : a =
   match xs of
-    Nil => d
-    Cons(x, Nil) => x
-    Cons(_, rest) => last_or(rest, d)
+    [] => d
+    [x] => x
+    _ :: rest => last_or(rest, d)
 
 fn eq_pair(p : (Int, List(String)), q : (Int, List(String))) : Bool =
   match p of
@@ -83,14 +83,14 @@ fn eq_pair(p : (Int, List(String)), q : (Int, List(String))) : Bool =
 
 fn list_eq_str(a : List(String), b : List(String)) : Bool =
   match a of
-    Nil =>
+    [] =>
       match b of
-        Nil => true
+        [] => true
         _ => false
-    Cons(x, xs) =>
+    x :: xs =>
       match b of
-        Nil => false
-        Cons(y, ys) => str_eq(x, y) && list_eq_str(xs, ys)
+        [] => false
+        y :: ys => str_eq(x, y) && list_eq_str(xs, ys)
 
 pub fn main() =
   if eq_pair(run_incremental(), run_scratch()) then

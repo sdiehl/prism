@@ -1,0 +1,305 @@
+-- | Path: lexical file paths, with no filesystem in sight.
+--
+-- A `Path` is a list of components and a flag saying whether it starts at the
+-- root. Every operation here is pure: none of them asks the host whether a path
+-- exists, what a symlink points at, or what the current directory is. Those are
+-- filesystem questions and belong to a capability, not to a value.
+--
+-- Parsing normalizes only what is lexically certain. Repeated separators, a
+-- trailing separator, and `.` components carry no meaning, so they are dropped
+-- and `"a//./b/"` is the same path as `"a/b"`. A `..` component is kept as it
+-- is, because erasing it together with the component before it is only right
+-- when that component is not a symlink, and nothing here can know. For the same
+-- reason `parent` refuses a path whose last component is `..` rather than
+-- guessing.
+--
+-- Paths combine with `</>`: `dir </> name` is `name` inside `dir`. The operator
+-- groups to the left, so `root() </> etc </> hosts` builds outward from the
+-- root, and an absolute right side replaces what is on its left, since it is
+-- already anchored. With the empty relative path as identity this makes `Path`
+-- a monoid, and the module gives it the `Semigroup` and `Monoid` instances.
+--
+-- The host boundary is UTF-8. A `Path` is built from a `String`, so a name the
+-- host spells in bytes that are not valid UTF-8 cannot be written down here at
+-- all; `path` fails on the one string a host can never accept, one containing a
+-- NUL byte, rather than letting it reach a process call and be cut short there.
+--
+-- ```prism
+-- match path("/usr//local/./bin/") of
+--   Ok(p) => path_str(p </> relative(["prism"]))
+--   Err(_) => "invalid"
+-- ```
+-- ```output
+-- /usr/local/bin/prism
+-- ```
+
+import Data.List (append, reverse)
+import Data.Monoid (Monoid, Semigroup)
+import Data.String (str_join, str_slice)
+
+-- | Why a string is not a path.
+pub type PathError = EmptyPath | ContainsNul deriving (Eq, Show)
+
+-- | A lexical path: whether it is rooted, and its components in order.
+opaque type Path = Path(Bool, List(String))
+
+-- Bytes, compared against ASCII scalars, which UTF-8 encodes as themselves.
+let path_separator : Int = ord('/')
+
+let path_dot : Int = ord('.')
+
+-- No character literal spells NUL, so it is the byte value.
+let path_nul : Int = 0
+
+-- | Parse a path, normalizing it lexically. Fails on the empty string, which
+-- names nothing, and on a string containing a NUL byte, which no host accepts.
+--
+-- ```prism
+-- match path("a//b/./c/") of
+--   Ok(p) => path_str(p)
+--   Err(_) => "invalid"
+-- ```
+-- ```output
+-- a/b/c
+-- ```
+pub fn path(s : String) : Result(Path, PathError) =
+  if byte_len(s) == 0 then
+    Err(EmptyPath)
+  elif path_has_nul(s, 0) then
+    Err(ContainsNul)
+  else
+    Ok(Path(byte_at(s, 0) == path_separator, reverse(path_split(s, 0, 0, Nil))))
+
+-- Bytes, not codepoints: a separator and a NUL are single bytes in UTF-8 and
+-- never occur inside a multi-byte sequence, so a byte walk finds exactly them.
+fn path_has_nul(s : String, i : Int) : Bool =
+  if i >= byte_len(s) then
+    false
+  elif byte_at(s, i) == path_nul then
+    true
+  else
+    path_has_nul(s, i + 1)
+
+-- Components in reverse, from the segment starting at `start`; `i` is the scan.
+fn path_split(
+  s : String,
+  start : Int,
+  i : Int,
+  acc : List(String)
+) : List(String) =
+  if i >= byte_len(s) then
+    path_keep(str_slice(s, start, i), acc)
+  elif byte_at(s, i) == path_separator then
+    path_split(s, i + 1, i + 1, path_keep(str_slice(s, start, i), acc))
+  else
+    path_split(s, start, i + 1, acc)
+
+fn path_keep(seg : String, acc : List(String)) : List(String) =
+  if seg == "" || seg == "." then
+    acc
+  else
+    Cons(seg, acc)
+
+-- | A relative path from components, each of which must be a single name.
+-- Components that are empty, `.`, or contain a separator or NUL are dropped.
+--
+-- ```prism
+-- path_str(relative(["src", "main.pr"]))
+-- ```
+-- ```output
+-- src/main.pr
+-- ```
+pub fn relative(names : List(String)) : Path = Path(false, path_names(names))
+
+-- | The root directory.
+pub fn root() : Path = Path(true, Nil)
+
+fn path_names(names : List(String)) : List(String) =
+  match names of
+    [] => Nil
+    n :: rest =>
+      if path_is_name(n) then
+        Cons(n, path_names(rest))
+      else
+        path_names(rest)
+
+fn path_is_name(n : String) : Bool =
+  not(n == "")
+    && not(n == ".")
+    && not(path_has_nul(n, 0))
+    && not(path_has_sep(n, 0))
+
+fn path_has_sep(s : String, i : Int) : Bool =
+  if i >= byte_len(s) then
+    false
+  elif byte_at(s, i) == path_separator then
+    true
+  else
+    path_has_sep(s, i + 1)
+
+-- | Render a path for the host. The relative path with no components is `.`.
+pub fn path_str(p : Path) : String =
+  match p of
+    Path(true, cs) => concat("/", str_join("/", cs))
+    Path(false, []) => "."
+    Path(false, cs) => str_join("/", cs)
+
+-- | Is the path rooted?
+pub fn is_absolute(p : Path) : Bool =
+  match p of
+    Path(abs, _) => abs
+
+-- | The components, in order. The root is not a component.
+pub fn components(p : Path) : List(String) =
+  match p of
+    Path(_, cs) => cs
+
+-- | `q` relative to `p`, the function behind `p </> q`. An absolute `q` is
+-- already anchored, so it is the answer as it stands.
+--
+-- ```prism
+-- path_str(join(relative(["src"]), relative(["main.pr"])))
+-- ```
+-- ```output
+-- src/main.pr
+-- ```
+pub fn join(p : Path, q : Path) : Path =
+  match (p, q) of
+    (_, Path(true, _)) => q
+    (Path(abs, cs), Path(false, ds)) => Path(abs, append(cs, ds))
+
+-- | `p </> q` is `join(p, q)`. The operator groups to the left and binds
+-- looser than `::` and arithmetic, tighter than comparison.
+--
+-- ```prism
+-- path_str(root() </> relative(["usr"]) </> relative(["local", "bin"]))
+-- ```
+-- ```output
+-- /usr/local/bin
+-- ```
+--
+-- A rooted right operand discards everything on its left:
+--
+-- ```prism
+-- path_str(relative(["build"]) </> root() </> relative(["tmp"]))
+-- ```
+-- ```output
+-- /tmp
+-- ```
+instance pathJoinPath : PathJoin(Path)
+  fn path_append(p, q) = join(p, q)
+
+-- | Joining is associative: components concatenate, and an absolute operand
+-- resets the result wherever it falls. No `..` is ever collapsed, so the law
+-- holds exactly rather than only up to the filesystem.
+--
+-- ```prism
+-- let a = relative(["a"])
+-- let b = root() </> relative(["b"])
+-- let c = relative(["c"])
+-- path_eq((a </> b) </> c, a </> (b </> c))
+-- ```
+-- ```output
+-- true
+-- ```
+instance semigroupPath : Semigroup(Path)
+  fn mappend(p, q) = join(p, q)
+
+-- | The empty relative path is the identity on both sides. It prints as `.`.
+--
+-- ```prism
+-- let p = relative(["docs", "index.md"])
+-- path_eq(mappend(mempty(), p), p) && path_eq(mappend(p, mempty()), p)
+-- ```
+-- ```output
+-- true
+-- ```
+instance monoidPath : Monoid(Path)
+  fn mempty() = Path(false, Nil)
+
+-- | The path one component up, or `None` when that is not lexically known: at
+-- the root, at the empty relative path, and after a `..`.
+--
+-- ```prism
+-- match path("/a/b") of
+--   Ok(p) => map_option(path_str, parent(p))
+--   Err(_) => None
+-- ```
+-- ```output
+-- Some(/a)
+-- ```
+pub fn parent(p : Path) : Option(Path) =
+  match p of
+    Path(abs, cs) =>
+      match path_last(cs) of
+        None => None
+        Some(last) =>
+          if last == ".." then
+            None
+          else
+            Some(Path(abs, path_init(cs)))
+
+fn path_last(cs : List(String)) : Option(String) =
+  match cs of
+    [] => None
+    [c] => Some(c)
+    _ :: rest => path_last(rest)
+
+fn path_init(cs : List(String)) : List(String) =
+  match cs of
+    [] => Nil
+    [_] => Nil
+    c :: rest => Cons(c, path_init(rest))
+
+-- | The last component, unless it is `..` or there is none.
+pub fn file_name(p : Path) : Option(String) =
+  match path_last(components(p)) of
+    Some(n) =>
+      if n == ".." then
+        None
+      else
+        Some(n)
+    None => None
+
+-- | The file name after its last `.`. A name with no dot, a dot only in first
+-- position (a hidden file), or a dot only in last position has none.
+--
+-- ```prism
+-- match path("dist/prism.tar.gz") of
+--   Ok(p) => extension(p)
+--   Err(_) => None
+-- ```
+-- ```output
+-- Some(gz)
+-- ```
+pub fn extension(p : Path) : Option(String) =
+  match file_name(p) of
+    None => None
+    Some(n) =>
+      let d = path_last_dot(n, byte_len(n) - 1)
+      if d <= 0 || d == byte_len(n) - 1 then
+        None
+      else
+        Some(str_slice(n, d + 1, byte_len(n)))
+
+-- | The file name before its extension.
+pub fn stem(p : Path) : Option(String) =
+  match file_name(p) of
+    None => None
+    Some(n) =>
+      let d = path_last_dot(n, byte_len(n) - 1)
+      if d <= 0 || d == byte_len(n) - 1 then
+        Some(n)
+      else
+        Some(str_slice(n, 0, d))
+
+fn path_last_dot(n : String, i : Int) : Int =
+  if i < 0 then
+    -1
+  elif byte_at(n, i) == path_dot then
+    i
+  else
+    path_last_dot(n, i - 1)
+
+-- | Equality of paths is equality of their lexical forms.
+pub fn path_eq(p : Path, q : Path) : Bool = path_str(p) == path_str(q)

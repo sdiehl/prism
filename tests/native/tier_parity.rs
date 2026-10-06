@@ -24,6 +24,7 @@
 // oracle from going vacuous if the forcing knob or the classifier silently
 // breaks.
 
+use prism::DumpPhase;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -33,7 +34,8 @@ use super::{effect_plan, forced};
 
 use crate::support::{
     check_native_parity, cleanup_bin, corpus_is_sharded, heavy_corpus_delegated, leak_free,
-    parallel_check, program_stderr, require_cc, sharded_corpus, source, temp_bin, CHECK_LEAKS,
+    parallel_check, parallel_collect, program_stderr, require_cc, sharded_corpus, source, temp_bin,
+    CHECK_LEAKS,
 };
 
 const PROCESS_FAULT_EXIT: i32 = -1;
@@ -75,21 +77,24 @@ fn run_forced(tier: EffectTier, erasures: bool, floor_count: usize) {
     let forced_cfg = forced(tier, erasures);
     let base = Path::new(".");
     let roots = default_roots(base);
-    let cases: Vec<_> = sharded_corpus()
-        .into_iter()
-        .filter(|case| {
-            let full = source(case);
-            let auto = effect_plan(&full, &roots, &auto_cfg);
-            let cascade = effect_plan(&full, &roots, &cascade_cfg);
-            let hard = effect_plan(&full, &roots, &forced_cfg);
-            match (auto, cascade, hard) {
-                (Ok(a), Ok(c), Ok(h)) => a != h || c != h,
-                // A planning error under exactly one config is itself a tier
-                // divergence; keep the case so the build surfaces it.
-                _ => true,
-            }
-        })
-        .collect();
+    // Planning costs three elaborations per case, so selection runs on the
+    // worker pool too; the sort restores corpus order for the build pass.
+    let corpus = sharded_corpus();
+    let (_, moved) = parallel_collect(&corpus, |case| {
+        let full = source(case);
+        let auto = effect_plan(&full, &roots, &auto_cfg);
+        let cascade = effect_plan(&full, &roots, &cascade_cfg);
+        let hard = effect_plan(&full, &roots, &forced_cfg);
+        let moved = match (auto, cascade, hard) {
+            (Ok(a), Ok(c), Ok(h)) => a != h || c != h,
+            // A planning error under exactly one config is itself a tier
+            // divergence; keep the case so the build surfaces it.
+            _ => true,
+        };
+        Ok(moved.then(|| case.to_path_buf()))
+    });
+    let mut cases: Vec<PathBuf> = moved.into_iter().flatten().collect();
+    cases.sort();
     assert!(
         corpus_is_sharded() || cases.len() >= floor_count,
         r"forcing {tag} moved only {} corpus programs off their natural lowering (floor {floor_count}); the forcing knob or the effect planner likely broke",
@@ -315,7 +320,7 @@ fn exact_size_cases() -> Vec<PathBuf> {
 #[test]
 fn exact_size_toggle_matches_native() {
     let probe = source(Path::new("examples/fixtures/compiler/exact_size_map.pr"));
-    let facts = prism::dump("optimizer-facts", &probe)
+    let facts = prism::dump(DumpPhase::OptimizerFacts, &probe)
         .expect("the exact-size fixture dumps optimizer facts");
     assert!(
         facts.contains("$xs"),
@@ -367,8 +372,13 @@ fn summary_consumers_toggle_matches_native() {
     let mut probe_cfg = Config::from_env();
     probe_cfg.update_flags(|flags| flags.consolidate = false);
     probe_cfg.update_flags(|flags| flags.quiet = true);
-    let tier = prism::dump_on("tier", &probe, &default_roots(Path::new(".")), &probe_cfg)
-        .expect("the promoted case dumps its lowering tier");
+    let tier = prism::dump_on(
+        DumpPhase::Tier,
+        &probe,
+        &default_roots(Path::new(".")),
+        &probe_cfg,
+    )
+    .expect("the promoted case dumps its lowering tier");
     assert_eq!(
         tier.trim(),
         "local-partial",

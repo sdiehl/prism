@@ -63,9 +63,10 @@ fn interface_projection_is_versioned_and_self_verifying() {
     );
     assert!(ModuleInterface::from_json(&corrupt).is_err());
 
-    interface.entries[0].digest = Digest::from("0".repeat(interface.entries[0].digest.len()));
+    interface.entries[0].digest =
+        Digest::parse("0".repeat(interface.entries[0].digest.len())).unwrap();
     let error = ModuleInterface::from_json(&interface.to_json().unwrap()).unwrap_err();
-    assert!(error.contains("row"));
+    assert!(error.to_string().contains("row"), "{error}");
     assert!(interface.exported_value_env().is_err());
 }
 

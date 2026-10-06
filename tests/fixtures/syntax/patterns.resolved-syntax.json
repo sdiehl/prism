@@ -2,8 +2,8 @@
   "schema": "prism-resolved-syntax-v1",
   "compiler": "<version>",
   "source": {
-    "digest": "4af039e91ba99d57a978bb8d61f6cb3a8193a72f0c1e18d29d2a910e9c10dff8",
-    "text": "-- Pattern forms: constructors, tuples, records, literals, guards, views,\n-- alternations, and parameters written as patterns.\ntype Point = Point { x: Int, y: Int }\n\ntype Shape = Dot | Line(Point, Point) | Poly(List(Point))\n\npattern Diag(n) for Point =\n  view \\(p) -> if p.x == p.y then Some(p.x) else None\n  make \\(n) -> Point { x = n, y = n }\n\nfn classify(s : Shape) : Int =\n  match s of\n    Dot => 0\n    Line(Point { x = 0, y = 0 }, _) => 1\n    Line(a, b) if a.x == b.x => 2\n    Poly(Nil) => 3\n    Poly(Cons(p, Nil)) => p.x\n    _ => 9\n\nfn literals(v : Int, c : Char, f : Float, b : Bool) : Int =\n  match (v, c, f, b) of\n    (0, 'a', 1.5, true) => 1\n    (n, _, _, false) => n\n    _ => 2\n\nfn record_rest(p : Point) : Int =\n  match p of\n    Point { x = 0, .. } => 0\n    Point { x = x, y = y } => x + y\n\nfn views(p : Point) : Int =\n  match p of\n    Diag(n) if n > 3 => n * 2\n    Diag(n) => n\n    _ => 0\n\nfn alternation(s : Shape) : Int =\n  match s of\n    Dot | Poly(Nil) => 0\n    Line(Point { x = 0, y = 0 } | Point { x = 1, y = 1 }, _) => 1\n    Line(p, _) | Poly(Cons(p, _)) => p.x\n\nfn alt_literals(c : Char, n : Int) : Int =\n  match (c, n) of\n    ('a' | 'b' | 'c', 0 | 1) => 1\n    (_, _) => 2\n\nfn param_pats(Point { x = x, .. }, (a, b), borrow q : Point) : Int =\n  let f = \\(Point { x = u, y = v }) -> u + v\n  x + a + b + q.y + f(q)\n"
+    "digest": "530fc4b93c27eed1d4fc80ccb9893da2465f7fca1bccc3720a58ef713fb5b981",
+    "text": "-- Pattern forms: constructors, tuples, records, literals, guards, views,\n-- alternations, and parameters written as patterns.\ntype Point = Point { x: Int, y: Int }\n\ntype Shape = Dot | Line(Point, Point) | Poly(List(Point))\n\npattern Diag(n) for Point =\n  view \\(p) -> if p.x == p.y then Some(p.x) else None\n  make \\(n) -> Point { x = n, y = n }\n\nfn classify(s : Shape) : Int =\n  match s of\n    Dot => 0\n    Line(Point { x = 0, y = 0 }, _) => 1\n    Line(a, b) if a.x == b.x => 2\n    Poly([]) => 3\n    Poly([p]) => p.x\n    _ => 9\n\nfn literals(v : Int, c : Char, f : Float, b : Bool) : Int =\n  match (v, c, f, b) of\n    (0, 'a', 1.5, true) => 1\n    (n, _, _, false) => n\n    _ => 2\n\nfn record_rest(p : Point) : Int =\n  match p of\n    Point { x = 0, .. } => 0\n    Point { x = x, y = y } => x + y\n\nfn views(p : Point) : Int =\n  match p of\n    Diag(n) if n > 3 => n * 2\n    Diag(n) => n\n    _ => 0\n\nfn alternation(s : Shape) : Int =\n  match s of\n    Dot | Poly([]) => 0\n    Line(Point { x = 0, y = 0 } | Point { x = 1, y = 1 }, _) => 1\n    Line(p, _) | Poly(p :: _) => p.x\n\nfn alt_literals(c : Char, n : Int) : Int =\n  match (c, n) of\n    ('a' | 'b' | 'c', 0 | 1) => 1\n    (_, _) => 2\n\nfn param_pats(Point { x = x, .. }, (a, b), borrow q : Point) : Int =\n  let f = \\(Point { x = u, y = v }) -> u + v\n  x + a + b + q.y + f(q)\n"
   },
   "functions": [
     {
@@ -19,7 +19,7 @@
         "kind": "match",
         "span": [
           379,
-          537
+          527
         ],
         "children": [
           {
@@ -104,24 +104,24 @@
             "id": 1459,
             "kind": "int",
             "span": [
-              495,
-              496
+              494,
+              495
             ]
           },
           {
             "id": 1464,
             "kind": "field",
             "span": [
-              523,
-              526
+              513,
+              516
             ],
             "children": [
               {
                 "id": 1465,
                 "kind": "var",
                 "span": [
-                  523,
-                  524
+                  513,
+                  514
                 ]
               }
             ]
@@ -130,8 +130,8 @@
             "id": 1467,
             "kind": "int",
             "span": [
-              536,
-              537
+              526,
+              527
             ]
           }
         ]
@@ -161,48 +161,48 @@
         "id": 1468,
         "kind": "match",
         "span": [
-          601,
-          688
+          591,
+          678
         ],
         "children": [
           {
             "id": 1469,
             "kind": "tuple",
             "span": [
-              607,
-              619
+              597,
+              609
             ],
             "children": [
               {
                 "id": 1470,
                 "kind": "var",
                 "span": [
-                  608,
-                  609
+                  598,
+                  599
                 ]
               },
               {
                 "id": 1471,
                 "kind": "var",
                 "span": [
-                  611,
-                  612
+                  601,
+                  602
                 ]
               },
               {
                 "id": 1472,
                 "kind": "var",
                 "span": [
-                  614,
-                  615
+                  604,
+                  605
                 ]
               },
               {
                 "id": 1473,
                 "kind": "var",
                 "span": [
-                  617,
-                  618
+                  607,
+                  608
                 ]
               }
             ]
@@ -211,24 +211,24 @@
             "id": 1479,
             "kind": "int",
             "span": [
-              650,
-              651
+              640,
+              641
             ]
           },
           {
             "id": 1485,
             "kind": "var",
             "span": [
-              676,
-              677
+              666,
+              667
             ]
           },
           {
             "id": 1487,
             "kind": "int",
             "span": [
-              687,
-              688
+              677,
+              678
             ]
           }
         ]
@@ -246,48 +246,48 @@
         "id": 1488,
         "kind": "match",
         "span": [
-          726,
-          801
+          716,
+          791
         ],
         "children": [
           {
             "id": 1489,
             "kind": "var",
             "span": [
-              732,
-              733
+              722,
+              723
             ]
           },
           {
             "id": 1492,
             "kind": "int",
             "span": [
-              764,
-              765
+              754,
+              755
             ]
           },
           {
             "id": 1496,
             "kind": "bin",
             "span": [
-              796,
-              801
+              786,
+              791
             ],
             "children": [
               {
                 "id": 1497,
                 "kind": "var",
                 "span": [
-                  796,
-                  797
+                  786,
+                  787
                 ]
               },
               {
                 "id": 1498,
                 "kind": "var",
                 "span": [
-                  800,
-                  801
+                  790,
+                  791
                 ]
               }
             ]
@@ -307,48 +307,48 @@
         "id": 1499,
         "kind": "match",
         "span": [
-          833,
-          901
+          823,
+          891
         ],
         "children": [
           {
             "id": 1500,
             "kind": "var",
             "span": [
-              839,
-              840
+              829,
+              830
             ]
           },
           {
             "id": 1502,
             "kind": "match",
             "span": [
-              848,
-              848
+              838,
+              838
             ],
             "children": [
               {
                 "id": 1503,
                 "kind": "call",
                 "span": [
-                  848,
-                  855
+                  838,
+                  845
                 ],
                 "children": [
                   {
                     "id": 1504,
                     "kind": "var",
                     "span": [
-                      848,
-                      848
+                      838,
+                      838
                     ]
                   },
                   {
                     "id": 1505,
                     "kind": "var",
                     "span": [
-                      848,
-                      855
+                      838,
+                      845
                     ]
                   }
                 ]
@@ -357,24 +357,24 @@
                 "id": 1508,
                 "kind": "bin",
                 "span": [
-                  859,
-                  864
+                  849,
+                  854
                 ],
                 "children": [
                   {
                     "id": 1509,
                     "kind": "var",
                     "span": [
-                      859,
-                      860
+                      849,
+                      850
                     ]
                   },
                   {
                     "id": 1510,
                     "kind": "int",
                     "span": [
-                      863,
-                      864
+                      853,
+                      854
                     ]
                   }
                 ]
@@ -383,24 +383,24 @@
                 "id": 1511,
                 "kind": "bin",
                 "span": [
-                  868,
-                  873
+                  858,
+                  863
                 ],
                 "children": [
                   {
                     "id": 1512,
                     "kind": "var",
                     "span": [
-                      868,
-                      869
+                      858,
+                      859
                     ]
                   },
                   {
                     "id": 1513,
                     "kind": "int",
                     "span": [
-                      872,
-                      873
+                      862,
+                      863
                     ]
                   }
                 ]
@@ -409,48 +409,48 @@
                 "id": 1515,
                 "kind": "match",
                 "span": [
-                  848,
-                  848
+                  838,
+                  838
                 ],
                 "children": [
                   {
                     "id": 1516,
                     "kind": "var",
                     "span": [
-                      848,
-                      855
+                      838,
+                      845
                     ]
                   },
                   {
                     "id": 1518,
                     "kind": "match",
                     "span": [
-                      878,
-                      878
+                      868,
+                      868
                     ],
                     "children": [
                       {
                         "id": 1519,
                         "kind": "call",
                         "span": [
-                          878,
-                          885
+                          868,
+                          875
                         ],
                         "children": [
                           {
                             "id": 1520,
                             "kind": "var",
                             "span": [
-                              878,
-                              878
+                              868,
+                              868
                             ]
                           },
                           {
                             "id": 1521,
                             "kind": "var",
                             "span": [
-                              878,
-                              885
+                              868,
+                              875
                             ]
                           }
                         ]
@@ -459,32 +459,32 @@
                         "id": 1524,
                         "kind": "var",
                         "span": [
-                          889,
-                          890
+                          879,
+                          880
                         ]
                       },
                       {
                         "id": 1526,
                         "kind": "match",
                         "span": [
-                          878,
-                          878
+                          868,
+                          868
                         ],
                         "children": [
                           {
                             "id": 1527,
                             "kind": "var",
                             "span": [
-                              878,
-                              885
+                              868,
+                              875
                             ]
                           },
                           {
                             "id": 1529,
                             "kind": "int",
                             "span": [
-                              900,
-                              901
+                              890,
+                              891
                             ]
                           }
                         ]
@@ -510,64 +510,64 @@
         "id": 1530,
         "kind": "match",
         "span": [
-          939,
-          1081
+          929,
+          1066
         ],
         "children": [
           {
             "id": 1531,
             "kind": "var",
             "span": [
-              945,
-              946
+              935,
+              936
             ]
           },
           {
             "id": 1533,
             "kind": "int",
             "span": [
-              973,
-              974
+              962,
+              963
             ]
           },
           {
             "id": 1536,
             "kind": "int",
             "span": [
-              973,
-              974
+              962,
+              963
             ]
           },
           {
             "id": 1542,
             "kind": "int",
             "span": [
-              1039,
-              1040
+              1028,
+              1029
             ]
           },
           {
             "id": 1548,
             "kind": "int",
             "span": [
-              1039,
-              1040
+              1028,
+              1029
             ]
           },
           {
             "id": 1552,
             "kind": "field",
             "span": [
-              1078,
-              1081
+              1063,
+              1066
             ],
             "children": [
               {
                 "id": 1553,
                 "kind": "var",
                 "span": [
-                  1078,
-                  1079
+                  1063,
+                  1064
                 ]
               }
             ]
@@ -576,16 +576,16 @@
             "id": 1558,
             "kind": "field",
             "span": [
-              1078,
-              1081
+              1063,
+              1066
             ],
             "children": [
               {
                 "id": 1559,
                 "kind": "var",
                 "span": [
-                  1078,
-                  1079
+                  1063,
+                  1064
                 ]
               }
             ]
@@ -609,32 +609,32 @@
         "id": 1560,
         "kind": "match",
         "span": [
-          1128,
-          1193
+          1113,
+          1178
         ],
         "children": [
           {
             "id": 1561,
             "kind": "tuple",
             "span": [
-              1134,
-              1140
+              1119,
+              1125
             ],
             "children": [
               {
                 "id": 1562,
                 "kind": "var",
                 "span": [
-                  1135,
-                  1136
+                  1120,
+                  1121
                 ]
               },
               {
                 "id": 1563,
                 "kind": "var",
                 "span": [
-                  1138,
-                  1139
+                  1123,
+                  1124
                 ]
               }
             ]
@@ -643,56 +643,56 @@
             "id": 1567,
             "kind": "int",
             "span": [
-              1176,
-              1177
+              1161,
+              1162
             ]
           },
           {
             "id": 1571,
             "kind": "int",
             "span": [
-              1176,
-              1177
+              1161,
+              1162
             ]
           },
           {
             "id": 1575,
             "kind": "int",
             "span": [
-              1176,
-              1177
+              1161,
+              1162
             ]
           },
           {
             "id": 1579,
             "kind": "int",
             "span": [
-              1176,
-              1177
+              1161,
+              1162
             ]
           },
           {
             "id": 1583,
             "kind": "int",
             "span": [
-              1176,
-              1177
+              1161,
+              1162
             ]
           },
           {
             "id": 1587,
             "kind": "int",
             "span": [
-              1176,
-              1177
+              1161,
+              1162
             ]
           },
           {
             "id": 1591,
             "kind": "int",
             "span": [
-              1192,
-              1193
+              1177,
+              1178
             ]
           }
         ]
@@ -718,88 +718,88 @@
         "id": 1592,
         "kind": "match",
         "span": [
-          1209,
-          1228
+          1194,
+          1213
         ],
         "children": [
           {
             "id": 1593,
             "kind": "var",
             "span": [
-              1209,
-              1228
+              1194,
+              1213
             ]
           },
           {
             "id": 1596,
             "kind": "match",
             "span": [
-              1230,
-              1236
+              1215,
+              1221
             ],
             "children": [
               {
                 "id": 1597,
                 "kind": "var",
                 "span": [
-                  1230,
-                  1236
+                  1215,
+                  1221
                 ]
               },
               {
                 "id": 1601,
                 "kind": "let",
                 "span": [
-                  1266,
-                  1333
+                  1251,
+                  1318
                 ],
                 "children": [
                   {
                     "id": 1602,
                     "kind": "lam",
                     "span": [
-                      1274,
-                      1308
+                      1259,
+                      1293
                     ],
                     "children": [
                       {
                         "id": 1603,
                         "kind": "match",
                         "span": [
-                          1276,
-                          1298
+                          1261,
+                          1283
                         ],
                         "children": [
                           {
                             "id": 1604,
                             "kind": "var",
                             "span": [
-                              1276,
-                              1298
+                              1261,
+                              1283
                             ]
                           },
                           {
                             "id": 1608,
                             "kind": "bin",
                             "span": [
-                              1303,
-                              1308
+                              1288,
+                              1293
                             ],
                             "children": [
                               {
                                 "id": 1609,
                                 "kind": "var",
                                 "span": [
-                                  1303,
-                                  1304
+                                  1288,
+                                  1289
                                 ]
                               },
                               {
                                 "id": 1610,
                                 "kind": "var",
                                 "span": [
-                                  1307,
-                                  1308
+                                  1292,
+                                  1293
                                 ]
                               }
                             ]
@@ -812,48 +812,48 @@
                     "id": 1611,
                     "kind": "bin",
                     "span": [
-                      1311,
-                      1333
+                      1296,
+                      1318
                     ],
                     "children": [
                       {
                         "id": 1612,
                         "kind": "bin",
                         "span": [
-                          1311,
-                          1326
+                          1296,
+                          1311
                         ],
                         "children": [
                           {
                             "id": 1613,
                             "kind": "bin",
                             "span": [
-                              1311,
-                              1320
+                              1296,
+                              1305
                             ],
                             "children": [
                               {
                                 "id": 1614,
                                 "kind": "bin",
                                 "span": [
-                                  1311,
-                                  1316
+                                  1296,
+                                  1301
                                 ],
                                 "children": [
                                   {
                                     "id": 1615,
                                     "kind": "var",
                                     "span": [
-                                      1311,
-                                      1312
+                                      1296,
+                                      1297
                                     ]
                                   },
                                   {
                                     "id": 1616,
                                     "kind": "var",
                                     "span": [
-                                      1315,
-                                      1316
+                                      1300,
+                                      1301
                                     ]
                                   }
                                 ]
@@ -862,8 +862,8 @@
                                 "id": 1617,
                                 "kind": "var",
                                 "span": [
-                                  1319,
-                                  1320
+                                  1304,
+                                  1305
                                 ]
                               }
                             ]
@@ -872,16 +872,16 @@
                             "id": 1618,
                             "kind": "field",
                             "span": [
-                              1323,
-                              1326
+                              1308,
+                              1311
                             ],
                             "children": [
                               {
                                 "id": 1619,
                                 "kind": "var",
                                 "span": [
-                                  1323,
-                                  1324
+                                  1308,
+                                  1309
                                 ]
                               }
                             ]
@@ -892,24 +892,24 @@
                         "id": 1620,
                         "kind": "call",
                         "span": [
-                          1329,
-                          1333
+                          1314,
+                          1318
                         ],
                         "children": [
                           {
                             "id": 1621,
                             "kind": "var",
                             "span": [
-                              1329,
-                              1330
+                              1314,
+                              1315
                             ]
                           },
                           {
                             "id": 1622,
                             "kind": "var",
                             "span": [
-                              1331,
-                              1332
+                              1316,
+                              1317
                             ]
                           }
                         ]

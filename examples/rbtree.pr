@@ -45,8 +45,8 @@ fn insert(x, t) : RB = blacken(ins(x, t))
 
 fn from_list(xs, t) : RB =
   match xs of
-    Nil => t
-    Cons(x, rest) => from_list(rest, insert(x, t))
+    [] => t
+    x :: rest => from_list(rest, insert(x, t))
 
 fn size(t) : Int =
   match t of

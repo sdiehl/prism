@@ -270,8 +270,8 @@ type Sched(a, e : Row) = Sched {
 
 fn lookup_result(fid : Int, rs : List((Int, a))) : Option(a) =
   match rs of
-    Nil => None
-    Cons((i, v), r) =>
+    [] => None
+    (i, v) :: r =>
       if i == fid then
         Some(v)
       else
@@ -279,8 +279,8 @@ fn lookup_result(fid : Int, rs : List((Int, a))) : Option(a) =
 
 fn is_member(fid : Int, xs : List(Int)) : Bool =
   match xs of
-    Nil => false
-    Cons(x, r) =>
+    [] => false
+    x :: r =>
       if x == fid then
         true
       else
@@ -289,8 +289,8 @@ fn is_member(fid : Int, xs : List(Int)) : Bool =
 -- The direct children of `p` recorded in the fork tree.
 fn children_of(p : Int, kids : List((Int, Int))) : List(Int) =
   match kids of
-    Nil => Nil
-    Cons((par, ch), rest) =>
+    [] => Nil
+    (par, ch) :: rest =>
       if par == p then
         Cons(ch, children_of(p, rest))
       else
@@ -303,8 +303,8 @@ fn descendants(
   acc : List(Int)
 ) : List(Int) =
   match roots of
-    Nil => acc
-    Cons(r, rest) =>
+    [] => acc
+    r :: rest =>
       if is_member(r, acc) then
         descendants(rest, kids, acc)
       else
@@ -313,8 +313,8 @@ fn descendants(
 -- Add each of `xs` to the set `acc` (idempotent), skipping duplicates.
 fn fold_add(xs : List(Int), acc : List(Int)) : List(Int) =
   match xs of
-    Nil => acc
-    Cons(x, rest) =>
+    [] => acc
+    x :: rest =>
       if is_member(x, acc) then
         fold_add(rest, acc)
       else
@@ -323,8 +323,8 @@ fn fold_add(xs : List(Int), acc : List(Int)) : List(Int) =
 -- Remove every member of `excluded` from `xs`.
 fn without(xs : List(Int), excluded : List(Int)) : List(Int) =
   match xs of
-    Nil => Nil
-    Cons(x, rest) =>
+    [] => Nil
+    x :: rest =>
       if is_member(x, excluded) then
         without(rest, excluded)
       else
@@ -340,8 +340,8 @@ fn wake(
   enq : (List(Ready(a, e)), Ready(a, e)) -> List(Ready(a, e))
 ) : (List((Int, Int, (Wake(a)) -> Cmd(a, e) ! {| e})), List(Ready(a, e))) =
   match ws of
-    Nil => (Nil, acc)
-    Cons((f, who, k), rest) =>
+    [] => (Nil, acc)
+    (f, who, k) :: rest =>
       if f == fid then
         wake(
             fid,
@@ -361,12 +361,12 @@ fn chan_take(
   chans : List((Int, List(a)))
 ) : Option((a, List((Int, List(a))))) =
   match chans of
-    Nil => None
-    Cons((c, buf), rest) =>
+    [] => None
+    (c, buf) :: rest =>
       if c == cid then
         match buf of
-          Nil => None
-          Cons(h, t) => Some((h, Cons((c, t), rest)))
+          [] => None
+          h :: t => Some((h, Cons((c, t), rest)))
       else
         match chan_take(cid, rest) of
           None => None
@@ -379,8 +379,8 @@ fn chan_put(
   chans : List((Int, List(a)))
 ) : List((Int, List(a))) =
   match chans of
-    Nil => Nil
-    Cons((c, buf), rest) =>
+    [] => Nil
+    (c, buf) :: rest =>
       if c == cid then
         Cons((c, append(buf, [v])), rest)
       else
@@ -392,8 +392,8 @@ fn take_recv(
   rws : List((Int, Int, (Wake(a)) -> Cmd(a, e) ! {| e}))
 ) : Option((Int, (Wake(a)) -> Cmd(a, e) ! {| e}, List((Int, Int, (Wake(a)) -> Cmd(a, e) ! {| e})))) =
   match rws of
-    Nil => None
-    Cons((c, who, k), rest) =>
+    [] => None
+    (c, who, k) :: rest =>
       if c == cid then
         Some((who, k, rest))
       else
@@ -403,14 +403,14 @@ fn take_recv(
 
 fn list_len(xs : List(a)) : Int =
   match xs of
-    Nil => 0
-    Cons(_, r) => 1 + list_len(r)
+    [] => 0
+    _ :: r => 1 + list_len(r)
 
 -- The capacity of channel `cid`, or `None` if it is unbounded.
 fn cap_of(cid : Int, caps : List((Int, Int))) : Option(Int) =
   match caps of
-    Nil => None
-    Cons((c, n), rest) =>
+    [] => None
+    (c, n) :: rest =>
       if c == cid then
         Some(n)
       else
@@ -419,8 +419,8 @@ fn cap_of(cid : Int, caps : List((Int, Int))) : Option(Int) =
 -- The number of values currently buffered on channel `cid`.
 fn chan_len(cid : Int, chans : List((Int, List(a)))) : Int =
   match chans of
-    Nil => 0
-    Cons((c, buf), rest) =>
+    [] => 0
+    (c, buf) :: rest =>
       if c == cid then
         list_len(buf)
       else
@@ -433,8 +433,8 @@ fn take_sender(
   ss : List((Int, Int, a, (Signal) -> Cmd(a, e) ! {| e}))
 ) : Option((Int, a, (Signal) -> Cmd(a, e) ! {| e}, List((Int, Int, a, (Signal) -> Cmd(a, e) ! {| e})))) =
   match ss of
-    Nil => None
-    Cons((c, who, v, k), rest) =>
+    [] => None
+    (c, who, v, k) :: rest =>
       if c == cid then
         Some((who, v, k, rest))
       else
@@ -453,8 +453,8 @@ fn evict_waiters(
   enq : (List(Ready(a, e)), Ready(a, e)) -> List(Ready(a, e))
 ) : (List((Int, Int, (Wake(a)) -> Cmd(a, e) ! {| e})), List(Ready(a, e))) =
   match ws of
-    Nil => (Nil, q)
-    Cons((f, who, k), rest) =>
+    [] => (Nil, q)
+    (f, who, k) :: rest =>
       if is_member(who, victims) then
         evict_waiters(
             victims,
@@ -475,8 +475,8 @@ fn evict_senders(
   enq : (List(Ready(a, e)), Ready(a, e)) -> List(Ready(a, e))
 ) : (List((Int, Int, a, (Signal) -> Cmd(a, e) ! {| e})), List(Ready(a, e))) =
   match ss of
-    Nil => (Nil, q)
-    Cons((c, who, v, k), rest) =>
+    [] => (Nil, q)
+    (c, who, v, k) :: rest =>
       if is_member(who, victims) then
         evict_senders(
             victims,
@@ -521,29 +521,29 @@ fn others(me : Int, s : Sched(a, e)) : List(Int) =
 
 fn queue_ids(q : List(Ready(a, e)), acc : List(Int)) : List(Int) =
   match q of
-    Nil => acc
-    Cons(Ready(id, _, _), rest) => queue_ids(rest, Cons(id, acc))
+    [] => acc
+    Ready(id, _, _) :: rest => queue_ids(rest, Cons(id, acc))
 
 fn waiter_ids(
   ws : List((Int, Int, (Wake(a)) -> Cmd(a, e) ! {| e})),
   acc : List(Int)
 ) : List(Int) =
   match ws of
-    Nil => acc
-    Cons((_, who, _), rest) => waiter_ids(rest, Cons(who, acc))
+    [] => acc
+    (_, who, _) :: rest => waiter_ids(rest, Cons(who, acc))
 
 fn sender_ids(
   ss : List((Int, Int, a, (Signal) -> Cmd(a, e) ! {| e})),
   acc : List(Int)
 ) : List(Int) =
   match ss of
-    Nil => acc
-    Cons((_, who, _, _), rest) => sender_ids(rest, Cons(who, acc))
+    [] => acc
+    (_, who, _, _) :: rest => sender_ids(rest, Cons(who, acc))
 
 fn remove(x : Int, xs : List(Int)) : List(Int) =
   match xs of
-    Nil => Nil
-    Cons(y, rest) =>
+    [] => Nil
+    y :: rest =>
       if x == y then
         remove(x, rest)
       else
@@ -745,13 +745,13 @@ fn drive(me : Int, cmd : Cmd(a, e), s : Sched(a, e)) : a =
 -- even a requested main stop rotates until all other ready cleanup has run.
 fn run_next(s : Sched(a, e)) : a =
   match s.queue of
-    Nil => fail()
-    Cons(Ready(id, go, stop), rest) =>
+    [] => fail()
+    Ready(id, go, stop) :: rest =>
       if s.failed && id == 0 then
         match rest of
-          Cons(_, _) =>
+          _ :: _ =>
             run_next(Sched { ..s, queue = append(rest, [Ready(id, go, stop)]) })
-          Nil =>
+          [] =>
             if is_member(id, s.cancelled) then
               drive(
                   id,
@@ -837,14 +837,14 @@ pub fn run_lifo(main : () -> a ! {Async(a) | e}) : a =
 -- Fork every task, returning the fiber handles in order.
 fn fork_all(tasks : List(() -> a ! {Async(a) | e})) : List(Fiber) =
   match tasks of
-    Nil => Nil
-    Cons(t, rest) => Cons(fork(t), fork_all(rest))
+    [] => Nil
+    t :: rest => Cons(fork(t), fork_all(rest))
 
 -- Await every fiber, returning the results in order.
 fn await_all(fs : List(Fiber)) : List(a) =
   match fs of
-    Nil => Nil
-    Cons(f, rest) => Cons(await(f), await_all(rest))
+    [] => Nil
+    f :: rest => Cons(await(f), await_all(rest))
 
 -- | Structured join: run `tasks` concurrently and await their results in order.
 -- On a successful run every task completes before `scope` returns. `scope` is

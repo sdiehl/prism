@@ -1,0 +1,68 @@
+-- Every outcome the process boundary can answer, one line each, provoked through
+-- `/bin/sh` so the children are the same on every host.
+--
+-- A child killed for its output or its deadline answers with both streams empty,
+-- which is what lets the `yes` and `sleep` lines be pinned at all: what either
+-- had written by the time it was killed depends on scheduling.
+
+import Path (relative, root)
+import Proc (..)
+
+fn sh(script : String) : Command = command("/bin/sh", ["-c", script])
+
+fn show_text(b : Buf) : String =
+  match text(b) of
+    Some(s) => s
+    None => "<bytes>"
+
+fn report(label : String, c : Command) : Unit ! {Proc, IO} =
+  let o = collect(c)
+  println(
+      "{label} {show(o.status)} out={show(show_text(o.out))} err={show(show_text(o.err))}",
+    )
+
+-- Both streams carry more than a pipe buffer while the input is still being
+-- written, so a host that drained them in turn, or wrote all of the input
+-- before reading, would deadlock here instead of answering.
+fn both_pipes() : Unit ! {Proc, IO} =
+  let size = 4 * default_capture
+  let cap = Capture(2 * size)
+  let fed = { sh("tee /dev/stderr") | input = Feed(buf_new(size, 120)) }
+  let o = collect({ fed | stdout_policy = cap, stderr_policy = cap })
+  println(
+      "both-pipes {show(o.status)} out={buf_len(o.out)} err={buf_len(o.err)}",
+    )
+
+fn outcomes() : Unit ! {Proc, IO} =
+  report("exit", sh("echo hi; exit 3"))
+  report("stderr", sh("echo oops >&2"))
+  report("feed", { sh("cat") | input = Feed(buf_of_string("fed")) })
+  report("feed-ignored", { sh("exit 0") | input = Feed(buf_new(1048576, 120)) })
+  both_pipes()
+  report("signal", sh("kill -9 $$"))
+  report("discard", { sh("echo gone") | stdout_policy = Discard })
+  report("out-limit", { sh("yes") | stdout_policy = Capture(16) })
+  report("err-limit", { sh("yes >&2") | stderr_policy = Capture(16) })
+  report("deadline", { sh("sleep 5") | deadline_ms = Some(50) })
+  report("clean-env", { sh("echo \"[$HOME]\"") | base_env = Clean })
+  report(
+      "set-env",
+      { sh("echo $PRISM_PROC_X") | env_edits = [SetVar("PRISM_PROC_X", "set")] },
+    )
+  report(
+      "unset-env",
+      { sh("echo \"[$PRISM_PROC_X]\"") | env_edits = [SetVar("PRISM_PROC_X", "set"), UnsetVar("PRISM_PROC_X")] },
+    )
+  report("cwd", { sh("pwd") | directory = Some(root()) })
+  report("not-found", command("prism-no-such-program", []))
+  report("relative-name", command("./prism-no-such-program", []))
+  report("empty-program", command("", []))
+  report("bad-limit", { sh("true") | stdout_policy = Capture(-1) })
+  report("over-max", { sh("true") | stdout_policy = Capture(max_capture + 1) })
+  report("bad-deadline", { sh("true") | deadline_ms = Some(-1) })
+  report(
+      "missing-dir",
+      { sh("true") | directory = Some(relative(["prism-no-such-dir"])) },
+    )
+
+fn main() : Unit ! {IO} = run_proc(outcomes)

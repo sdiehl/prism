@@ -215,6 +215,7 @@ mod tests {
             return_var: Some(s("rv")),
             // uses the bound `rv` and a free `ro`.
             return_body: Some(Box::new(Comp::Prim(CoreOp::Add, var("rv"), var("ro")))),
+            finally_body: None,
             ops: CheckedHandler::new(vec![op]).unwrap(),
         };
         assert_eq!(comp(&c), set(&["bd", "ro", "of"]));

@@ -57,8 +57,8 @@ fn q_is_name(k : TokenKind) : Bool =
 -- The comment spans of a trivia stream, in order.
 fn q_comments(ts : List(Trivia)) : List(Span) =
   match ts of
-    Nil => Nil
-    Cons(t, rest) =>
+    [] => Nil
+    t :: rest =>
       match t of
         TComment(s) => Cons(s, q_comments(rest))
         _ => q_comments(rest)
@@ -67,8 +67,8 @@ fn q_comments(ts : List(Trivia)) : List(Span) =
 -- a fresh one at the end.
 fn q_bump(acc : List(KindCount), k : String) : List(KindCount) =
   match acc of
-    Nil => Cons(KindCount { kind = k, count = 1 }, Nil)
-    Cons(p, rest) =>
+    [] => Cons(KindCount { kind = k, count = 1 }, Nil)
+    p :: rest =>
       if p.kind == k then
         Cons(KindCount { kind = k, count = p.count + 1 }, rest)
       else
@@ -77,8 +77,8 @@ fn q_bump(acc : List(KindCount), k : String) : List(KindCount) =
 -- The kind histogram of a raw token stream, in first-seen order.
 fn q_kinds_go(ts : List(Token), acc : List(KindCount)) : List(KindCount) =
   match ts of
-    Nil => acc
-    Cons(t, rest) => q_kinds_go(rest, q_bump(acc, kind_name(t.kind)))
+    [] => acc
+    t :: rest => q_kinds_go(rest, q_bump(acc, kind_name(t.kind)))
 
 fn q_kinds(ts : List(Token)) : List(KindCount) = q_kinds_go(ts, Nil)
 
@@ -86,8 +86,8 @@ fn q_kinds(ts : List(Token)) : List(KindCount) = q_kinds_go(ts, Nil)
 -- restoring source order.
 fn q_flush(cur : List(Token), out : List(List(Token))) : List(List(Token)) =
   match cur of
-    Nil => out
-    Cons(_, _) => Cons(reverse(cur), out)
+    [] => out
+    _ :: _ => Cons(reverse(cur), out)
 
 -- Split the layout-resolved parse stream into top-level items. Only depth-one
 -- tokens (a declaration's head, before its body block opens) are retained, and
@@ -100,8 +100,8 @@ fn q_items_go(
   out : List(List(Token))
 ) : List(List(Token)) =
   match ts of
-    Nil => reverse(q_flush(cur, out))
-    Cons(t, rest) =>
+    [] => reverse(q_flush(cur, out))
+    t :: rest =>
       match t.kind of
         TVOpen => q_items_go(rest, depth + 1, cur, out)
         TVClose => q_items_go(rest, depth - 1, cur, out)
@@ -122,8 +122,8 @@ fn q_items(parse : List(Token)) : List(List(Token)) =
 -- Drop a leading `pub` visibility modifier from an item's head tokens.
 fn q_drop_pub(item : List(Token)) : List(Token) =
   match item of
-    Nil => Nil
-    Cons(h, rest) =>
+    [] => Nil
+    h :: rest =>
       if kind_name(h.kind) == "pub" then
         rest
       else
@@ -132,8 +132,8 @@ fn q_drop_pub(item : List(Token)) : List(Token) =
 -- The first identifier-like name in a token list, or the empty string.
 fn q_first_name(ts : List(Token)) : String =
   match ts of
-    Nil => ""
-    Cons(t, rest) =>
+    [] => ""
+    t :: rest =>
       if q_is_name(t.kind) then
         q_val(t)
       else
@@ -142,8 +142,8 @@ fn q_first_name(ts : List(Token)) : String =
 -- The declaration head of one item, if it has a leading keyword.
 fn q_head(item : List(Token)) : Option(DeclHead) =
   match q_drop_pub(item) of
-    Nil => None
-    Cons(h, rest) =>
+    [] => None
+    h :: rest =>
       Some(
           DeclHead {
             keyword = kind_name(h.kind),
@@ -154,8 +154,8 @@ fn q_head(item : List(Token)) : Option(DeclHead) =
 
 fn q_heads(items : List(List(Token))) : List(DeclHead) =
   match items of
-    Nil => Nil
-    Cons(it, rest) =>
+    [] => Nil
+    it :: rest =>
       match q_head(it) of
         Some(d) => Cons(d, q_heads(rest))
         None => q_heads(rest)
@@ -166,8 +166,8 @@ fn q_decls(parse : List(Token)) : List(DeclHead) = q_heads(q_items(parse))
 -- The import module names among a declaration list, in order.
 fn q_imports(decls : List(DeclHead)) : List(String) =
   match decls of
-    Nil => Nil
-    Cons(d, rest) =>
+    [] => Nil
+    d :: rest =>
       if d.keyword == "import" then
         Cons(d.name, q_imports(rest))
       else
@@ -201,9 +201,9 @@ pub fn query_lines(r : QueryReport) : List(String) =
 -- Join report lines with newlines, no trailing newline.
 fn q_join(ls : List(String)) : String =
   match ls of
-    Nil => ""
-    Cons(l, Nil) => l
-    Cons(l, rest) => "{l}\n{q_join(rest)}"
+    [] => ""
+    [l] => l
+    l :: rest => "{l}\n{q_join(rest)}"
 
 -- | The inventory rendered as one newline-joined block, ready to print in a
 -- single call. Same content and ordering as `query_lines`.

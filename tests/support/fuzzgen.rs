@@ -111,6 +111,7 @@ impl CmpOp {
 
 /// A generated expression of a statically known type. Rendering is fully
 /// parenthesized, so the emitted text never depends on operator precedence.
+#[derive(Clone)]
 enum Expr {
     Int(i64),
     Bool(bool),
@@ -289,6 +290,7 @@ impl Arm {
 /// A generated effectful program: a body performing a fixed two-operation effect,
 /// wrapped in a full handler or a `partial` handler that forwards its residual to
 /// an outer full handler.
+#[derive(Clone)]
 struct EffProgram {
     calls: Vec<bool>, // true = op `a`, false = op `b`
     partial: bool,
@@ -300,6 +302,7 @@ struct EffProgram {
 }
 
 /// The generator's output: either a pure typed-core program or an effectful one.
+#[derive(Clone)]
 pub struct Program(Repr);
 
 /// Semantic family exercised by a generated program. Differential gates use
@@ -313,6 +316,7 @@ pub enum ProgramFamily {
     Arena,
 }
 
+#[derive(Clone)]
 enum Repr {
     Pure(Expr),
     Eff(EffProgram),
@@ -379,6 +383,7 @@ impl Program {
 /// region (exercising exit promotion) or only a scalar does; `shared` adds a
 /// pair helper called both under the arena and outside it, pinning the
 /// shared-function exclusion.
+#[derive(Clone)]
 struct ArenaProgram {
     elems: Vec<i64>, // at least one; each is one arena-built `Cons` cell
     escape: bool,

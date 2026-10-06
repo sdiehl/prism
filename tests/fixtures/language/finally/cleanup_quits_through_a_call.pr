@@ -1,0 +1,16 @@
+effect Ask
+  ask() : Int
+
+effect Quit
+  never quit(Unit) : Unit
+
+fn bail() : Unit ! {Quit} = quit(())
+
+fn go() =
+  handle ask() with
+    ask() resume k => k(1)
+    finally => bail()
+
+fn main() =
+  handle go() with
+    never quit(u) => ()

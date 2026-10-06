@@ -11,13 +11,72 @@ use prism_native::rt::{cc, cc_flags, cc_overridden};
 
 use super::Config;
 
+/// The compilation context an artifact identity is taken under.
+///
+/// Its spelling is folded into the fingerprint, so each one is a stable
+/// cache-key string, and contexts that share inputs never share an entry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ArtifactBackend {
+    /// A native build through LLVM.
+    Llvm,
+    /// A native build through MLIR.
+    Mlir,
+    /// Per-SCC LLVM bitcode.
+    LlvmScc,
+    /// The front end alone.
+    Frontend,
+    /// A separately checked module.
+    ModuleCheck,
+    /// `prism watch`.
+    Watch,
+    /// Generated documentation.
+    Docs,
+    /// `prism check-world`.
+    Check,
+    /// A recorded interpreter run.
+    Interpreter,
+}
+
+impl ArtifactBackend {
+    /// The native backend a build selects.
+    #[must_use]
+    pub const fn native(mlir: bool) -> Self {
+        if mlir {
+            Self::Mlir
+        } else {
+            Self::Llvm
+        }
+    }
+
+    /// The fingerprint spelling.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Llvm => "llvm",
+            Self::Mlir => "mlir",
+            Self::LlvmScc => "llvm-scc",
+            Self::Frontend => "frontend",
+            Self::ModuleCheck => "module-check",
+            Self::Watch => "watch",
+            Self::Docs => "docs",
+            Self::Check => "check",
+            Self::Interpreter => "interpreter",
+        }
+    }
+
+    // Whether the artifact links through the host C toolchain.
+    const fn links_natively(self) -> bool {
+        matches!(self, Self::Llvm | Self::Mlir)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct ArtifactIdentity {
     pub compiler_version: &'static str,
     pub hash_scheme: &'static str,
     pub target: &'static str,
-    pub backend: String,
+    pub backend: ArtifactBackend,
     pub source_root: Option<String>,
     pub stdlib_root: Option<String>,
     pub package_roots: Vec<String>,
@@ -148,9 +207,8 @@ enum ArtifactRows {
 
 impl ArtifactIdentity {
     #[must_use]
-    pub fn from_config(cfg: &Config, backend: impl Into<String>) -> Self {
-        let backend = backend.into();
-        let native_toolchain = native_toolchain_identity(&backend);
+    pub fn from_config(cfg: &Config, backend: ArtifactBackend) -> Self {
+        let native_toolchain = native_toolchain_identity(backend);
         let (opt, passes, disabled) = optimization_labels(&cfg.optimization_plan());
         Self {
             compiler_version: env!("CARGO_PKG_VERSION"),
@@ -226,7 +284,7 @@ impl ArtifactIdentity {
             ArtifactRow::new(ArtifactField::Compiler, self.compiler_version),
             ArtifactRow::new(ArtifactField::HashScheme, self.hash_scheme),
             ArtifactRow::new(ArtifactField::Target, self.target),
-            ArtifactRow::new(ArtifactField::Backend, self.backend.clone()),
+            ArtifactRow::new(ArtifactField::Backend, self.backend.as_str()),
         ];
         if let Some(root) = &self.source_root {
             rows.push(ArtifactRow::new(
@@ -306,8 +364,8 @@ impl ArtifactIdentity {
     }
 }
 
-fn native_toolchain_identity(backend: &str) -> Option<NativeToolchainIdentity> {
-    matches!(backend, "llvm" | "mlir").then(native_toolchain_for_backend)
+fn native_toolchain_identity(backend: ArtifactBackend) -> Option<NativeToolchainIdentity> {
+    backend.links_natively().then(native_toolchain_for_backend)
 }
 
 #[cfg(feature = "native")]
@@ -412,7 +470,7 @@ mod tests {
 
     #[test]
     fn native_backend_identity_names_linker_inputs() {
-        let identity = ArtifactIdentity::from_config(&Config::default(), "llvm");
+        let identity = ArtifactIdentity::from_config(&Config::default(), ArtifactBackend::Llvm);
         let rows = row_fields(&identity);
         assert!(rows.contains(&ArtifactField::NativeCc));
         assert!(rows.contains(&ArtifactField::NativeCcVersion));
@@ -421,7 +479,8 @@ mod tests {
 
     #[test]
     fn non_native_identity_omits_linker_inputs() {
-        let identity = ArtifactIdentity::from_config(&Config::default(), "interpreter");
+        let identity =
+            ArtifactIdentity::from_config(&Config::default(), ArtifactBackend::Interpreter);
         let rows = row_fields(&identity);
         assert!(!rows.contains(&ArtifactField::NativeCc));
         assert!(!rows.contains(&ArtifactField::NativeCcVersion));
@@ -430,7 +489,7 @@ mod tests {
 
     #[test]
     fn portable_rows_omit_host_toolchain_strings() {
-        let identity = ArtifactIdentity::from_config(&Config::default(), "llvm");
+        let identity = ArtifactIdentity::from_config(&Config::default(), ArtifactBackend::Llvm);
         let rows: Vec<ArtifactField> = identity
             .portable_rows()
             .into_iter()
@@ -443,10 +502,10 @@ mod tests {
 
     #[test]
     fn direct_object_mode_has_a_distinct_artifact_identity() {
-        let normal = ArtifactIdentity::from_config(&Config::default(), "llvm");
+        let normal = ArtifactIdentity::from_config(&Config::default(), ArtifactBackend::Llvm);
         let mut cfg = Config::default();
         cfg.update_flags(|flags| flags.direct_object = true);
-        let direct = ArtifactIdentity::from_config(&cfg, "llvm");
+        let direct = ArtifactIdentity::from_config(&cfg, ArtifactBackend::Llvm);
 
         assert_ne!(normal.fingerprint(), direct.fingerprint());
         assert!(direct
@@ -457,7 +516,7 @@ mod tests {
 
     #[test]
     fn effect_exclusions_are_canonical_behavior_identity() {
-        let normal = ArtifactIdentity::from_config(&Config::default(), "llvm");
+        let normal = ArtifactIdentity::from_config(&Config::default(), ArtifactBackend::Llvm);
         assert!(!row_fields(&normal).contains(&ArtifactField::EffectExclude));
 
         let mut cfg = Config::default();
@@ -465,7 +524,7 @@ mod tests {
             flags.effect_exclude =
                 crate::flags::RungExclude::parse("local-partial state-fusion local-partial");
         });
-        let excluded = ArtifactIdentity::from_config(&cfg, "llvm");
+        let excluded = ArtifactIdentity::from_config(&cfg, ArtifactBackend::Llvm);
         let row = excluded
             .rows()
             .into_iter()
@@ -480,11 +539,11 @@ mod tests {
     fn reification_changes_artifact_identity_without_changing_default_rows() {
         let mut cfg = Config::default();
         cfg.update_flags(|flags| flags.reify = false);
-        let normal = ArtifactIdentity::from_config(&cfg, "llvm");
+        let normal = ArtifactIdentity::from_config(&cfg, ArtifactBackend::Llvm);
         assert!(!row_fields(&normal).contains(&ArtifactField::Reify));
 
         cfg.update_flags(|flags| flags.reify = true);
-        let reified = ArtifactIdentity::from_config(&cfg, "llvm");
+        let reified = ArtifactIdentity::from_config(&cfg, ArtifactBackend::Llvm);
         assert_ne!(normal.fingerprint(), reified.fingerprint());
         assert!(reified
             .portable_rows()
@@ -498,6 +557,9 @@ mod tests {
         assert_eq!(normal.rows(), without_reify);
 
         cfg.update_flags(|flags| flags.reify = false);
-        assert_eq!(normal, ArtifactIdentity::from_config(&cfg, "llvm"));
+        assert_eq!(
+            normal,
+            ArtifactIdentity::from_config(&cfg, ArtifactBackend::Llvm)
+        );
     }
 }

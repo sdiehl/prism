@@ -13,6 +13,7 @@
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
 use std::mem;
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 
 use marginalia::Span;
@@ -20,7 +21,7 @@ use marginalia::Span;
 use crate::error::{suggest, Error, TypeError};
 use crate::stdlib::STDLIB;
 use crate::syntax::ast::{
-    Constraint, Decl, EffLabel, Expr, HandlerArm, ImportDecl, MigrationDir, MigrationRoute,
+    Constraint, Decl, EffLabel, Expr, HandlerArm, ImportDecl, MigrationDir, MigrationRoute, Param,
     Pattern, PreludeCapture, Program, Qualifier, Row, Sugar, SugarArm, Surface, Ty, S,
 };
 use crate::syntax::desugar::routes_to_current;
@@ -33,8 +34,8 @@ use identity::{CanonicalName, ModuleName};
 
 pub use lints::{lint_bindings, lint_prelude_captures, prelude_capture};
 pub use load::{
-    load, serving_root, Module, Root, SourceBundleArtifactKind, SourceBundleIdentity,
-    SourceBundleKind, SourceBundleOrigin,
+    load, module_source, serving_root, with_origin_source, Module, Root, SourceBundleArtifactKind,
+    SourceBundleIdentity, SourceBundleKind, SourceBundleOrigin,
 };
 
 /// The search path for a single-file or test program: the given source root,
@@ -270,6 +271,7 @@ pub fn resolve(program: Program) -> Result<Program, TypeError> {
         return Err(TypeError::ScopeFailure {
             span: Span::empty(0),
             msg: format!("cannot export `{name}`: no such definition"),
+            origin: None,
         });
     }
     Ok(program)
@@ -343,12 +345,15 @@ pub(crate) fn resolve_loaded_module_units(
     root: Program,
     modules: Vec<Module>,
 ) -> Result<(Program, Vec<Module>), Error> {
-    let (root, modules, _) = resolve_loaded_module_units_seeing(root, modules)?;
+    let (root, modules, _) = resolve_loaded_module_units_seeing(root, modules, None)?;
     Ok((root, modules))
 }
 
 /// [`resolve_loaded_module_units`], additionally returning every reference the
 /// renamer resolved.
+///
+/// With the root's source text at hand, local bindings and their uses are
+/// recorded as well (each module's own text is loaded with it).
 ///
 /// # Errors
 /// Fails on a cross-module name clash, undefined export, or an unresolved or
@@ -356,9 +361,10 @@ pub(crate) fn resolve_loaded_module_units(
 pub(crate) fn resolve_loaded_module_units_seeing(
     root: Program,
     mut modules: Vec<Module>,
-) -> Result<(Program, Vec<Module>, Vec<Occurrence>), Error> {
+    root_src: Option<&str>,
+) -> Result<(Program, Vec<Module>, Seen), Error> {
     if is_single_region(&root) {
-        return Ok((resolve(root)?, modules, Vec::new()));
+        return Ok((resolve(root)?, modules, Seen::default()));
     }
     let (mods, by_path) = module_infos(&modules)?;
 
@@ -385,7 +391,9 @@ pub(crate) fn resolve_loaded_module_units_seeing(
     };
     let mut root = root;
     root.prelude_captures = prelude_captures(&root, &root_prelude_scope);
-    let mut seen = Rw::new("", &root_scopes, &mods).program(&mut root)?;
+    let mut rw = Rw::new("", &root_scopes, &mods);
+    rw.src = root_src;
+    let mut seen = rw.program(&mut root)?;
 
     // An imported module carries no prelude of its own, so its prelude halves
     // stay empty and every one of its declarations resolves in the user region.
@@ -402,7 +410,11 @@ pub(crate) fn resolve_loaded_module_units_seeing(
             prelude_end: 0,
             moved_prelude: &moved_prelude,
         };
-        seen.extend(Rw::new(&path, &scopes, &mods).program(&mut m.prog)?);
+        let mut rw = Rw::new(&path, &scopes, &mods);
+        rw.src = root_src.map(|_| m.source.as_str());
+        let more = rw.program(&mut m.prog)?;
+        seen.refs.extend(more.refs);
+        seen.defs.extend(more.defs);
     }
 
     Ok((root, modules, seen))
@@ -419,13 +431,14 @@ pub(crate) fn resolve_loaded_module_units_seeing(
 /// undefined export, or an unresolved/ambiguous qualified reference.
 pub fn resolve_modules_seeing(
     root: Program,
+    src: &str,
     roots: &[Root],
-) -> Result<(Program, Vec<Occurrence>), Error> {
+) -> Result<(Program, Seen), Error> {
     if root.imports.is_empty() {
-        return Ok((resolve(root)?, Vec::new()));
+        return Ok((resolve(root)?, Seen::default()));
     }
     let modules = load(&root, roots)?;
-    let (root, modules, seen) = resolve_loaded_module_units_seeing(root, modules)?;
+    let (root, modules, seen) = resolve_loaded_module_units_seeing(root, modules, Some(src))?;
     Ok((merge(root, modules), seen))
 }
 
@@ -827,6 +840,39 @@ pub struct Occurrence {
     /// this against the definitions it knows and treats an unmatched target as a
     /// reference leaving its own view.
     pub target: String,
+    /// Where the local binding this names was written, for a local: the byte
+    /// offset of its binder in the same coordinates as `span`. The binding site
+    /// itself is recorded too, with `span.start` equal to this, so every use and
+    /// the binder group under one key. `None` for a top-level reference.
+    pub binder: Option<usize>,
+}
+
+/// A top-level definition, or a member of one, and where its name is written.
+///
+/// `name` is canonical, spelled exactly as the [`Occurrence::target`] of every
+/// reference to it, so a target looks its definition up by string equality.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Definition {
+    /// The dotted module whose source `span` indexes into (empty for the root).
+    pub module: String,
+    pub name: String,
+    /// The name's byte range where the definition writes it.
+    pub span: Span,
+}
+
+/// Everything the renamer saw: each resolved reference, and, when the source
+/// text is at hand, each definition's name.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Seen {
+    pub refs: Vec<Occurrence>,
+    pub defs: Vec<Definition>,
+}
+
+/// A name in local scope, and where its binder was written when the source text
+/// is at hand to find it.
+struct Local {
+    name: String,
+    at: Option<usize>,
 }
 
 /// A scope-aware rewriter for one module. References to the module's own
@@ -844,9 +890,15 @@ struct Rw<'a> {
     // the prelude's bodies resolve in the prelude's scope and the user's in the
     // user's. Always false for a module with no prelude prefix.
     in_prelude: bool,
-    locals: Vec<String>,
+    locals: Vec<Local>,
+    /// The module's own source text, present only when the caller wants local
+    /// occurrences. Most binders carry no span of their own, so a binder's offset
+    /// is found by searching the text its construct spans.
+    src: Option<&'a str>,
     /// Every reference resolved so far, in walk order. See [`Occurrence`].
     occurrences: Vec<Occurrence>,
+    /// Every definition walked so far, recorded only when `src` is present.
+    defs: Vec<Definition>,
     /// The declaration being rewritten (canonical name and span), recorded as the
     /// owner of each reference found inside it. Every site that walks an
     /// expression sets this first, so a reference always names the declaration a
@@ -868,7 +920,9 @@ impl<'a> Rw<'a> {
             mods,
             in_prelude: false,
             locals: Vec::new(),
+            src: None,
             occurrences: Vec::new(),
+            defs: Vec::new(),
             owner: (String::new(), Span::empty(0)),
             family_routes: BTreeMap::new(),
             err: None,
@@ -881,7 +935,7 @@ impl<'a> Rw<'a> {
     }
 
     // Rewrite `p` in place, returning every reference resolved along the way.
-    fn program(mut self, p: &mut Program) -> Result<Vec<Occurrence>, Error> {
+    fn program(mut self, p: &mut Program) -> Result<Seen, Error> {
         // Record the promised family routes before rewriting any reference, so a
         // `T.Vk.upgrade` use resolves against the declared migration table.
         self.family_routes = p
@@ -899,12 +953,17 @@ impl<'a> Rw<'a> {
         for d in &mut p.types {
             self.at(d.span);
             let opaque = p.opaques.contains(&d.name);
-            d.name = self.canon(&d.name);
+            let mut at = d.span.start..d.span.end;
+            let written = mem::take(&mut d.name);
+            d.name = self.canon(&written);
+            self.define(&written, &d.name, &mut at);
             if opaque {
                 opaques.insert(d.name.clone());
             }
             for c in &mut d.ctors {
-                c.name = self.canon(&c.name);
+                let written = mem::take(&mut c.name);
+                c.name = self.canon(&written);
+                self.define_at(&c.name, c.span);
                 for a in &mut c.args {
                     self.ty(a);
                 }
@@ -918,9 +977,14 @@ impl<'a> Rw<'a> {
         p.opaques = opaques;
         for e in &mut p.effects {
             self.at(e.span);
-            e.name = self.canon(&e.name);
+            let mut at = e.span.start..e.span.end;
+            let written = mem::take(&mut e.name);
+            e.name = self.canon(&written);
+            self.define(&written, &e.name, &mut at);
             for op in &mut e.ops {
-                op.name = self.canon(&op.name);
+                let written = mem::take(&mut op.name);
+                op.name = self.canon(&written);
+                self.define_at(&op.name, op.span);
                 for t in &mut op.params {
                     self.ty(t);
                 }
@@ -929,34 +993,46 @@ impl<'a> Rw<'a> {
         }
         for er in &mut p.errors {
             self.at(er.span);
-            er.name = self.canon(&er.name);
+            let written = mem::take(&mut er.name);
+            er.name = self.canon(&written);
+            self.define(&written, &er.name, &mut (er.span.start..er.span.end));
             for t in &mut er.params {
                 self.ty(t);
             }
         }
         for a in &mut p.aliases {
             self.at(a.span);
-            a.name = self.canon(&a.name);
+            let written = mem::take(&mut a.name);
+            a.name = self.canon(&written);
+            self.define(&written, &a.name, &mut (a.span.start..a.span.end));
             for l in &mut a.labels {
                 self.efflabel(l);
             }
         }
         for s in &mut p.synonyms {
             self.at(s.span);
-            s.name = self.canon(&s.name);
+            let written = mem::take(&mut s.name);
+            s.name = self.canon(&written);
+            self.define(&written, &s.name, &mut (s.span.start..s.span.end));
             self.ty(&mut s.ty);
         }
         for c in &mut p.classes {
             self.at(c.span);
-            c.name = self.canon(&c.name);
+            let mut at = c.span.start..c.span.end;
+            let written = mem::take(&mut c.name);
+            c.name = self.canon(&written);
+            self.define(&written, &c.name, &mut at);
             // A superclass names another class, so it resolves like any other
             // reference. Leaving it bare breaks a class whose superclass moved
             // to its module-private symbol because the user shadowed the name.
             for s in &mut c.supers {
                 *s = self.value(s, c.span);
             }
-            for (_, t) in &mut c.methods {
-                self.ty(t);
+            // A method keeps its bare name: dispatch, not the renamer, decides
+            // which instance a call reaches.
+            for m in &mut c.methods {
+                self.define_at(&m.name, m.span);
+                self.ty(&mut m.ty);
             }
         }
         for inst in &mut p.instances {
@@ -985,12 +1061,16 @@ impl<'a> Rw<'a> {
         }
         for pat in &mut p.patterns {
             self.at(pat.span);
-            pat.name = self.canon(&pat.name);
+            let written = mem::take(&mut pat.name);
+            pat.name = self.canon(&written);
+            self.define(&written, &pat.name, &mut (pat.span.start..pat.span.end));
             // The extractor owns the references in its view and make clauses.
             self.owner = (pat.name.clone(), pat.span);
             pat.for_ty = self.value(&pat.for_ty, pat.span);
             let base = self.locals.len();
-            self.locals.extend(pat.params.iter().cloned());
+            for x in &pat.params {
+                self.bind(x, None);
+            }
             self.expr(&mut pat.view);
             if let Some(make) = &mut pat.make {
                 self.expr(make);
@@ -1007,6 +1087,8 @@ impl<'a> Rw<'a> {
         // local, so push that before resolving the body.
         for sd in &mut p.stable {
             self.at(sd.span);
+            let name = sd.name.clone();
+            self.define(&name, &name, &mut (sd.span.start..sd.span.end));
             // The family owns the references in its field defaults and converter
             // bodies. They desugar into their own declarations later; before that
             // the block is the declaration a reader would navigate to.
@@ -1021,7 +1103,7 @@ impl<'a> Rw<'a> {
             }
             for cv in &mut sd.converters {
                 let base = self.locals.len();
-                self.locals.push(names::stable_param(&cv.from));
+                self.bind(&names::stable_param(&cv.from), None);
                 self.expr(&mut cv.base);
                 for (_, e) in &mut cv.overrides {
                     self.expr(e);
@@ -1041,14 +1123,44 @@ impl<'a> Rw<'a> {
             }
         }
         match self.err.take() {
-            Some(e) => Err(Error::Type(e)),
-            None => Ok(self.occurrences),
+            Some(e) => Err(Error::Type(e.in_module(self.module))),
+            None => Ok(Seen {
+                refs: self.occurrences,
+                defs: self.defs,
+            }),
+        }
+    }
+
+    // Record the definition of `written`, now `canonical`, at the first place it
+    // is spelled in `at`, and move `at` past it so a member written after the
+    // definition's own name is found after it.
+    fn define(&mut self, written: &str, canonical: &str, at: &mut Range<usize>) {
+        if let Some(start) = self.find(written, at) {
+            self.defs.push(Definition {
+                module: self.module.to_string(),
+                name: canonical.to_string(),
+                span: Span::new(start, start + written.len()),
+            });
+        }
+    }
+
+    // A definition whose name span the parser recorded. A synthesized member
+    // carries an empty span and defines nothing a reader can navigate to.
+    fn define_at(&mut self, canonical: &str, span: Span) {
+        if span.end > span.start {
+            self.defs.push(Definition {
+                module: self.module.to_string(),
+                name: canonical.to_string(),
+                span,
+            });
         }
     }
 
     fn decl(&mut self, d: &mut Decl, canon_name: bool) {
         if canon_name {
-            d.name = self.canon(&d.name);
+            let written = mem::take(&mut d.name);
+            d.name = self.canon(&written);
+            self.define(&written, &d.name, &mut (d.span.start..d.span.end));
         }
         // A top-level declaration owns the references in its body. An instance
         // method (`canon_name` false) does not: its own name is the bare method
@@ -1070,9 +1182,8 @@ impl<'a> Rw<'a> {
                 self.expr(def);
             }
         }
-        for p in &mut d.params {
-            self.locals.push(p.name.clone());
-        }
+        let mut at = self.params_window(d.span.start, d.body.span.start);
+        self.params(&d.params, &mut at);
         if let Some(t) = &mut d.ret {
             self.ty(t);
         }
@@ -1146,18 +1257,18 @@ impl<'a> Rw<'a> {
             Expr::Let(x, v, body) => {
                 self.expr(v);
                 let base = self.locals.len();
-                self.locals.push(x.clone());
+                self.bind_in(x, &mut (span.start..v.span.end));
                 self.expr(body);
                 self.locals.truncate(base);
             }
             Expr::Lam(params, body) => {
                 let base = self.locals.len();
-                for p in params {
+                for p in params.iter_mut() {
                     if let Some(t) = &mut p.ty {
                         self.ty(t);
                     }
-                    self.locals.push(p.name.clone());
                 }
+                self.params(params, &mut (span.start..body.span.start));
                 self.expr(body);
                 self.locals.truncate(base);
             }
@@ -1216,8 +1327,9 @@ impl<'a> Rw<'a> {
             }
             Expr::Handle(body, arms, _) => {
                 self.expr(body);
+                let mut at = body.span.end..span.end;
                 for arm in arms {
-                    self.handler_arm(arm, span);
+                    self.handler_arm(arm, span, &mut at);
                 }
             }
             Expr::Mask(label, body) => {
@@ -1260,14 +1372,18 @@ impl<'a> Rw<'a> {
 
     fn sugar(&mut self, s: &mut Sugar<Surface>, span: Span) {
         match s {
-            Sugar::Default(a, b) | Sugar::Transact(a, b) | Sugar::Compose(_, a, b) => {
+            Sugar::Default(a, b)
+            | Sugar::Transact(a, b)
+            | Sugar::Compose(_, a, b)
+            | Sugar::Cons(a, b)
+            | Sugar::PathJoin(a, b) => {
                 self.expr(a);
                 self.expr(b);
             }
             Sugar::VarDecl(x, v, body) => {
                 self.expr(v);
                 let base = self.locals.len();
-                self.locals.push(x.clone());
+                self.bind_in(x, &mut (span.start..v.span.end));
                 self.expr(body);
                 self.locals.truncate(base);
             }
@@ -1282,14 +1398,23 @@ impl<'a> Rw<'a> {
             }
             Sugar::NamedHandle(name, body, arms) => {
                 let base = self.locals.len();
-                self.locals.push(name.clone());
+                // `with h <- handler <arms>` writes the arms between the name
+                // and the scope they handle.
+                let mut at = span.start..body.span.start;
+                self.bind_in(name, &mut at);
                 self.expr(body);
                 self.locals.truncate(base);
                 for arm in arms {
-                    self.handler_arm(arm, span);
+                    self.handler_arm(arm, span, &mut at);
                 }
             }
-            Sugar::Assign(_, v) => self.expr(v),
+            Sugar::Assign(x, v) => {
+                // The assigned name is a use of the `var` it writes.
+                if self.local(x).is_some() {
+                    self.value_ref(x, span);
+                }
+                self.expr(v);
+            }
             Sugar::IndexAssign(recv, key, v) => {
                 self.expr(recv);
                 self.expr(key);
@@ -1306,7 +1431,13 @@ impl<'a> Rw<'a> {
                 for arm in arms {
                     arm.name = self.value(&arm.name, arm.span);
                     let base = self.locals.len();
-                    self.locals.extend(arm.binders.iter().cloned());
+                    let mut at = arm.span.start..arm.body.span.start;
+                    // The exception's own name comes first; a binder spelled
+                    // like it must not be found there.
+                    self.find(arm.name.rsplit('.').next().unwrap_or(&arm.name), &mut at);
+                    for x in &arm.binders {
+                        self.bind_in(x, &mut at);
+                    }
                     self.expr(&mut arm.body);
                     self.locals.truncate(base);
                 }
@@ -1314,16 +1445,16 @@ impl<'a> Rw<'a> {
             Sugar::For(x, iter, quals, body) => {
                 self.expr(iter);
                 let base = self.locals.len();
-                self.locals.push(x.clone());
-                self.quals(quals);
+                self.bind_in(x, &mut (span.start..iter.span.start));
+                self.quals(quals, iter.span.end..body.span.start);
                 self.expr(body);
                 self.locals.truncate(base);
             }
             Sugar::Comp(head, x, source, quals) => {
                 self.expr(source);
                 let base = self.locals.len();
-                self.locals.push(x.clone());
-                self.quals(quals);
+                self.bind_in(x, &mut (head.span.end..source.span.start));
+                self.quals(quals, source.span.end..span.end);
                 self.expr(head);
                 self.locals.truncate(base);
             }
@@ -1348,13 +1479,19 @@ impl<'a> Rw<'a> {
         }
     }
 
-    fn quals(&mut self, quals: &mut [Qualifier]) {
+    // `at` is the text the qualifiers are written in; each binder precedes its
+    // own source expression.
+    fn quals(&mut self, quals: &mut [Qualifier], mut at: Range<usize>) {
         for q in quals {
             match q {
-                Qualifier::Guard(g) => self.expr(g),
+                Qualifier::Guard(g) => {
+                    self.expr(g);
+                    at.start = at.start.max(g.span.end);
+                }
                 Qualifier::Bind(y, e) => {
                     self.expr(e);
-                    self.locals.push(y.clone());
+                    self.bind_in(y, &mut (at.start..e.span.start));
+                    at.start = at.start.max(e.span.end);
                 }
             }
         }
@@ -1364,33 +1501,162 @@ impl<'a> Rw<'a> {
     /// other reference: through the module's own definitions first, then its
     /// imports. Leaving it bare would let a handler for a local operation bind
     /// against an identically named one from an unimported module.
-    fn handler_arm(&mut self, arm: &mut HandlerArm, span: Span) {
+    //
+    // An arm has no span of its own, so `at` is the text from the end of the
+    // previous arm (or the handled body) to the end of the handler, and its
+    // binders are found between there and the arm's body.
+    fn handler_arm(&mut self, arm: &mut HandlerArm, span: Span, at: &mut Range<usize>) {
         let base = self.locals.len();
         match arm {
             HandlerArm::Return(x, body) | HandlerArm::Sugar(SugarArm::Val(x, body)) => {
-                self.locals.push(x.clone());
+                self.bind_in(x, &mut (at.start..body.span.start));
                 self.expr(body);
+                at.start = at.start.max(body.span.end);
             }
             HandlerArm::Op(name, params, k, body) => {
+                let mut here = at.start..body.span.start;
+                self.find(name.rsplit('.').next().unwrap_or(name), &mut here);
                 *name = self.handler_op(name, span);
-                self.locals.extend(params.iter().cloned());
-                self.locals.push(k.clone());
+                for x in params.iter() {
+                    self.bind_in(x, &mut here);
+                }
+                self.bind_in(k, &mut here);
                 self.expr(body);
+                at.start = at.start.max(body.span.end);
             }
             HandlerArm::Sugar(
                 SugarArm::Once(name, params, body) | SugarArm::Never(name, params, body),
             ) => {
+                let mut here = at.start..body.span.start;
+                self.find(name.rsplit('.').next().unwrap_or(name), &mut here);
                 *name = self.handler_op(name, span);
-                self.locals.extend(params.iter().cloned());
+                for x in params.iter() {
+                    self.bind_in(x, &mut here);
+                }
                 self.expr(body);
+                at.start = at.start.max(body.span.end);
+            }
+            HandlerArm::Finally(body) => {
+                self.expr(body);
+                at.start = at.start.max(body.span.end);
             }
         }
         self.locals.truncate(base);
     }
 
+    // Bring a parameter list into scope. A plain parameter's binder is searched
+    // for in `at`; a pattern parameter binds the variables its pattern writes,
+    // each of which carries its own span, and its synthetic name, which no source
+    // spells, binds nowhere.
+    fn params(&mut self, params: &[Param], at: &mut Range<usize>) {
+        for p in params {
+            match &p.pat {
+                Some(pat) => {
+                    self.bind(&p.name, None);
+                    self.pat_binders(pat);
+                    at.start = at.start.max(pat.span.end);
+                }
+                None => self.bind_in(&p.name, at),
+            }
+        }
+    }
+
+    fn pat_binders(&mut self, p: &S<Pattern>) {
+        if let Pattern::Var(n) = &p.node {
+            let at = self.pat_binder(n, p.span);
+            self.bind(n, at);
+        }
+        p.node.each_child(&mut |c| self.pat_binders(c));
+    }
+
+    // A declaration's parameters are written after its name, inside the first
+    // parenthesis, so the search starts there and the name cannot be mistaken for
+    // a parameter spelled like it.
+    fn params_window(&self, start: usize, end: usize) -> Range<usize> {
+        let open = self
+            .src
+            .and_then(|src| src.get(start..end))
+            .and_then(|text| text.find('('))
+            .map_or(end, |i| start + i + 1);
+        open..end
+    }
+
+    // Bring `name` into scope, bound at `at` when its binder was found.
+    fn bind(&mut self, name: &str, at: Option<usize>) {
+        if let Some(b) = at {
+            self.see_local(Span::new(b, b + name.len()), name, b);
+        }
+        self.locals.push(Local {
+            name: name.to_string(),
+            at,
+        });
+    }
+
+    // Bring `name` into scope, its binder searched for in `at`.
+    fn bind_in(&mut self, name: &str, at: &mut Range<usize>) {
+        let b = self.find(name, at);
+        self.bind(name, b);
+    }
+
+    // The offset of the first whole-word `name` in `at`, and move `at` past it so
+    // the next binder of the same construct is searched for after this one.
+    fn find(&self, name: &str, at: &mut Range<usize>) -> Option<usize> {
+        let src = self.src?;
+        if name.is_empty() || name == "_" {
+            return None;
+        }
+        let text = src.get(at.clone())?;
+        let word = |c: char| c.is_ascii_alphanumeric() || c == '_';
+        let found = text.match_indices(name).find_map(|(i, _)| {
+            let before = text[..i].chars().next_back();
+            let after = text[i + name.len()..].chars().next();
+            (!before.is_some_and(word) && !after.is_some_and(word)).then_some(at.start + i)
+        })?;
+        at.start = found + name.len();
+        Some(found)
+    }
+
+    // Where a pattern variable was written. Its span is usually the name, but the
+    // binder of a statement `let x = e?` carries the scrutinee's span, so the
+    // name is then the last one written before it on the same line.
+    fn pat_binder(&self, name: &str, span: Span) -> Option<usize> {
+        if let Some(s) = self.at_name(name, span) {
+            return Some(s.start);
+        }
+        let src = self.src?;
+        let line = src.get(..span.start)?.rfind('\n').map_or(0, |i| i + 1);
+        let mut at = line..span.start;
+        let mut last = None;
+        while let Some(b) = self.find(name, &mut at) {
+            last = Some(b);
+        }
+        last
+    }
+
+    // The name at the head of `span`, when the text there spells it. A use
+    // usually spans exactly its name; one a desugaring synthesized carries the
+    // span of the statement it came from (`total += i` reads `total` over the
+    // whole statement), whose head is still the name. A synthetic name no
+    // source spells is found nowhere.
+    fn at_name(&self, name: &str, span: Span) -> Option<Span> {
+        let text = self.src?.get(span.start..span.end)?;
+        let rest = text.strip_prefix(name)?;
+        let word = |c: char| c.is_ascii_alphanumeric() || c == '_';
+        (!name.is_empty() && !rest.starts_with(word))
+            .then(|| Span::new(span.start, span.start + name.len()))
+    }
+
+    // The innermost local named `name`.
+    fn local(&self, name: &str) -> Option<&Local> {
+        self.locals.iter().rev().find(|l| l.name == name)
+    }
+
     fn pat(&mut self, p: &mut S<Pattern>) {
         match &mut p.node {
-            Pattern::Var(n) => self.locals.push(n.clone()),
+            Pattern::Var(n) => {
+                let at = self.pat_binder(n, p.span);
+                self.bind(n, at);
+            }
             Pattern::Ctor(name, args) => {
                 *name = self.value(name, p.span);
                 for a in args {
@@ -1527,7 +1793,7 @@ impl<'a> Rw<'a> {
     /// prelude) left bare for later phases.
     fn value(&mut self, name: &str, span: Span) -> String {
         // A local shadows everything and refers to a binder, not a definition.
-        if self.locals.iter().any(|l| l == name) {
+        if self.local(name).is_some() {
             return name.to_string();
         }
         self.global(name, span)
@@ -1544,7 +1810,7 @@ impl<'a> Rw<'a> {
     /// reading such a clause can have. Two imports offering it is ambiguous and
     /// reported, never silently resolved to one of them.
     fn handler_op(&mut self, name: &str, span: Span) -> String {
-        if self.locals.iter().any(|l| l == name) {
+        if self.local(name).is_some() {
             return name.to_string();
         }
         if let Some(canon) = self.lookup(name, span) {
@@ -1601,7 +1867,10 @@ impl<'a> Rw<'a> {
     /// effect-row label, whose span the parser sets to the label's name and not to
     /// the argument list after it.
     fn value_ref(&mut self, name: &str, span: Span) -> String {
-        if self.locals.iter().any(|l| l == name) {
+        if let Some(l) = self.local(name) {
+            if let (Some(b), Some(at)) = (l.at, self.at_name(name, span)) {
+                self.see_local(at, name, b);
+            }
             return name.to_string();
         }
         let resolved = self.global(name, span);
@@ -1645,6 +1914,23 @@ impl<'a> Rw<'a> {
             owner_span: *owner_span,
             span,
             target: target.to_string(),
+            binder: None,
+        });
+    }
+
+    // Record a binder, or a use of one, bound at `binder`.
+    fn see_local(&mut self, span: Span, name: &str, binder: usize) {
+        if span.is_empty() || self.src.is_none() {
+            return;
+        }
+        let (owner, owner_span) = &self.owner;
+        self.occurrences.push(Occurrence {
+            module: self.module.to_string(),
+            owner: owner.clone(),
+            owner_span: *owner_span,
+            span,
+            target: name.to_string(),
+            binder: Some(binder),
         });
     }
 
@@ -1690,7 +1976,11 @@ impl<'a> Rw<'a> {
 
     fn record(&mut self, span: Span, msg: String) {
         if self.err.is_none() {
-            self.err = Some(TypeError::ScopeFailure { span, msg });
+            self.err = Some(TypeError::ScopeFailure {
+                span,
+                msg,
+                origin: None,
+            });
         }
     }
 }

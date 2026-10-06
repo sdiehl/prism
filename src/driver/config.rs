@@ -10,11 +10,13 @@ pub use crate::flags::{BackendOpt, Scheduler};
 
 use std::{ffi::OsString, io};
 
-use crate::core::opt::{CorePass, OptLevel, OptimizationPlan, OptimizerOptions, PassSet};
+use crate::core::opt::{
+    CorePass, OptLevel, OptimizationPlan, OptimizerOptions, PassSet, PipelineError,
+};
 use crate::flags::{DynFlags, EffectLowerOptions};
 use crate::store::disk::{resolve_store_path, Store};
 
-use super::{ArtifactIdentity, CompilerSession, TimingSink};
+use super::{ArtifactBackend, ArtifactIdentity, CompilerSession, TimingSink};
 
 /// The explicit compilation mode.
 ///
@@ -251,7 +253,7 @@ impl Config {
     ///
     /// # Errors
     /// Removing the sole pass from an explicit pipeline is rejected.
-    pub fn disable_pass(&mut self, pass: CorePass) -> Result<(), String> {
+    pub fn disable_pass(&mut self, pass: CorePass) -> Result<(), PipelineError> {
         let mut plan = self.optimization_plan();
         plan.disable(pass)?;
         self.set_optimization_plan(plan);
@@ -318,7 +320,7 @@ impl Config {
 
     /// Structured identity for behavior-affecting compiler artifacts.
     #[must_use]
-    pub fn artifact_identity_for(&self, backend: &str) -> ArtifactIdentity {
+    pub fn artifact_identity_for(&self, backend: ArtifactBackend) -> ArtifactIdentity {
         ArtifactIdentity::from_config(self, backend)
     }
 }

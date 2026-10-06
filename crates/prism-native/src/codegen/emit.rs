@@ -1414,6 +1414,21 @@ struct ClosureShape {
 }
 
 impl ClosureSummary {
+    fn of(lams: &[LamInfo], used_apply: &BTreeSet<usize>) -> Self {
+        Self {
+            lams: lams
+                .iter()
+                .map(|lambda| ClosureShape {
+                    tag: lambda.tag,
+                    owner: lambda.owner.to_string(),
+                    params: lambda.params.len(),
+                    free_vars: lambda.free_vars.len(),
+                })
+                .collect(),
+            used_apply: used_apply.clone(),
+        }
+    }
+
     #[must_use]
     pub fn validate(&self) -> bool {
         let mut tags = BTreeSet::new();
@@ -1504,19 +1519,7 @@ pub(crate) fn closure_summary_with_isa<I: Isa>(
         let _ = cg.lam_fn(index)?;
         index += 1;
     }
-    let summary = ClosureSummary {
-        lams: cg
-            .lams
-            .into_iter()
-            .map(|lambda| ClosureShape {
-                tag: lambda.tag,
-                owner: lambda.owner.to_string(),
-                params: lambda.params.len(),
-                free_vars: lambda.free_vars.len(),
-            })
-            .collect(),
-        used_apply: cg.used_apply,
-    };
+    let summary = ClosureSummary::of(&cg.lams, &cg.used_apply);
     if summary.validate() {
         Ok(summary)
     } else {
@@ -1567,7 +1570,7 @@ pub(crate) fn plan_closures_from_summaries_with_isa<I: Isa>(
     loop {
         let before = (cg.lams.len(), cg.used_apply.len());
         for arity in cg.apply_arities() {
-            cg.plan_dispatch(arity);
+            cg.plan_dispatch(arity)?;
         }
         if (cg.lams.len(), cg.used_apply.len()) == before {
             break;
@@ -1635,10 +1638,10 @@ pub(crate) fn emit_closure_dispatch_with_isa<I: Isa>(
     ctors: &BTreeMap<String, CtorInfo>,
     plan: &ClosurePlan,
     arity: usize,
-) -> String {
+) -> Result<String, String> {
     let mut cg = cg_from_closure_plan(isa, core, ctors, plan);
-    let dispatch = cg.apply_dispatch(arity);
-    finish_module(isa, &cg, "", &dispatch)
+    let dispatch = cg.apply_dispatch(arity)?;
+    Ok(finish_module(isa, &cg, "", &dispatch))
 }
 
 pub(crate) fn emit_selected_plan_with_isa<I: Isa>(
@@ -1693,6 +1696,16 @@ fn emit_with_isa_selection<I: Isa>(
         return Ok(finish_module(isa, &cg, &fn_bodies, ""));
     }
 
+    // The sharded backend validates each SCC's closure summary before folding
+    // them; hold the whole-program plan to the same check, so a tag minted out
+    // of its owner's dense ordinal range fails here with the sharded backend
+    // off too.
+    if !ClosureSummary::of(&cg.lams, &cg.used_apply).validate() {
+        return Err(SelectedEmissionError::Codegen(
+            "ICE: invalid whole-program closure summary".to_string(),
+        ));
+    }
+
     // Stable closure tags, rather than traversal position, define the global
     // dispatcher order. This makes folding independently discovered SCC
     // summaries byte-identical to whole-program planning.
@@ -1706,7 +1719,7 @@ fn emit_with_isa_selection<I: Isa>(
     loop {
         let before = (cg.lams.len(), cg.used_apply.len());
         for n in cg.apply_arities() {
-            cg.plan_dispatch(n);
+            cg.plan_dispatch(n)?;
         }
         if (cg.lams.len(), cg.used_apply.len()) == before {
             break;
@@ -1726,7 +1739,7 @@ fn emit_with_isa_selection<I: Isa>(
     // resolve as a symbol).
     let mut dispatch = String::new();
     for n in cg.apply_arities() {
-        dispatch.push_str(&cg.apply_dispatch(n));
+        dispatch.push_str(&cg.apply_dispatch(n)?);
         dispatch.push('\n');
     }
 
@@ -1792,6 +1805,24 @@ mod tests {
     use prism_core::core::builtins::{Builtin, BuiltinKind, BUILTINS};
 
     use super::super::abi;
+
+    #[test]
+    fn a_closure_summary_needs_unique_dense_tags() {
+        use super::{closure_tag, ClosureShape, ClosureSummary, Sym};
+        let shape = |ordinal| ClosureShape {
+            tag: closure_tag(Sym::new("main"), ordinal),
+            owner: "main".to_string(),
+            params: 1,
+            free_vars: 0,
+        };
+        let summary = |ordinals: &[usize]| ClosureSummary {
+            lams: ordinals.iter().map(|o| shape(*o)).collect(),
+            used_apply: [1].into(),
+        };
+        assert!(summary(&[0, 1]).validate());
+        assert!(!summary(&[0, 2]).validate());
+        assert!(!summary(&[0, 0]).validate());
+    }
 
     fn c_def(name: &str) -> i64 {
         let prefix = format!("#define {name} ");

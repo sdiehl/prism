@@ -253,7 +253,6 @@ impl Isa for MlirText {
         const FIXED: &[&str] = &[
             "llvm.func @printf(!llvm.ptr, ...) -> i32",
             "llvm.func @prism_alloc(i64) -> !llvm.ptr",
-            "llvm.func @prism_div_zero()",
             "llvm.func @prism_apply_error()",
             "llvm.func @prism_match_error()",
             "llvm.func @prism_fatal(i64)",
@@ -381,35 +380,34 @@ fn i64s(n: usize) -> String {
 /// structural self-check rejects the emitted module.
 pub fn emit(core: &LoweredCore, ctors: &BTreeMap<String, CtorInfo>) -> Result<String, String> {
     let text = emit_with_isa(&MlirText, core, ctors)?;
-    verify(&text)?;
+    self_check(&text)?;
     Ok(text)
 }
 
-/// Structural self-check, the text-backend analogue of the LLVM backend's
-/// `m.verify()`. The real verifier runs downstream in `mlir-translate` (only
-/// when the toolchain is installed); this catches gross emission bugs (an
-/// unbalanced function body, a call to an undeclared symbol) with no external
-/// dependency, so a malformed module is a structured error rather than a
-/// confusing translator failure or a silent miscompile.
+/// Structural self-check, not a verifier: the real one runs downstream in
+/// `mlir-translate` (only when the toolchain is installed). This catches gross
+/// emission bugs (an unbalanced function body, a call to an undeclared symbol, a
+/// `musttail` call that cannot be a tail call) with no external dependency, so a
+/// malformed module is a structured error rather than a confusing translator
+/// failure or a silent miscompile.
 ///
-/// On rejection the offending module is kept at a stable temp path for
+/// On rejection the offending module is kept in the temp directory for
 /// inspection, mirroring `emit_bitcode` on the LLVM side.
 ///
 /// # Errors
 /// Fails on an empty module, an unbalanced brace/paren nesting, a malformed
-/// line, or a reference to a symbol that is never defined.
-fn verify(text: &str) -> Result<(), String> {
-    check(text).map_err(|e| {
-        let kept = std::env::temp_dir().join("prism_failed.mlir");
-        let _ = std::fs::write(&kept, text);
-        format!(
-            "MLIR self-check rejected module, kept at {}:\n{e}",
-            kept.display()
-        )
-    })
+/// line, a reference to a symbol that is never defined, or a `musttail` call
+/// out of tail position or with a prototype unlike its caller's.
+fn self_check(text: &str) -> Result<(), String> {
+    scan_delimiters_and_symbols(text)
+        .and_then(|()| scan_musttail(text))
+        .map_err(|e| {
+            let kept = super::keep_failed("mlir", text.as_bytes());
+            format!("MLIR self-check rejected module, {kept}:\n{e}")
+        })
 }
 
-fn check(text: &str) -> Result<(), String> {
+fn scan_delimiters_and_symbols(text: &str) -> Result<(), String> {
     if text.trim().is_empty() {
         return Err("empty module".into());
     }
@@ -483,6 +481,54 @@ fn check(text: &str) -> Result<(), String> {
         return Err(format!(
             "unbalanced module: brace depth {braces}, paren depth {parens}"
         ));
+    }
+    Ok(())
+}
+
+// `musttail` is a guarantee LLVM refuses to compile rather than break, so the
+// emitter must only claim it where it holds: the call's result is returned by
+// the very next instruction, and the callee's prototype is the caller's. Every
+// emitted function takes and returns `i64` words, so equal prototypes are equal
+// arities.
+fn scan_musttail(text: &str) -> Result<(), String> {
+    let mut enclosing = None;
+    let mut lines = text.lines().map(str::trim).enumerate().peekable();
+    while let Some((n, t)) = lines.next() {
+        if let Some(rest) = t.strip_prefix("llvm.func @") {
+            enclosing = t.ends_with('{').then(|| {
+                let params = rest.split_once('(').map_or("", |(_, p)| p);
+                params
+                    .split(')')
+                    .next()
+                    .unwrap_or("")
+                    .matches(": i64")
+                    .count()
+            });
+            continue;
+        }
+        let Some((dst, call)) = t.split_once(" = llvm.call musttail @") else {
+            continue;
+        };
+        let passed = call
+            .rsplit_once(" : (")
+            .and_then(|(_, sig)| sig.split_once(')'))
+            .map_or(0, |(params, _)| {
+                params.split(',').filter(|p| !p.trim().is_empty()).count()
+            });
+        if enclosing != Some(passed) {
+            return Err(format!(
+                "musttail call passing {passed} arguments from a function of {} parameters at line {}: {t}",
+                enclosing.map_or_else(|| "unknown".into(), |a| a.to_string()),
+                n + 1
+            ));
+        }
+        let returned = format!("llvm.return {dst} : i64");
+        if lines.peek().map(|(_, next)| *next) != Some(returned.as_str()) {
+            return Err(format!(
+                "musttail call not followed by a return of its result at line {}: {t}",
+                n + 1
+            ));
+        }
     }
     Ok(())
 }

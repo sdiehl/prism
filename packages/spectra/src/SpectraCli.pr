@@ -1,11 +1,13 @@
 -- | Spectra's command grammar, built applicatively with Std `Cli`.
 --
 -- The executable understands three subcommands, each defaulting its project
--- path to the current directory:
+-- path to the current directory. `check` and `build` shell out to the compiler
+-- named by `--prism`, so a fresh build can pin itself instead of trusting
+-- whichever `prism` is first on `PATH`:
 --
 -- ```text
--- spectra check [PATH]
--- spectra build [PATH] --output deck.pdf --open
+-- spectra check [PATH] --prism prism
+-- spectra build [PATH] --output deck.pdf --open --prism prism
 -- spectra clean [PATH]
 -- ```
 --
@@ -20,17 +22,19 @@
 --     _ => println("usage error")
 -- ```
 -- ```output
--- SpectraCli.Build("talk", "deck.pdf", true)
+-- SpectraCli.Build("talk", "deck.pdf", true, "prism")
 -- ```
 
 import Cli as C
 import Cli (Command, Group, SubCmd)
+import Test (expect_equal)
 
 -- | One parsed subcommand: check a project, build it to a named PDF and
--- optionally open it, or clean its build directory.
+-- optionally open it, or clean its build directory. The last field of `Check`
+-- and `Build` is the compiler binary their shell steps invoke.
 pub type SpectraCommand
-  = Check(String)
-  | Build(String, String, Bool)
+  = Check(String, String)
+  | Build(String, String, Bool, String)
   | Clean(String)
   deriving (Eq, Show)
 
@@ -41,16 +45,29 @@ fn path_parser() =
       ".",
     )
 
-fn check_parser() = C.map_p(\(path) -> Check(path), path_parser())
+fn prism_parser() =
+  C.opt_str("prism", "", "BIN", "compiler binary to invoke", "prism")
+
+fn check_parser() =
+  C.build2(
+      \(path) -> \(prism) -> Check(path, prism),
+      path_parser(),
+      prism_parser(),
+    )
 
 fn clean_parser() = C.map_p(\(path) -> Clean(path), path_parser())
 
+-- The build command, curried one field per parser stage.
+fn build_command(path : String) =
+  \(output) -> \(open) -> \(prism) -> Build(path, output, open, prism)
+
 fn build_parser() =
-  C.build3(
-      \(path) -> \(output) -> \(open) -> Build(path, output, open),
+  C.build4(
+      build_command,
       path_parser(),
       C.opt_str("output", "o", "PDF", "output PDF name", "deck.pdf"),
       C.switch("open", "", "open the resulting PDF"),
+      prism_parser(),
     )
 
 -- | The whole command grammar the executable parses its argument list with.
@@ -84,23 +101,22 @@ pub fn parse_spectra_argv(argv : List(String)) : C.Outcome(SpectraCommand) =
 
 test fn default_paths_are_current_directory() =
   match parse_spectra_argv(["check"]) of
-    C.Parsed(Check(path)) =>
-      if path == "." then
-        ()
-      else
-        fail()
+    C.Parsed(Check(path, prism)) => expect_equal((".", "prism"), (path, prism))
     _ => fail()
 
 test fn build_combines_path_output_and_open_applicatively() =
   match (parse_spectra_argv(["build", "talk", "--output", "talk.pdf", "--open"])) of
-    C.Parsed(Build(path, output, open)) =>
-      if path == "talk" && output == "talk.pdf" && open then
-        ()
-      else
-        fail()
+    C.Parsed(Build(path, output, open, _)) =>
+      expect_equal(("talk", "talk.pdf", true), (path, output, open))
     _ => fail()
 
 test fn extra_paths_are_rejected() =
   match parse_spectra_argv(["clean", "one", "two"]) of
     C.BadUsage(_) => ()
+    _ => fail()
+
+test fn prism_flag_pins_the_compiler() =
+  match (parse_spectra_argv(["build", "talk", "--prism", "target/release/prism"])) of
+    C.Parsed(Build(_, _, _, prism)) =>
+      expect_equal("target/release/prism", prism)
     _ => fail()

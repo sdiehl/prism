@@ -357,15 +357,22 @@ fn push_spend_comp<'a>(work: &mut Vec<SpendFrame<'a>>, token: Sym, comp: &'a Com
         Comp::Handle {
             body,
             return_body,
+            finally_body,
             ops,
             ..
         } => {
             work.push(SpendFrame::Sum {
-                children: 1 + usize::from(return_body.is_some()) + ops.len(),
+                children: 1
+                    + usize::from(return_body.is_some())
+                    + usize::from(finally_body.is_some())
+                    + ops.len(),
                 base: 0,
             });
             for operation in ops.iter().rev() {
                 work.push(SpendFrame::Comp(&operation.body));
+            }
+            if let Some(finally_body) = finally_body {
+                work.push(SpendFrame::Comp(finally_body));
             }
             if let Some(return_body) = return_body {
                 work.push(SpendFrame::Comp(return_body));

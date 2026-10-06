@@ -3,17 +3,17 @@ use logos::Logos as _;
 use super::Token;
 use Token::{
     Alias, AmpAmp, Arrow, As, At, Bang, Bar, Borrow, Break, Canonical, Caret, Catch, CharLit,
-    Class, Colon, ColonEq, Comma, Comment, CompLeft, CompRight, Continue, Deriving, Do, Dot,
-    DotDot, Each, Effect, Elif, Else, Ensures, Eq, EqDot, EqEq, False, FatArrow, Fbip, Fip, Float,
-    Fn, For, Forall, Ge, GeDot, Given, Gt, GtDot, Handle, Handler, Hash, Ident, If, Import, In,
-    Instance, Int, InterpEnd, InterpMid, InterpStart, KwBool, KwChar, KwError, KwFloat, KwI64,
+    Class, Colon, ColonColon, ColonEq, Comma, Comment, CompLeft, CompRight, Continue, Deriving, Do,
+    Dot, DotDot, Each, Effect, Elif, Else, Ensures, Eq, EqDot, EqEq, False, FatArrow, Fbip, Fip,
+    Float, Fn, For, Forall, Ge, GeDot, Given, Gt, GtDot, Handle, Handler, Hash, Ident, If, Import,
+    In, Instance, Int, InterpEnd, InterpMid, InterpStart, KwBool, KwChar, KwError, KwFloat, KwI64,
     KwInt, KwString, KwU64, KwUnit, LArrow, LBrace, LBracket, LParen, Lambda, Le, LeDot, Let,
     Logic, Loop, Lt, LtDot, Mask, Match, Minus, MinusDot, MinusEq, Ne, NeDot, Newtype, Of, Opaque,
-    Pattern, Percent, PercentEq, PipePipe, PipeRight, Plus, PlusDot, PlusEq, Probe, Pub, QualName,
-    Question, QuestionDot, QuestionQuestion, RBrace, RBracket, RParen, Replayable, Requires,
-    Return, Slash, SlashDot, Stable, Star, StarDot, StarEq, StringLit, Then, Throw, Tilde,
-    Transact, True, Try, Type, UIdent, Using, VClose, VHead, VOpen, VSemi, Val, Var, Where, While,
-    With,
+    PathJoin, Pattern, Percent, PercentEq, PipePipe, PipeRight, Plus, PlusDot, PlusEq, Probe, Pub,
+    QualName, Question, QuestionDot, QuestionQuestion, RBrace, RBracket, RParen, Replayable,
+    Requires, Return, Slash, SlashDot, Stable, Star, StarDot, StarEq, StringLit, Then, Throw,
+    Tilde, Transact, True, Try, Type, UIdent, Using, VClose, VHead, VOpen, VSemi, Val, Var, Where,
+    While, With,
 };
 
 /// The highlight category for a comment.
@@ -29,8 +29,9 @@ pub const COMMENT_CLASS: &str = "com";
 /// Exhaustive by construction: every operator, delimiter, and layout-virtual
 /// token is enumerated rather than caught by `_`, so a newly added `Token`
 /// forces a highlight-category decision here the way `Token::text` forces a
-/// spelling decision. The REPL categorizer, the mdbook JS highlighter, and the
-/// nvim syntax file mirror this keyword set; the token drift test pins them.
+/// spelling decision. The REPL categorizer derives from this; the mdbook JS
+/// highlighter and the nvim syntax file mirror its keyword set, and the token
+/// drift test pins them.
 #[must_use]
 pub const fn tok_class(t: &Token) -> &'static str {
     match t {
@@ -55,9 +56,9 @@ pub const fn tok_class(t: &Token) -> &'static str {
         | Le | Ge | Lt | Gt | Eq | AmpAmp | PipePipe | PipeRight | CompRight | CompLeft | Bar
         | Lambda | PlusDot | MinusDot | PlusEq | MinusEq | StarEq | PercentEq | Plus | Minus
         | StarDot | Star | SlashDot | Slash | Percent | Caret | Tilde | LParen | RParen
-        | LBrace | RBrace | LBracket | RBracket | Comma | ColonEq | Colon | Bang | At | Hash
-        | DotDot | Dot | QuestionQuestion | QuestionDot | Question | VOpen | VClose | VSemi
-        | VHead => "op",
+        | LBrace | RBrace | LBracket | RBracket | Comma | ColonColon | PathJoin | ColonEq
+        | Colon | Bang | At | Hash | DotDot | Dot | QuestionQuestion | QuestionDot | Question
+        | VOpen | VClose | VSemi | VHead => "op",
     }
 }
 

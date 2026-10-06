@@ -1,14 +1,14 @@
 instance ordList : Ord(List(a)) given Ord(a)
   fn cmp(xs, ys) =
     match xs of
-      Nil =>
+      [] =>
         match ys of
-          Nil => 0
-          Cons(_, _) => -1
-      Cons(x, xt) =>
+          [] => 0
+          _ :: _ => -1
+      x :: xt =>
         match ys of
-          Nil => 1
-          Cons(y, yt) =>
+          [] => 1
+          y :: yt =>
             let c = cmp(x, y)
             if c == 0 then
               cmp(xt, yt)
@@ -17,8 +17,8 @@ instance ordList : Ord(List(a)) given Ord(a)
 
 fn print_all(xs : List(Int)) =
   match xs of
-    Nil => ()
-    Cons(x, rest) =>
+    [] => ()
+    x :: rest =>
       println(x)
       print_all(rest)
 

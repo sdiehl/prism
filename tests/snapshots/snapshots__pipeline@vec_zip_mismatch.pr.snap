@@ -22,6 +22,7 @@ Program {
                     name: "Nil",
                     args: [],
                     fields: None,
+                    span: 315..318,
                 },
                 Ctor {
                     name: "Cons",
@@ -39,6 +40,7 @@ Program {
                         ),
                     ],
                     fields: None,
+                    span: 321..325,
                 },
             ],
             deriving: [],
@@ -69,6 +71,7 @@ Program {
                         ),
                     ],
                     fields: None,
+                    span: 362..367,
                 },
             ],
             deriving: [],

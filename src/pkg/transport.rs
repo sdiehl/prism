@@ -512,7 +512,7 @@ pub fn push_closure<T: Transport + ?Sized>(
             .map_err(|_| TransportError::Missing(hash.clone()))?;
         let decoded = decode_def(&bytes)?;
         for dep in decoded.dep_hashes {
-            work.push(dep);
+            work.push(dep.into_string());
         }
         to_send.insert(hash);
     }
@@ -567,7 +567,7 @@ pub fn verify_closure(
         verify(&hash, &bytes)?;
         verified += 1;
         for dep in decode_def(&bytes)?.dep_hashes {
-            work.push(dep);
+            work.push(dep.into_string());
         }
     }
     Ok(verified)

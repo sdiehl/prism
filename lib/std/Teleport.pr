@@ -36,7 +36,9 @@ import Wire (Bytes, bytes_buf, bytes_of_buf)
 -- this very bundle that nothing proved portable, which is what a suspended run
 -- is: it carries the machine state a step budget stopped at, not a computation
 -- the compiler checked may travel. `Unsupported` is a host that cannot land
--- continuations at all, which is every native binary.
+-- continuations at all, which is every native binary. `Bracketed` is a
+-- computation that still owes a handler's `finally` clause: the cleanup is an
+-- obligation of the process that installed the handler, so it never travels.
 --
 -- `Undelivered` is the one refusal no runtime raises: it is a transport saying
 -- the envelope never reached the far side. It carries no reason because the
@@ -50,6 +52,7 @@ pub type MoveError
   | Foreign
   | Unsupported
   | Uncertified
+  | Bracketed
   | Undelivered
   deriving (Eq, Show)
 
@@ -67,6 +70,8 @@ let move_code_unsupported : Int = 4
 
 let move_code_uncertified : Int = 5
 
+let move_code_bracketed : Int = 6
+
 -- The one place a runtime classification code becomes a `MoveError`. An
 -- unrecognized code is `Unsupported` rather than a trap, on the same reasoning
 -- as the socket table: a newer runtime that classifies more finely must still be
@@ -83,6 +88,8 @@ fn move_error(code : Int) : MoveError =
     Unsupported
   elif code == move_code_uncertified then
     Uncertified
+  elif code == move_code_bracketed then
+    Bracketed
   else
     Unsupported
 
@@ -172,12 +179,15 @@ pub fn land(envelope : Bytes) : Result(Unit, MoveError) ! {IO} =
 -- A closure over top-level code and portable parameters satisfies the contract;
 -- `run_here` below shows one running end to end.
 --
--- Capturing a local binding is refused at compile time: a local does not travel,
--- so the closure could not move to a fresh runtime:
+-- Capturing a local closure is refused at compile time: it is bound to the
+-- runtime that built it, so the closure could not move to a fresh one (a local
+-- whose value has a portable type, such as an `Int` read at runtime, may be
+-- captured):
 --
 -- ```prism,compile_fail
--- let n = 6
--- teleport(\() -> n * 7)
+-- let n = read_int()
+-- let scale = \(x) -> x * n
+-- teleport(\() -> scale(7))
 -- ```
 pub fn teleport(work : (() -> a ! {IO}) @ {once, portable}) : Result(Unit, MoveError) ! {Placement, IO | e} =
   match seal(work) of

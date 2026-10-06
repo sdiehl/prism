@@ -9,6 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::Cursor;
 use std::ops::Deref;
 
+use prism_common::format::FormatTag;
 use serde::{Deserialize, Serialize};
 
 use crate::core::builtins::Builtin;
@@ -29,13 +30,14 @@ use crate::types::{show_effects, Checked};
 use super::identity::{module_interface, namespace_root_of, ModuleInterface, ModuleInterfaceEntry};
 use super::{elaborated, elaborated_validated, hash_meta, observe_run_on, Config};
 
-pub const PATCH_FETCH_FORMAT: &str = "prism-patch-fetch-v1";
-pub const PATCH_IMPACT_FORMAT: &str = "prism-patch-impact-v1";
-pub const PATCH_DELTA_FORMAT: &str = "prism-patch-delta-v1";
-pub const PATCH_REFUSAL_FORMAT: &str = "prism-patch-refusal-v1";
-pub const PATCH_STAGE_FORMAT: &str = "prism-patch-stage-v1";
-pub const PATCH_BEHAVIOR_CORPUS_FORMAT: &str = "prism-patch-behavior-corpus-v1";
-pub const PATCH_BEHAVIOR_FORMAT: &str = "prism-patch-behavior-v1";
+pub const PATCH_FETCH_FORMAT: FormatTag = FormatTag::new("prism-patch-fetch-v1");
+pub const PATCH_IMPACT_FORMAT: FormatTag = FormatTag::new("prism-patch-impact-v1");
+pub const PATCH_DELTA_FORMAT: FormatTag = FormatTag::new("prism-patch-delta-v1");
+pub const PATCH_REFUSAL_FORMAT: FormatTag = FormatTag::new("prism-patch-refusal-v1");
+pub const PATCH_STAGE_FORMAT: FormatTag = FormatTag::new("prism-patch-stage-v1");
+pub const PATCH_BEHAVIOR_CORPUS_FORMAT: FormatTag =
+    FormatTag::new("prism-patch-behavior-corpus-v1");
+pub const PATCH_BEHAVIOR_FORMAT: FormatTag = FormatTag::new("prism-patch-behavior-v1");
 
 const DEFINITION_SHAPE_DOMAIN: &[u8] = b"prism-definition-shape-v1";
 const DELTA_ADDRESS_DOMAIN: &[u8] = b"prism-patch-delta-address-v1";
@@ -57,7 +59,7 @@ pub struct DefinitionDigest {
 /// Read-side response for one owned definition.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FetchReport {
-    pub format: String,
+    pub format: FormatTag,
     pub namespace: PatchTarget,
     pub target: PatchTarget,
     pub name: String,
@@ -84,7 +86,7 @@ impl FetchReport {
 /// Importer-cone response for a definition.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImpactReport {
-    pub format: String,
+    pub format: FormatTag,
     pub target: PatchTarget,
     pub name: String,
     pub importers: Vec<DefinitionDigest>,
@@ -128,7 +130,7 @@ pub struct InterfaceRowDelta {
 /// The deterministic judgment returned by `patch apply` / protocol `submit`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeltaReport {
-    pub format: String,
+    pub format: FormatTag,
     pub digest: String,
     pub patch: String,
     pub base_namespace: PatchTarget,
@@ -165,7 +167,7 @@ impl DeltaReport {
 /// A stable machine-readable refusal naming the judgment that failed.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PatchRefusal {
-    pub format: String,
+    pub format: FormatTag,
     pub digest: String,
     #[serde(flatten)]
     pub subject: Option<Box<PatchRefusalSubject>>,
@@ -209,7 +211,7 @@ impl PatchRefusal {
 
     pub(crate) fn new(code: &str, judgment: &str, message: impl Into<String>) -> Self {
         let mut refusal = Self {
-            format: PATCH_REFUSAL_FORMAT.to_string(),
+            format: PATCH_REFUSAL_FORMAT,
             digest: String::new(),
             subject: None,
             body: Box::new(PatchRefusalBody {
@@ -255,7 +257,7 @@ impl PatchRefusal {
 
 #[derive(Serialize)]
 struct RefusalPayload<'a> {
-    format: &'a str,
+    format: &'a FormatTag,
     subject: &'a Option<Box<PatchRefusalSubject>>,
     code: &'a str,
     judgment: &'a str,
@@ -277,7 +279,7 @@ pub struct BehaviorCase {
 /// Content-addressed set of explicit interpreter inputs for old/new comparison.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BehaviorCorpus {
-    pub format: String,
+    pub format: FormatTag,
     pub digest: String,
     pub cases: Vec<BehaviorCase>,
 }
@@ -289,9 +291,9 @@ impl BehaviorCorpus {
     /// Refuses empty corpora and empty or duplicate case names.
     pub fn new(cases: Vec<BehaviorCase>) -> Result<Self, PatchRefusal> {
         validate_behavior_cases(&cases)?;
-        let digest = behavior_corpus_digest(PATCH_BEHAVIOR_CORPUS_FORMAT, &cases)?;
+        let digest = behavior_corpus_digest(&PATCH_BEHAVIOR_CORPUS_FORMAT, &cases)?;
         Ok(Self {
-            format: PATCH_BEHAVIOR_CORPUS_FORMAT.to_string(),
+            format: PATCH_BEHAVIOR_CORPUS_FORMAT,
             digest,
             cases,
         })
@@ -327,7 +329,7 @@ impl BehaviorCorpus {
 
 #[derive(Serialize)]
 struct BehaviorCorpusPayload<'a> {
-    format: &'a str,
+    format: &'a FormatTag,
     cases: &'a [BehaviorCase],
 }
 
@@ -353,7 +355,7 @@ pub struct BehaviorDivergence {
 /// Trace-corpus evidence attached to one already-typed patch judgment.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BehaviorReceipt {
-    pub format: String,
+    pub format: FormatTag,
     pub digest: String,
     pub patch: String,
     pub judgment: String,
@@ -367,7 +369,7 @@ pub struct BehaviorReceipt {
 
 #[derive(Serialize)]
 struct BehaviorReceiptPayload<'a> {
-    format: &'a str,
+    format: &'a FormatTag,
     patch: &'a str,
     judgment: &'a str,
     base_namespace: &'a PatchTarget,
@@ -381,7 +383,7 @@ struct BehaviorReceiptPayload<'a> {
 /// Durable staging payload written to the content-addressed store before commit.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StagedPatch {
-    pub format: String,
+    pub format: FormatTag,
     pub digest: String,
     pub source_digest: String,
     pub patch: PatchArtifact,
@@ -401,7 +403,7 @@ impl StagedPatch {
         report: DeltaReport,
     ) -> Result<Self, PatchRefusal> {
         let payload = StagePayload {
-            format: PATCH_STAGE_FORMAT,
+            format: &PATCH_STAGE_FORMAT,
             source_digest: &source_digest,
             patch: &patch,
             result_source: &result_source,
@@ -409,7 +411,7 @@ impl StagedPatch {
         };
         let bytes = serde_json::to_vec(&payload).map_err(|error| serialization_refusal(&error))?;
         Ok(Self {
-            format: PATCH_STAGE_FORMAT.to_string(),
+            format: PATCH_STAGE_FORMAT,
             digest: address(STAGE_ADDRESS_DOMAIN, &bytes),
             source_digest,
             patch,
@@ -465,7 +467,7 @@ impl StagedPatch {
 
 #[derive(Serialize)]
 struct StagePayload<'a> {
-    format: &'a str,
+    format: &'a FormatTag,
     source_digest: &'a str,
     patch: &'a PatchArtifact,
     result_source: &'a str,
@@ -520,7 +522,7 @@ pub fn fetch_semantic_patch(
     })?;
     let rendered = term.render().map_err(|error| artifact_refusal(&error))?;
     Ok(FetchReport {
-        format: PATCH_FETCH_FORMAT.to_string(),
+        format: PATCH_FETCH_FORMAT,
         namespace: state.namespace,
         target: PatchTarget::new(facts.hash.clone()),
         name: facts.name,
@@ -549,7 +551,7 @@ pub fn impact_semantic_patch(
     let symbol = resolve_selector(&state, selector)?;
     let facts = definition_facts(&state, symbol)?;
     Ok(ImpactReport {
-        format: PATCH_IMPACT_FORMAT.to_string(),
+        format: PATCH_IMPACT_FORMAT,
         target: PatchTarget::new(facts.hash),
         name: facts.name,
         importers: facts.importers,
@@ -655,7 +657,7 @@ fn apply_semantic_patch_inner(
         }
     };
     let report = addressed_delta(&DeltaPayload {
-        format: PATCH_DELTA_FORMAT,
+        format: &PATCH_DELTA_FORMAT,
         patch: &patch.digest,
         base_namespace: &patch.base_namespace,
         result_namespace: &after.namespace,
@@ -783,7 +785,7 @@ fn verify_semantic_patch_behavior_inner(
         "equivalent-on-corpus"
     };
     addressed_behavior(&BehaviorReceiptPayload {
-        format: PATCH_BEHAVIOR_FORMAT,
+        format: &PATCH_BEHAVIOR_FORMAT,
         patch: &patch.digest,
         judgment: &judgment.digest,
         base_namespace: &judgment.base_namespace,
@@ -797,7 +799,7 @@ fn verify_semantic_patch_behavior_inner(
 
 #[derive(Serialize)]
 struct DeltaPayload<'a> {
-    format: &'a str,
+    format: &'a FormatTag,
     patch: &'a str,
     base_namespace: &'a PatchTarget,
     result_namespace: &'a PatchTarget,
@@ -823,7 +825,7 @@ struct DeltaPayload<'a> {
 fn addressed_delta(payload: &DeltaPayload<'_>) -> Result<DeltaReport, PatchRefusal> {
     let bytes = serde_json::to_vec(payload).map_err(|error| serialization_refusal(&error))?;
     Ok(DeltaReport {
-        format: payload.format.to_string(),
+        format: payload.format.clone(),
         digest: address(DELTA_ADDRESS_DOMAIN, &bytes),
         patch: payload.patch.to_string(),
         base_namespace: payload.base_namespace.clone(),
@@ -853,7 +855,7 @@ fn addressed_behavior(
 ) -> Result<BehaviorReceipt, PatchRefusal> {
     let bytes = serde_json::to_vec(payload).map_err(|error| serialization_refusal(&error))?;
     Ok(BehaviorReceipt {
-        format: payload.format.to_string(),
+        format: payload.format.clone(),
         digest: address(BEHAVIOR_ADDRESS_DOMAIN, &bytes),
         patch: payload.patch.to_string(),
         judgment: payload.judgment.to_string(),
@@ -866,7 +868,10 @@ fn addressed_behavior(
     })
 }
 
-fn behavior_corpus_digest(format: &str, cases: &[BehaviorCase]) -> Result<String, PatchRefusal> {
+fn behavior_corpus_digest(
+    format: &FormatTag,
+    cases: &[BehaviorCase],
+) -> Result<String, PatchRefusal> {
     let bytes = serde_json::to_vec(&BehaviorCorpusPayload { format, cases })
         .map_err(|error| serialization_refusal(&error))?;
     Ok(address(BEHAVIOR_CORPUS_ADDRESS_DOMAIN, &bytes))
@@ -1243,12 +1248,16 @@ fn ambient_builtins(core: &Core) -> Vec<String> {
             Comp::Handle {
                 body,
                 return_body,
+                finally_body,
                 ops,
                 ..
             } => {
                 comp(body, out);
                 if let Some(return_body) = return_body {
                     comp(return_body, out);
+                }
+                if let Some(finally_body) = finally_body {
+                    comp(finally_body, out);
                 }
                 for op in ops {
                     comp(&op.body, out);

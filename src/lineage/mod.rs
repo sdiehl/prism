@@ -65,13 +65,13 @@ pub use facts::{
 };
 #[cfg(feature = "native")]
 pub use graph::{
-    backend_name, ArgvPayload, BuildRequest, CompilerPayload, CompilerRow, DiagnosticPayload,
+    ArgvPayload, BuildRequest, CompilerPayload, CompilerRow, DiagnosticPayload,
     DocsGeneratorPayload, DoctestPayload, Edge, EdgeKind, EnvReadPayload, FileWritePayload,
     InputFilePayload, LineageArtifact, LineageCache, LineageGraph, LineageRoot, Node, NodeKind,
     OutputPayload, ReplayRelation, RequestKind, RootRole, TracePayload, Variant, WorldForkPayload,
-    WorldLawPayload, WorldStatePayload, WriteMode, BACKEND_INTERPRETER, DOCS_GENERATOR_FORMAT,
-    DOCS_MANIFEST_FILE, DOCS_PAGE_KIND, LINEAGE_EXTENSION, LINEAGE_FORMAT, LINEAGE_GRAPH_FORMAT,
-    REPLAY_EXTENSION, STDOUT_SELECTOR,
+    WorldLawPayload, WorldStatePayload, WriteMode, DOCS_GENERATOR_FORMAT, DOCS_MANIFEST_FILE,
+    DOCS_PAGE_KIND, LINEAGE_EXTENSION, LINEAGE_FORMAT, LINEAGE_GRAPH_FORMAT, REPLAY_EXTENSION,
+    STDOUT_SELECTOR,
 };
 pub use node_id::NodeId;
 #[cfg(feature = "native")]

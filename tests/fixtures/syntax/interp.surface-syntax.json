@@ -1,5 +1,5 @@
 {
-  "schema": "prism-surface-syntax-v1",
+  "schema": "prism-surface-syntax-v2",
   "compiler": "<version>",
   "source": {
     "digest": "985da653818178a2b85a9be956094a5acc7ae10b7cc450d6abf24e4d8cdc08ff",
@@ -19,7 +19,11 @@
           ],
           "ret": {
             "kind": "str"
-          }
+          },
+          "span": [
+            90,
+            94
+          ]
         }
       ],
       "span": [
@@ -32,6 +36,10 @@
       "methods": [
         {
           "name": "render",
+          "span": [
+            131,
+            137
+          ],
           "ty": {
             "effects": {
               "labels": []

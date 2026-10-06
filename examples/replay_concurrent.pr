@@ -21,7 +21,7 @@ fn worker(_name : String) : Int ! {Async(Int), Random} =
 
 fn scene() : Int ! {Async(Int), Random} =
   match scope([\() -> worker("A"), \() -> worker("B")]) of
-    Cons(a, Cons(b, Nil)) => a + b
+    [a, b] => a + b
     _ => 0
 
 -- `replayable` verifies the whole concurrent run stays within the recordable

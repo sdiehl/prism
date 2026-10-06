@@ -21,6 +21,7 @@ Program {
                     ],
                     ret: Int,
                     grade: Many,
+                    span: 264..270,
                 },
                 EffOp {
                     name: "put_v1",
@@ -30,6 +31,7 @@ Program {
                     ],
                     ret: Unit,
                     grade: Many,
+                    span: 284..290,
                 },
             ],
             span: 250..307,
@@ -45,6 +47,7 @@ Program {
                     ],
                     ret: Int,
                     grade: Many,
+                    span: 323..329,
                 },
                 EffOp {
                     name: "put_v2",
@@ -54,6 +57,7 @@ Program {
                     ],
                     ret: Unit,
                     grade: Many,
+                    span: 343..349,
                 },
             ],
             span: 309..366,

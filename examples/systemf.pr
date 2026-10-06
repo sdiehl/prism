@@ -179,8 +179,8 @@ fn lookup_term(
   xs : List((Name(TermSpace), RTy))
 ) : RTy ! {TypeError} =
   match xs of
-    Nil => type_error("unresolved reference %{name_id(name)}")
-    Cons((x, ty), rest) =>
+    [] => type_error("unresolved reference %{name_id(name)}")
+    (x, ty) :: rest =>
       if name == x then
         ty
       else
@@ -291,8 +291,8 @@ fn show_ty(ty : RTy) : String = show_ty_at(0, [], ty)
 
 fn hint_for(env : List((Name(TySpace), String)), n : Name(TySpace)) : String =
   match env of
-    Nil => "%{name_id(n)}"
-    Cons((m, hint), rest) =>
+    [] => "%{name_id(n)}"
+    (m, hint) :: rest =>
       if n == m then
         hint
       else
@@ -300,8 +300,8 @@ fn hint_for(env : List((Name(TySpace), String)), n : Name(TySpace)) : String =
 
 fn hint_taken(env : List((Name(TySpace), String)), hint : String) : Bool =
   match env of
-    Nil => false
-    Cons((_m, h), rest) => h == hint || hint_taken(rest, hint)
+    [] => false
+    (_m, h) :: rest => h == hint || hint_taken(rest, hint)
 
 fn free_hint(env : List((Name(TySpace), String)), hint : String) : String =
   if hint_taken(env, hint) then

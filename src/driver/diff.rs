@@ -15,6 +15,7 @@ use crate::error::Error;
 use crate::parse::parse;
 use crate::resolve::Root;
 use crate::sym::Sym;
+use prism_common::format::FormatTag;
 
 use super::{elaborated, hash_meta, Config, PRELUDE};
 
@@ -99,7 +100,7 @@ pub struct DiffNamedDef {
 /// canonicalized hash held.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SourceDiff {
-    pub format: &'static str,
+    pub format: FormatTag,
     pub behavioral: Vec<DiffChangedDef>,
     pub added: Vec<DiffNamedDef>,
     pub removed: Vec<DiffNamedDef>,
@@ -109,7 +110,7 @@ pub struct SourceDiff {
 }
 
 /// The format tag `SourceDiff` serializes under.
-pub const SOURCE_DIFF_FORMAT: &str = "prism-source-diff-v1";
+pub const SOURCE_DIFF_FORMAT: FormatTag = FormatTag::new("prism-source-diff-v1");
 
 // Per-definition source slices, for the text-only classification: bare name to
 // the trimmed span text of each top-level function. Parse-only, no checking.

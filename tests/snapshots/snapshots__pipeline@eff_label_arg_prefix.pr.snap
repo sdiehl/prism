@@ -25,6 +25,7 @@ Program {
                     ],
                     ret: Unit,
                     grade: Many,
+                    span: 469..472,
                 },
             ],
             span: 453..482,

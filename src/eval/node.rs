@@ -74,6 +74,7 @@ pub struct HandleInfo {
     pub(super) ops: BTreeMap<Sym, (Vec<Sym>, Sym, Cmp)>,
     pub(super) return_var: Option<Sym>,
     pub(super) return_body: Option<Cmp>,
+    pub(super) finally_body: Option<Cmp>,
 }
 
 pub(super) fn lower(c: &Comp) -> Cmp {
@@ -149,6 +150,7 @@ fn node(c: &Comp, runtime: bool) -> Node {
             body,
             return_var,
             return_body,
+            finally_body,
             ops,
         } => Node::Handle(Rc::new(HandleInfo {
             body: lower_with_runtime(body, runtime),
@@ -167,6 +169,9 @@ fn node(c: &Comp, runtime: bool) -> Node {
                 .collect(),
             return_var: *return_var,
             return_body: return_body
+                .as_deref()
+                .map(|body| lower_with_runtime(body, runtime)),
+            finally_body: finally_body
                 .as_deref()
                 .map(|body| lower_with_runtime(body, runtime)),
         })),

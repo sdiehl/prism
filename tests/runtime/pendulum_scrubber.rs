@@ -19,7 +19,7 @@ fn kernel() -> String {
 }
 
 // Interpret the kernel under `main` and return its exact printed transcript, the
-// same bytes the wasm `pendulum_run` hands the browser.
+// same bytes `resident_run("pendulum", ...)` hands the browser.
 fn run(main: &str) -> String {
     let full = prism::with_prelude(&format!("{}\n{main}\n", kernel()));
     prism::interpret(&full)

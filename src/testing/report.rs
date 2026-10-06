@@ -3,7 +3,7 @@
 
 use std::io::Write;
 
-use super::runner::{Outcome, OutcomeKind};
+use super::runner::{Outcome, OutcomeKind, Tally};
 
 const fn status(kind: Option<OutcomeKind>) -> &'static str {
     match kind {
@@ -26,9 +26,35 @@ pub(crate) fn line(
     outcome: &Outcome,
     show_output: bool,
 ) -> std::io::Result<()> {
+    if let Some(reason) = &outcome.skipped {
+        return writeln!(out, "test {id} ... skipped ({reason})");
+    }
     writeln!(out, "test {id} ... {}", status(outcome.kind))?;
     if !outcome.passed() && !outcome.message.is_empty() {
         writeln!(out, "  {}", outcome.message)?;
+    }
+    if let Some(failure) = &outcome.failure {
+        for (label, value) in [("expected", &failure.expected), ("actual", &failure.actual)] {
+            match value {
+                Some(value) if value.contains('\n') => {
+                    writeln!(out, "  {label}:")?;
+                    for l in value.lines() {
+                        writeln!(out, "    {l}")?;
+                    }
+                }
+                Some(value) => writeln!(out, "  {label}: {value}")?,
+                None => {}
+            }
+        }
+        if let Some(diff) = &failure.diff {
+            writeln!(out, "  --- diff ---")?;
+            for l in diff.lines() {
+                writeln!(out, "  {l}")?;
+            }
+        }
+        for entry in &failure.context {
+            writeln!(out, "  context: {entry}")?;
+        }
     }
     let show = !outcome.passed() || show_output;
     if show && !outcome.output.is_empty() {
@@ -44,26 +70,22 @@ pub(crate) fn line(
 ///
 /// # Errors
 /// Propagates a write error from the sink.
-pub(crate) fn summary(
-    out: &mut dyn Write,
-    passed: usize,
-    failed: usize,
-    infrastructure: usize,
-) -> std::io::Result<()> {
-    let result = if failed == 0 && infrastructure == 0 {
+pub(crate) fn summary(out: &mut dyn Write, tally: &Tally) -> std::io::Result<()> {
+    let result = if tally.failed == 0 && tally.infrastructure == 0 {
         "ok"
     } else {
         "FAILED"
     };
-    if infrastructure == 0 {
-        writeln!(
-            out,
-            "test result: {result}. {passed} passed; {failed} failed"
-        )
-    } else {
-        writeln!(
-            out,
-            "test result: {result}. {passed} passed; {failed} failed; {infrastructure} harness error(s)"
-        )
+    write!(
+        out,
+        "test result: {result}. {} passed; {} failed",
+        tally.passed, tally.failed
+    )?;
+    if tally.skipped > 0 {
+        write!(out, "; {} skipped", tally.skipped)?;
     }
+    if tally.infrastructure > 0 {
+        write!(out, "; {} harness error(s)", tally.infrastructure)?;
+    }
+    writeln!(out)
 }

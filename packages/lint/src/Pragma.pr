@@ -69,8 +69,8 @@ pub fn pg_has_doc(text : String, lo : Int) : Bool = pg_any_doc(pg_leading(text, 
 
 fn pg_any_doc(lines : List(String)) : Bool =
   match lines of
-    Nil => false
-    Cons(line, rest) => starts_with(pg_doc_head(), line) || pg_any_doc(rest)
+    [] => false
+    line :: rest => starts_with(pg_doc_head(), line) || pg_any_doc(rest)
 
 -- | The rule codes allowed for the declaration at `lo`.
 pub fn pg_allows(text : String, lo : Int) : List(String) =

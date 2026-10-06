@@ -6,7 +6,7 @@ Prism is a small, strict, impure functional language in the ML family whose type
 
 This book has six parts:
 
-- [Prism Tutorial: Taste The Rainbow](./tutorial.md)
+- **[Prism Tutorial](./tutorial.md)** An introduction to using Prism. Taste the Rainbow.
 - **[Language Specification](./spec.md)** defines the surface language: lexical structure, grammar, types, effects, and evaluation.
 - **[Compiler](./compiler.md)** documents the implementation: the pipeline, the core calculus, effect lowering, reference counting, the backends, and the verification harness.
 - **[Standard Library](./stdlib/index.md)** is the API reference for the prelude and the standard modules, generated from their source by `prism docs`.

@@ -14,8 +14,8 @@ import Incr (..)
 fn ins_desc(p : (String, Int), xs : List((String, Int))) : List((String, Int)) =
   let (_, score) = p
   match xs of
-    Nil => Cons(p, Nil)
-    Cons(q, rest) =>
+    [] => Cons(p, Nil)
+    q :: rest =>
       let (_, other_score) = q
       if cmp(score, other_score) > 0 then
         Cons(p, Cons(q, rest))

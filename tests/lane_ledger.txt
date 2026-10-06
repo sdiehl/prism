@@ -59,12 +59,19 @@
 #   alone sets the latency of every change. The repair is a balanced partition,
 #   not a move to the nightly arm: the whole-workspace suite is what a change is
 #   gated on, and a gauntlet that runs tomorrow does not gate today.
+#
+# Not yet observed:
+#
+#   ci.yml lean-fuzz - split out of `lean` into two shards. Until a run of the
+#   split job is read, its figure is the pre-split `lean` cell, which ran the
+#   whole fuzz in one cell and so bounds either shard from above.
 
 ci.yml	checks	per-change	1	1010	within
 ci.yml	corpus-oracles	per-change	16	2451	within
 ci.yml	doc-links	per-change	1	6	within
 ci.yml	feature-matrix	per-change	4	111	within
 ci.yml	lean	per-change	1	2557	within
+ci.yml	lean-fuzz	per-change	2	2557	within
 ci.yml	lint	per-change	1	62	within
 ci.yml	mimalloc	per-change	1	275	within
 ci.yml	mlir	per-change	1	1242	within

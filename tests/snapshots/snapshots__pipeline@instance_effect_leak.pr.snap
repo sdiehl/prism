@@ -19,6 +19,7 @@ Program {
                     params: [],
                     ret: Unit,
                     grade: Many,
+                    span: 479..483,
                 },
             ],
             span: 465..492,
@@ -32,9 +33,9 @@ Program {
             param: "a",
             supers: [],
             methods: [
-                (
-                    "method",
-                    Fun(
+                ClassMethod {
+                    name: "method",
+                    ty: Fun(
                         [
                             Var(
                                 "a",
@@ -50,7 +51,8 @@ Program {
                             "a",
                         ),
                     ),
-                ),
+                    span: 507..513,
+                },
             ],
             span: 494..532,
         },

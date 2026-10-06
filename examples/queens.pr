@@ -19,8 +19,8 @@ let n = 6
 
 fn safe(c, dist, board) =
   match board of
-    Nil => true
-    Cons(d, rest) => c /= d && abs(c - d) /= dist && safe(c, dist + 1, rest)
+    [] => true
+    d :: rest => c /= d && abs(c - d) /= dist && safe(c, dist + 1, rest)
 
 fn place(row, board) : List(Int) ! {Amb} =
   if row == n then
@@ -45,5 +45,5 @@ fn main() =
   let sols = solutions()
   println(length(sols))
   match sols of
-    Nil => println("none")
-    Cons(b, _) => println(show_board(b))
+    [] => println("none")
+    b :: _ => println(show_board(b))

@@ -1,9 +1,11 @@
 //! Rust-authoritative bootstrap shadow checking.
 
+use crate::DumpPhase;
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use prism_common::format::FormatTag;
 use serde::{Deserialize, Serialize};
 
 use super::{file_name, resolve_input, tool_package_source, CmdError, CmdResult};
@@ -11,7 +13,7 @@ use crate::error::Error;
 use crate::scheme_canon::{canonical_scheme, SCHEME_CANON_CONTRACT};
 use crate::{dump_on, with_prelude, Config, OptLevel, Root};
 
-const REPORT_SCHEMA: &str = "prism-bootstrap-check-v2";
+const REPORT_SCHEMA: FormatTag = FormatTag::new("prism-bootstrap-check-v2");
 const SHADOW_NAME: &str = "prism-t1";
 const AUTHORITY: &str = "rust";
 const STATUS_PARITY: &str = "parity";
@@ -48,8 +50,8 @@ struct RustDecl {
 
 #[derive(Debug, Serialize)]
 struct BootstrapReport {
-    schema: &'static str,
-    scheme_contract: &'static str,
+    schema: FormatTag,
+    scheme_contract: FormatTag,
     authority: &'static str,
     shadow: &'static str,
     status: &'static str,
@@ -208,13 +210,13 @@ fn target_evidence(file: &Path, cfg: &Config) -> Result<TargetEvidence, CmdError
 
     // These dumps all pass through the normal Rust checker. If it refuses, the
     // command stops here: the shadow never grants or denies compilation.
-    let tc_input = dump_on("tc-input", &src, &roots, cfg)
+    let tc_input = dump_on(DumpPhase::TcInput, &src, &roots, cfg)
         .map_err(|error| (error, src.clone(), name.clone()))?;
-    let resolved = dump_on("resolved-syntax", &src, &roots, cfg)
+    let resolved = dump_on(DumpPhase::ResolvedSyntax, &src, &roots, cfg)
         .map_err(|error| (error, src.clone(), name.clone()))?;
-    let surface = dump_on("surface-syntax", &src, &roots, cfg)
+    let surface = dump_on(DumpPhase::SurfaceSyntax, &src, &roots, cfg)
         .map_err(|error| (error, src.clone(), name.clone()))?;
-    let facts_text = dump_on("tc-facts", &src, &roots, cfg)
+    let facts_text = dump_on(DumpPhase::TcFacts, &src, &roots, cfg)
         .map_err(|error| (error, src.clone(), name.clone()))?;
     let rust_facts: RustFacts = serde_json::from_str(&facts_text).map_err(|error| {
         command_error(
@@ -367,7 +369,7 @@ fn parse_protocol(text: &str) -> Result<Protocol, String> {
             // a mismatch is what keeps "agrees" one comparison, not two
             // conventions that drifted apart.
             [RECORD_HEADER, PROTOCOL_VERSION, contract] if !saw_header => {
-                if *contract != SCHEME_CANON_CONTRACT {
+                if SCHEME_CANON_CONTRACT.expect(contract).is_err() {
                     return Err(format!(
                         "Prism T1 shadow speaks scheme contract {contract}, expected {SCHEME_CANON_CONTRACT}"
                     ));

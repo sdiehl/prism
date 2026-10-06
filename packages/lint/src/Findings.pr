@@ -102,8 +102,8 @@ pub fn fd_title(code : String) : String = fd_title_in(code, fd_rules())
 
 fn fd_title_in(code : String, rows : List((String, String))) : String =
   match rows of
-    Nil => ""
-    Cons((c, title), rest) =>
+    [] => ""
+    (c, title) :: rest =>
       if c == code then
         title
       else

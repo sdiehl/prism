@@ -1,0 +1,23 @@
+-- A value computed before a multishot capture is shared by every resumption.
+-- `shared` announces each evaluation, so a tier that replays the prefix on
+-- resume prints it once per resumption where the interpreter prints it once.
+effect Choose
+  choose() : Bool
+
+fn shared(n : Int) : Int ! {IO} =
+  println("shared {n}")
+  n * 10
+
+fn pick() : Int ! {Choose, IO} =
+  let base = shared(4)
+  if choose() then
+    base + 1
+  else
+    base + 2
+
+fn main() =
+  let total =
+    handle pick() with
+      choose() resume k => k(true) + k(false)
+      return r => r
+  println(total)

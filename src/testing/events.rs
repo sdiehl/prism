@@ -56,6 +56,16 @@ pub(crate) fn test_passed(id: &str) -> String {
     format!("{{\"event\":\"test_passed\",\"id\":{}}}", json_str(id))
 }
 
+/// The skipped-test event, carrying the `skip` pragma's reason.
+#[must_use]
+pub(crate) fn test_skipped(id: &str, reason: &str) -> String {
+    format!(
+        "{{\"event\":\"test_skipped\",\"id\":{},\"reason\":{}}}",
+        json_str(id),
+        json_str(reason)
+    )
+}
+
 /// The failing-test event, carrying the classified kind and a message.
 #[must_use]
 pub(crate) fn test_failed(id: &str, kind: OutcomeKind, message: &str) -> String {
@@ -116,7 +126,8 @@ pub(crate) fn suite_finished(
 }
 
 /// Emit every event for one completed test outcome to `out`, in canonical order:
-/// `test_started`, an optional `test_output`, then `test_passed`/`test_failed`.
+/// `test_started`, an optional `test_output`, then `test_passed`/`test_failed`,
+/// or `test_started` then `test_skipped` for a test a pragma skipped.
 /// Output is emitted for a failing test always, and for a passing test only when
 /// `show_output` is set.
 ///
@@ -129,6 +140,9 @@ pub(crate) fn emit_outcome(
     show_output: bool,
 ) -> std::io::Result<()> {
     writeln!(out, "{}", test_started(id))?;
+    if let Some(reason) = &outcome.skipped {
+        return writeln!(out, "{}", test_skipped(id, reason));
+    }
     let show = !outcome.passed() || show_output;
     if show && !outcome.output.is_empty() {
         writeln!(out, "{}", test_output(id, "stdout", &outcome.output))?;

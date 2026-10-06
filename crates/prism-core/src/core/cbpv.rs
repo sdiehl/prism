@@ -420,6 +420,12 @@ pub enum Comp {
         body: Box<Self>,
         return_var: Option<Sym>,
         return_body: Option<Box<Self>>,
+        // The cleanup computation, when the handler has a `finally` clause. It
+        // binds nothing, closes over the handler's outer scope only, answers
+        // Unit, and runs exactly once when the handler is left: after the return
+        // clause on the normal path, or alone when an operation clause abandons
+        // the continuation.
+        finally_body: Option<Box<Self>>,
         ops: CheckedHandler,
     },
     Mask(Vec<Sym>, Box<Self>),
@@ -714,24 +720,60 @@ impl Deref for LoweredCore {
 // the platform scan over the reachable set, misreport a program as needing input.
 #[must_use]
 pub fn reachable_fns(core: &Core) -> BTreeSet<Sym> {
-    let fn_map: BTreeMap<Sym, &CoreFn> = core.fns.iter().map(|f| (f.name, f)).collect();
-    let mut visited: BTreeSet<Sym> = BTreeSet::new();
-    let mut queue = vec![Sym::new(ENTRY_POINT)];
-    while let Some(name) = queue.pop() {
-        if visited.contains(&name) {
-            continue;
+    reach(core).0.into_keys().collect()
+}
+
+/// Every name reachable from `main`, each with the name that first reached it.
+///
+/// The walk is breadth first and takes a definition's successors in name-string
+/// order, so the chain back to `main` is a shortest one and is the same in every
+/// process: interning order never decides it.
+#[derive(Clone, Debug, Default)]
+pub struct Reach(BTreeMap<Sym, Option<Sym>>);
+
+impl Reach {
+    /// The chain from `main` to `name`, both ends included; `None` when `main`
+    /// does not reach it.
+    #[must_use]
+    pub fn chain(&self, name: Sym) -> Option<Vec<Sym>> {
+        let mut chain = vec![name];
+        let mut at = *self.0.get(&name)?;
+        while let Some(pred) = at {
+            chain.push(pred);
+            at = self.0[&pred];
         }
-        visited.insert(name);
-        if let Some(f) = fn_map.get(&name) {
-            calls_in(&f.body, &mut queue);
-            queue.extend(
-                super::fv::comp_without(&f.body, &f.params)
-                    .into_iter()
-                    .filter(|n| fn_map.contains_key(n)),
-            );
+        chain.reverse();
+        Some(chain)
+    }
+}
+
+/// The reachability walk behind [`reachable_fns`], keeping the predecessors.
+#[must_use]
+pub fn reach(core: &Core) -> Reach {
+    let fn_map: BTreeMap<Sym, &CoreFn> = core.fns.iter().map(|f| (f.name, f)).collect();
+    let entry = Sym::new(ENTRY_POINT);
+    let mut preds = BTreeMap::from([(entry, None)]);
+    let mut queue = std::collections::VecDeque::from([entry]);
+    while let Some(name) = queue.pop_front() {
+        let Some(f) = fn_map.get(&name) else {
+            continue;
+        };
+        let mut next = Vec::new();
+        calls_in(&f.body, &mut next);
+        next.extend(
+            super::fv::comp_without(&f.body, &f.params)
+                .into_iter()
+                .filter(|n| fn_map.contains_key(n)),
+        );
+        next.sort_unstable_by_key(|n| n.as_str());
+        for n in next {
+            if let std::collections::btree_map::Entry::Vacant(slot) = preds.entry(n) {
+                slot.insert(Some(name));
+                queue.push_back(n);
+            }
         }
     }
-    visited
+    Reach(preds)
 }
 
 // Every direct call head anywhere in `c` (including inside thunks, lambdas, and

@@ -73,7 +73,7 @@ pub fn censor(
 -- | Emit every item of `log` in order.
 pub fn tells(log : List(w)) : Unit ! {Writer(w)} =
   match log of
-    Nil => ()
-    Cons(m, rest) =>
+    [] => ()
+    m :: rest =>
       tell(m)
       tells(rest)

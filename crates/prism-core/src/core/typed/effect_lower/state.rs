@@ -1890,6 +1890,7 @@ pub fn discharge_entry(
             body: Box::new(body.clone()),
             return_binder: None,
             return_body: None,
+            finally_body: None,
             ops: TypedHandler::new(arms).ok()?,
         },
     );

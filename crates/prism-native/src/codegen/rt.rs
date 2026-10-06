@@ -58,6 +58,8 @@ const PRISM_IO_H: &str = "prism_io.h";
 const PRISM_IO_C: &str = "prism_io.c";
 const PRISM_NET_H: &str = "prism_net.h";
 const PRISM_NET_C: &str = "prism_net.c";
+const PRISM_PROC_H: &str = "prism_proc.h";
+const PRISM_PROC_C: &str = "prism_proc.c";
 const PRISM_MOBILITY_H: &str = "prism_mobility.h";
 const PRISM_MOBILITY_C: &str = "prism_mobility.c";
 
@@ -90,6 +92,7 @@ const NATIVE_RUNTIME_MODULES: &[RuntimeModule] = &[
     RuntimeModule::NativeKont,
     RuntimeModule::Io,
     RuntimeModule::Net,
+    RuntimeModule::Proc,
     RuntimeModule::Mobility,
 ];
 
@@ -119,6 +122,7 @@ enum RuntimeModule {
     NativeKont,
     Io,
     Net,
+    Proc,
     Mobility,
 }
 
@@ -156,6 +160,7 @@ impl RuntimeModule {
             Self::NativeKont => &[PRISM_KONT_H, PRISM_KONT_C],
             Self::Io => &[PRISM_IO_H, PRISM_IO_C],
             Self::Net => &[PRISM_NET_H, PRISM_NET_C],
+            Self::Proc => &[PRISM_PROC_H, PRISM_PROC_C],
             Self::Mobility => &[PRISM_MOBILITY_H, PRISM_MOBILITY_C],
         }
     }
@@ -421,6 +426,12 @@ const ALL: &[&str] = &[
 #[must_use]
 pub const fn build_cc_version() -> &'static str {
     env!("PRISM_BUILD_CC_VERSION")
+}
+
+/// The major version of the LLVM the backend emits IR for.
+#[must_use]
+pub fn llvm_major() -> u32 {
+    inkwell::support::get_llvm_version().0
 }
 
 /// The macOS deployment target the runtime objects were compiled against

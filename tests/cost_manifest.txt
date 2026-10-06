@@ -133,7 +133,7 @@ examples/world.pr	69431	195
 examples/zipper.pr	445	9
 examples/zygo.pr	1481	40
 tests/cases/run/accum.pr	2496	0
-tests/cases/run/adapter_observation.pr	879	252
+tests/cases/run/adapter_observation.pr	879	193
 tests/cases/run/annot.pr	72	1
 tests/cases/run/arena_mixed.pr	970	15
 tests/cases/run/array_value_semantics.pr	50	2

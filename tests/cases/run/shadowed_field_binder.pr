@@ -17,13 +17,13 @@ fn walk_renamed(t : Tree) : Int =
 
 fn walk_all(ts : List(Tree)) : Int =
   match ts of
-    Nil => 0
-    Cons(x, rest) => walk(x) + walk_all(rest)
+    [] => 0
+    x :: rest => walk(x) + walk_all(rest)
 
 fn walk_all_renamed(ts : List(Tree)) : Int =
   match ts of
-    Nil => 0
-    Cons(x, rest) => walk_renamed(x) + walk_all_renamed(rest)
+    [] => 0
+    x :: rest => walk_renamed(x) + walk_all_renamed(rest)
 
 fn sample() : Tree = Node([Leaf(1), Node([Leaf(2)], Leaf(3))], Leaf(4))
 

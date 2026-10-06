@@ -8,6 +8,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::iter;
 
+use prism_common::format::FormatTag;
+use prism_common::record::RecordError;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, SourceMap};
@@ -28,7 +30,7 @@ use crate::types::{Checked, CtorInfo, DataInfo, EffOpInfo, Type};
 use crate::verify::check::Checker;
 
 /// Schema tag for the shared type-span payload.
-pub const TYPESPANS_FORMAT: &str = "prism-typespans-v1";
+pub const TYPESPANS_FORMAT: FormatTag = FormatTag::new("prism-typespans-v1");
 
 // The wired-in scalar type names (all of kind `Type`). They are `Type`
 // variants rather than data declarations, so the type-level hover resolves
@@ -111,7 +113,7 @@ pub struct TypeSpan {
 /// The versioned, source-ordered type-span document.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct TypeSpans {
-    pub format: String,
+    pub format: FormatTag,
     pub spans: Vec<TypeSpan>,
 }
 
@@ -130,28 +132,31 @@ impl TypeSpans {
     /// Refuses an unknown format, empty/duplicate ranges, or non-canonical row
     /// order. Crossing ranges are also refused: surface expression ranges may
     /// nest or be disjoint, never overlap partially.
-    pub fn from_json(text: &str) -> Result<Self, String> {
-        let doc: Self = serde_json::from_str(text).map_err(|error| error.to_string())?;
-        if doc.format != TYPESPANS_FORMAT {
-            return Err(format!(
-                "unsupported typespans format `{}` (expected `{TYPESPANS_FORMAT}`)",
-                doc.format
-            ));
-        }
+    pub fn from_json(text: &str) -> Result<Self, RecordError> {
+        let doc: Self = RecordError::decode(text)?;
+        RecordError::expect_format("typespans", &TYPESPANS_FORMAT, &doc.format)?;
         let mut prior: Option<&TypeSpan> = None;
         let mut stack: Vec<&TypeSpan> = Vec::new();
         for span in &doc.spans {
             if span.start >= span.end {
-                return Err(format!("empty typespan {}..{}", span.start, span.end));
+                return Err(RecordError::Invalid(format!(
+                    "empty typespan {}..{}",
+                    span.start, span.end
+                )));
             }
             if let Some(prev) = prior {
                 if (prev.start, prev.end) == (span.start, span.end) {
-                    return Err(format!("duplicate typespan {}..{}", span.start, span.end));
+                    return Err(RecordError::Invalid(format!(
+                        "duplicate typespan {}..{}",
+                        span.start, span.end
+                    )));
                 }
                 let ordered = (prev.start, Reverse(prev.end), &prev.rendered)
                     < (span.start, Reverse(span.end), &span.rendered);
                 if !ordered {
-                    return Err("typespans are not in canonical source order".into());
+                    return Err(RecordError::Invalid(
+                        "typespans are not in canonical source order".into(),
+                    ));
                 }
             }
             while stack.last().is_some_and(|open| span.start >= open.end) {
@@ -159,10 +164,10 @@ impl TypeSpans {
             }
             if let Some(open) = stack.last() {
                 if span.end > open.end {
-                    return Err(format!(
+                    return Err(RecordError::Invalid(format!(
                         "crossing typespans {}..{} and {}..{}",
                         open.start, open.end, span.start, span.end
-                    ));
+                    )));
                 }
             }
             stack.push(span);
@@ -372,6 +377,7 @@ fn collect_handler_arms(
         let body = match arm {
             HandlerArm::Return(_, body)
             | HandlerArm::Op(_, _, _, body)
+            | HandlerArm::Finally(body)
             | HandlerArm::Sugar(
                 SugarArm::Once(_, _, body) | SugarArm::Val(_, body) | SugarArm::Never(_, _, body),
             ) => body,
@@ -456,6 +462,8 @@ fn collect_handler_arms(
                     });
                 }
             }
+            // The cleanup clause binds nothing.
+            HandlerArm::Finally(_) => {}
         }
         cursor = body.span.end;
     }
@@ -913,9 +921,9 @@ fn collect_class_spans(decl: &ClassDecl, tokens: &[(usize, Token, usize)]) -> Cl
             Token::Ident(name)
                 if depth == 0
                     && matches!(body.get(index + 1), Some((_, Token::Colon, _)))
-                    && decl.methods.iter().any(|(m, _)| m == name) =>
+                    && decl.methods.iter().any(|m| &m.name == name) =>
             {
-                method = decl.methods.iter().position(|(m, _)| m == name);
+                method = decl.methods.iter().position(|m| &m.name == name);
             }
             Token::Ident(name) => {
                 if let Some(at) = method {
@@ -1907,7 +1915,7 @@ fn into_document(src: &str, resolved: BTreeMap<ByteRange, (String, Level)>) -> T
         (a.start, Reverse(a.end), &a.rendered).cmp(&(b.start, Reverse(b.end), &b.rendered))
     });
     TypeSpans {
-        format: TYPESPANS_FORMAT.to_string(),
+        format: TYPESPANS_FORMAT,
         spans,
     }
 }

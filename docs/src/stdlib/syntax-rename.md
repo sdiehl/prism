@@ -92,7 +92,7 @@ How many times a name is referenced.
 
 ### `rn_is_ident`
 
-```prism,sig,h-a9bfc58c521087143eb111da626b4637117eb8f737f8279dee5068fb42acf8b9
+```prism,sig,h-0a4851f736a9cedf0dd3baad665f503a5c8a1f515b8b65acbd6d97ad91da7f26
 rn_is_ident : (String) -> Bool
 ```
 
@@ -100,7 +100,7 @@ Whether a string is a single identifier, decided by the real lexer rather than a
 
 ### `rn_mentions`
 
-```prism,sig,h-2f6cc458ea592fbfb19b75586a14c03aff83641e440a289a9d6f52849354ada2
+```prism,sig,h-f0722e2aae9a7241b8c16bbbdd968f302f9e41a7fac8cfcb5aec479e8d38d7e3
 rn_mentions : (String, String) -> Result(List(Syntax.Source.Span), Syntax.Lex.LexError)
 ```
 
@@ -108,7 +108,7 @@ The span of every identifier token spelling `name`, anywhere in the text. This i
 
 ### `rn_plan`
 
-```prism,sig,h-ceed2ed2aea167223483ff3217c987511d6c00f1b0fe5e7bed77b124a29468c8
+```prism,sig,h-99a7866c2a12d3a444da93af2f2b158fa9d0619c874866ad75faa30a072bf099
 rn_plan : (Syntax.Resolved.ResolvedDoc, String, String) -> Result(List(Syntax.Edit.Edit), Syntax.Rename.RenameRefusal)
 ```
 
@@ -118,7 +118,7 @@ The checks run in a fixed order, so the refusal a caller sees is always the firs
 
 ### `rn_rename`
 
-```prism,sig,h-a576a09a87eadaed4c2c4c98dfabace44bb2962eb71c555016b62f38a9af2b71
+```prism,sig,h-609d0f4e6cd82528293e265f95374b14c3b25b9d19aa9192581644abe72f5e20
 rn_rename : (Syntax.Resolved.ResolvedDoc, String, String) -> Result(String, Syntax.Rename.RenameError)
 ```
 

@@ -1,0 +1,15 @@
+effect Quit
+  never quit(Unit) : Int
+
+fn go() : Int ! {Quit, IO} =
+  handle 1 with
+    return x =>
+      println("returning {x}")
+      quit(())
+    finally => println("cleanup")
+
+fn main() : Unit ! {IO} =
+  println(handle go() with {
+    never quit(u) => 7,
+    return r => r
+  })

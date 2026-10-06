@@ -13,6 +13,7 @@
 // easy to lose in handwritten maintenance; and four deterministic mutation
 // matrices generated live, so a parser shaped only around fixtures cannot pass.
 
+use prism::DumpPhase;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::{env, fs, process};
@@ -29,7 +30,7 @@ const PARSER_FIXTURES: &str = "tests/fixtures/parser";
 const WITNESS: &str = "parity.pr";
 const EDGES: &str = "edge_parity.pr";
 const SELF_PARSE: &str = "self_parse.pr";
-const SURFACE_PHASE: &str = "surface-syntax";
+const SURFACE_PHASE: DumpPhase = DumpPhase::SurfaceSyntax;
 const OK: &str = "ok";
 
 // Every syntax-fixture stem whose source the Prism parser is expected to accept

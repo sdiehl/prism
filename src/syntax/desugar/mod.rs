@@ -24,6 +24,8 @@ use prism_common::fresh::Fresh;
 mod aliases;
 mod derive;
 mod effects;
+
+pub(crate) use effects::referenced_names;
 mod ids;
 mod orpat;
 mod stable;
@@ -88,6 +90,7 @@ fn throw_effect(name: String, op_name: String, op_params: Vec<Ty>, span: Span) -
             // Never resumes: the poly-return restriction already forces every
             // handler to `never`, so grade Zero states the same fact.
             grade: Grade::Never,
+            span: Span::default(),
         }],
         span,
     }
@@ -141,6 +144,7 @@ fn inject_return_effect(prog: &mut Program) {
             params: vec![Ty::Var(names::RETURN_VAL.into())],
             ret: Ty::Var(THROW_RET.into()),
             grade: Grade::Never,
+            span: Span::default(),
         }],
         span: Span::empty(0),
     });
@@ -192,7 +196,7 @@ fn lower_patterns(prog: &mut Program, ctors: &BTreeSet<String>) -> Result<PatMap
                 }
                 .at(p.view.span));
             };
-            let Some((_, mty)) = cl.methods.iter().find(|(n, _)| n == method) else {
+            let Some(mty) = cl.methods.iter().find(|m| &m.name == method).map(|m| &m.ty) else {
                 return Err(ErrKind::PatternViewUnknownMethod {
                     method: method.clone(),
                     class: p.for_ty.clone(),
@@ -519,8 +523,8 @@ fn reject_coeffect_tys(prog: &Program) -> Result<(), TypeError> {
         check_decl(d)?;
     }
     for c in &prog.classes {
-        for (_, t) in &c.methods {
-            check(t, c.span)?;
+        for m in &c.methods {
+            check(&m.ty, c.span)?;
         }
     }
     for i in &prog.instances {
@@ -669,7 +673,7 @@ fn once_uses(e: &S<Expr>, name: &str) -> usize {
 }
 
 // A parameter annotated `((..) -> ..) @ portable`.
-fn is_portable_param(p: &Param) -> bool {
+fn is_portable_param<P: Phase>(p: &Param<P>) -> bool {
     matches!(&p.ty, Some(Ty::Coeffect(inner, row)) if matches!(**inner, Ty::Fun(..)) && row.is_portable())
 }
 
@@ -689,7 +693,7 @@ struct Portable<'a> {
 }
 
 impl<'a> Portable<'a> {
-    fn new(prog: &'a Program) -> Self {
+    fn new<P: Phase>(prog: &'a Program<P>) -> Self {
         Self {
             decls: prog.types.iter().map(|d| (d.name.as_str(), d)).collect(),
             opaque: &prog.opaques,
@@ -788,7 +792,7 @@ fn subst_ty(t: &Ty, subst: &BTreeMap<&str, &Ty>) -> Ty {
 // does not special-case recurses through `each_child` with the current binder
 // scope, so a name it cannot prove bound is reported free (a false capture only
 // costs a diagnostic).
-fn free_names(e: &S<Expr>, bound: &mut Vec<String>, out: &mut BTreeSet<String>) {
+fn free_names<P: Phase>(e: &S<Expr<P>>, bound: &mut Vec<String>, out: &mut BTreeSet<String>) {
     match &e.node {
         Expr::Var(n) => {
             if !bound.contains(n) {
@@ -851,11 +855,40 @@ fn pat_binds(p: &S<Pattern>, out: &mut Vec<String>) {
 // parameter may capture only names that travel to a fresh runtime: a top-level
 // function or constructor (a content-addressed code reference), another
 // `@ portable` parameter of the enclosing function (a relay), or a
-// portable-typed parameter (scalar data). Any other captured free variable (a
-// local closure, a `var` cell, a handler op, a nonportable value) is rejected.
-// A scalar bound by a local `let` is excluded because this check admits only
-// facts available directly from the enclosing function's signature.
+// portable-typed parameter or local `let` (scalar data). Any other captured
+// free variable (a local closure, a `var` cell, a handler op, a nonportable
+// value) is rejected.
+//
+// A `let` is portable data when its value says so on its face (a literal, or an
+// ascription to a portable type) or when the type inference gave it passes the
+// same judgment. The contract is therefore checked twice. This pass runs before
+// inference and refuses what no type could rescue (a captured closure literal,
+// a `var` cell, a nonportable parameter), so those keep their own diagnostic
+// rather than surfacing as a contract mismatch; every other `let` is taken on
+// trust here and decided by [`check_portable_captures_checked`].
 fn check_portable_captures(prog: &Program) -> Result<(), TypeError> {
+    check_portable_captures_with(prog, |_, v| !matches!(v.node, Expr::Lam(..)))
+}
+
+/// The authoritative `@ portable` capture check, over the checked program: a
+/// `let` that is not portable on its face is judged by its inferred type.
+pub(crate) fn check_portable_captures_checked(
+    prog: &Program<Core>,
+    checked: &crate::types::Checked,
+) -> Result<(), TypeError> {
+    check_portable_captures_with(prog, |portable, v| {
+        immediate_portable(v, portable)
+            || checked
+                .facts
+                .node_type(v.id)
+                .is_some_and(|t| portable.judge(&written_type(t)))
+    })
+}
+
+fn check_portable_captures_with<P: Phase>(
+    prog: &Program<P>,
+    admit_let: impl Fn(&Portable<'_>, &S<Expr<P>>) -> bool,
+) -> Result<(), TypeError> {
     let portable_params: BTreeMap<&str, Vec<usize>> = prog
         .fns
         .iter()
@@ -873,74 +906,140 @@ fn check_portable_captures(prog: &Program) -> Result<(), TypeError> {
     if portable_params.is_empty() {
         return Ok(());
     }
-    let portable = Portable::new(prog);
     let mut code_names: BTreeSet<&str> = prog.fns.iter().map(|d| d.name.as_str()).collect();
     for t in &prog.types {
         for c in &t.ctors {
             code_names.insert(c.name.as_str());
         }
     }
+    let walk = PortableWalk {
+        portable_params,
+        portable: Portable::new(prog),
+        code_names,
+        admit_let,
+    };
     for d in &prog.fns {
         let ok: BTreeSet<String> = d
             .params
             .iter()
-            .filter(|p| is_portable_param(p) || p.ty.as_ref().is_some_and(|t| portable.judge(t)))
+            .filter(|p| {
+                is_portable_param(p) || p.ty.as_ref().is_some_and(|t| walk.portable.judge(t))
+            })
             .map(|p| p.name.clone())
             .collect();
-        check_portable_calls(&d.body, &portable_params, &code_names, &ok)?;
+        walk.calls(&d.body, &ok)?;
     }
     Ok(())
 }
 
-fn check_portable_calls(
-    e: &S<Expr>,
-    portable_params: &BTreeMap<&str, Vec<usize>>,
-    code_names: &BTreeSet<&str>,
-    ok: &BTreeSet<String>,
-) -> Result<(), TypeError> {
-    if let Expr::Call(f, args) = &e.node {
-        if let Expr::Var(name) = &f.node {
-            if let Some(idxs) = portable_params.get(name.as_str()) {
-                for &i in idxs {
-                    if let Some(arg) = args.get(i) {
-                        check_arg_portable(arg, code_names, ok)?;
+// The zonked type of a checked node in the written-type shapes
+// [`Portable::walk`] can see through. Anything else becomes a bare variable,
+// which the walk refuses.
+fn written_type(t: &crate::types::Type) -> Ty {
+    use crate::types::Type;
+    let all = |ts: &[Type]| ts.iter().map(written_type).collect();
+    match t {
+        Type::Int => Ty::Int,
+        Type::I64 => Ty::I64,
+        Type::U64 => Ty::U64,
+        Type::Bool => Ty::Bool,
+        Type::Unit => Ty::Unit,
+        Type::Float => Ty::Float,
+        Type::Char => Ty::Char,
+        Type::Str => Ty::Str,
+        Type::Con(n, args) => Ty::Con(n.as_str().to_string(), all(args)),
+        Type::Tuple(ts) => Ty::Tuple(all(ts)),
+        Type::UnboxedTuple(ts) => Ty::UnboxedTuple(all(ts)),
+        Type::UnboxedRecord(fs) => Ty::UnboxedRecord(
+            fs.iter()
+                .map(|(n, a)| (n.as_str().to_string(), written_type(a)))
+                .collect(),
+        ),
+        _ => Ty::Var(String::new()),
+    }
+}
+
+// A `let` value that is portable data before any type is inferred.
+fn immediate_portable<P: Phase>(v: &S<Expr<P>>, portable: &Portable<'_>) -> bool {
+    match &v.node {
+        Expr::Int(_)
+        | Expr::Float(_)
+        | Expr::Char(_)
+        | Expr::Bool(_)
+        | Expr::Unit
+        | Expr::Str(_) => true,
+        Expr::Ann(_, t) => portable.judge(t),
+        _ => false,
+    }
+}
+
+struct PortableWalk<'a, F> {
+    portable_params: BTreeMap<&'a str, Vec<usize>>,
+    portable: Portable<'a>,
+    code_names: BTreeSet<&'a str>,
+    admit_let: F,
+}
+
+impl<F> PortableWalk<'_, F> {
+    fn calls<P: Phase>(&self, e: &S<Expr<P>>, ok: &BTreeSet<String>) -> Result<(), TypeError>
+    where
+        F: Fn(&Portable<'_>, &S<Expr<P>>) -> bool,
+    {
+        // A `let` scopes its name over the body: admitted when its value is
+        // portable data, and withdrawn when it shadows an admitted name with
+        // anything else.
+        if let Expr::Let(name, v, body) = &e.node {
+            self.calls(v, ok)?;
+            let mut inner = ok.clone();
+            if (self.admit_let)(&self.portable, v) {
+                inner.insert(name.clone());
+            } else {
+                inner.remove(name);
+            }
+            return self.calls(body, &inner);
+        }
+        if let Expr::Call(f, args) = &e.node {
+            if let Expr::Var(name) = &f.node {
+                if let Some(idxs) = self.portable_params.get(name.as_str()) {
+                    for &i in idxs {
+                        if let Some(arg) = args.get(i) {
+                            self.arg(arg, ok)?;
+                        }
                     }
                 }
             }
         }
-    }
-    let mut out = Ok(());
-    e.node.each_child(&mut |c| {
-        if out.is_ok() {
-            out = check_portable_calls(c, portable_params, code_names, ok);
-        }
-    });
-    out
-}
-
-// A single argument flowing into a `@ portable` parameter.
-fn check_arg_portable(
-    arg: &S<Expr>,
-    code_names: &BTreeSet<&str>,
-    ok: &BTreeSet<String>,
-) -> Result<(), TypeError> {
-    let bad = |subject: String| Err(ErrKind::PortableCapturesNonportable { subject }.at(arg.span));
-    match &arg.node {
-        Expr::Lam(params, body) => {
-            let mut bound: Vec<String> = params.iter().map(|p| p.name.clone()).collect();
-            let mut free = BTreeSet::new();
-            free_names(body, &mut bound, &mut free);
-            for name in &free {
-                if !code_names.contains(name.as_str()) && !ok.contains(name) {
-                    return bad(name.clone());
-                }
+        let mut out = Ok(());
+        e.node.each_child(&mut |c| {
+            if out.is_ok() {
+                out = self.calls(c, ok);
             }
-            Ok(())
+        });
+        out
+    }
+
+    // A single argument flowing into a `@ portable` parameter.
+    fn arg<P: Phase>(&self, arg: &S<Expr<P>>, ok: &BTreeSet<String>) -> Result<(), TypeError> {
+        let bad =
+            |subject: String| Err(ErrKind::PortableCapturesNonportable { subject }.at(arg.span));
+        match &arg.node {
+            Expr::Lam(params, body) => {
+                let mut bound: Vec<String> = params.iter().map(|p| p.name.clone()).collect();
+                let mut free = BTreeSet::new();
+                free_names(body, &mut bound, &mut free);
+                for name in &free {
+                    if !self.code_names.contains(name.as_str()) && !ok.contains(name) {
+                        return bad(name.clone());
+                    }
+                }
+                Ok(())
+            }
+            // A bare code reference or a relayed `@ portable` value is already
+            // portable.
+            Expr::Var(g) if self.code_names.contains(g.as_str()) || ok.contains(g) => Ok(()),
+            Expr::Var(g) => bad(g.clone()),
+            _ => bad("a computed closure".into()),
         }
-        // A bare code reference or a relayed `@ portable` value is already portable.
-        Expr::Var(g) if code_names.contains(g.as_str()) || ok.contains(g) => Ok(()),
-        Expr::Var(g) => bad(g.clone()),
-        _ => bad("a computed closure".into()),
     }
 }
 

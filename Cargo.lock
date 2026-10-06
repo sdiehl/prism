@@ -1114,7 +1114,7 @@ dependencies = [
 
 [[package]]
 name = "prism"
-version = "0.23.0"
+version = "0.24.0"
 dependencies = [
  "anstyle",
  "ariadne",
@@ -1152,14 +1152,16 @@ dependencies = [
 
 [[package]]
 name = "prism-common"
-version = "0.23.0"
+version = "0.24.0"
 dependencies = [
  "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]
 name = "prism-core"
-version = "0.23.0"
+version = "0.24.0"
 dependencies = [
  "blake3",
  "num-bigint",
@@ -1175,7 +1177,7 @@ dependencies = [
 
 [[package]]
 name = "prism-lineage"
-version = "0.23.0"
+version = "0.24.0"
 dependencies = [
  "blake3",
  "prism-common",
@@ -1188,7 +1190,7 @@ dependencies = [
 
 [[package]]
 name = "prism-native"
-version = "0.23.0"
+version = "0.24.0"
 dependencies = [
  "blake3",
  "cc",
@@ -1202,7 +1204,7 @@ dependencies = [
 
 [[package]]
 name = "prism-store"
-version = "0.23.0"
+version = "0.24.0"
 dependencies = [
  "blake3",
  "prism-common",
@@ -1213,7 +1215,7 @@ dependencies = [
 
 [[package]]
 name = "prism-syntax"
-version = "0.23.0"
+version = "0.24.0"
 dependencies = [
  "anstyle",
  "ariadne",

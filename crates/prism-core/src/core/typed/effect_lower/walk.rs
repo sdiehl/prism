@@ -210,12 +210,16 @@ pub fn each_subcomp<'a>(c: &'a TypedComp, f: &mut impl FnMut(&'a TypedComp)) {
         TypedCompKind::Handle {
             body,
             return_body,
+            finally_body,
             ops,
             ..
         } => {
             f(body);
             if let Some(rb) = return_body {
                 f(rb);
+            }
+            if let Some(fb) = finally_body {
+                f(fb);
             }
             for o in ops.arms() {
                 f(o.body());
@@ -271,6 +275,31 @@ pub fn contains_mask(c: &TypedComp) -> bool {
     }
 
     let mut finder = MaskFinder(false);
+    finder.walk_comp(c);
+    finder.0
+}
+
+/// Whether a computation holds a handler with a `finally` clause, descending
+/// through thunks.
+#[must_use]
+pub fn contains_cleanup(c: &TypedComp) -> bool {
+    struct CleanupFinder(bool);
+
+    impl Visit for CleanupFinder {
+        fn comp(&mut self, comp: &TypedComp) -> bool {
+            let found = matches!(
+                comp.kind(),
+                TypedCompKind::Handle {
+                    finally_body: Some(_),
+                    ..
+                }
+            );
+            self.0 |= found;
+            !self.0
+        }
+    }
+
+    let mut finder = CleanupFinder(false);
     finder.walk_comp(c);
     finder.0
 }

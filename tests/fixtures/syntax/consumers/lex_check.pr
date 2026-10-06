@@ -44,14 +44,14 @@ fn triv_key(t : Trivia) : String =
 -- first divergence.
 fn cmp_toks(got : List(Token), want : List(Token), idx : Int) : String =
   match got of
-    Nil =>
+    [] =>
       match want of
-        Nil => "ok"
-        Cons(_, _) => "mismatch raw-count got=fewer at idx={show_int(idx)}"
-    Cons(g, gr) =>
+        [] => "ok"
+        _ :: _ => "mismatch raw-count got=fewer at idx={show_int(idx)}"
+    g :: gr =>
       match want of
-        Nil => "mismatch raw-count got=more at idx={show_int(idx)}"
-        Cons(w, wr) =>
+        [] => "mismatch raw-count got=more at idx={show_int(idx)}"
+        w :: wr =>
           if tok_key(g) == tok_key(w) then
             cmp_toks(gr, wr, idx + 1)
           else
@@ -61,14 +61,14 @@ fn cmp_toks(got : List(Token), want : List(Token), idx : Int) : String =
 -- first divergence.
 fn cmp_trivs(got : List(Trivia), want : List(Trivia), idx : Int) : String =
   match got of
-    Nil =>
+    [] =>
       match want of
-        Nil => "ok"
-        Cons(_, _) => "mismatch trivia-count got=fewer at idx={show_int(idx)}"
-    Cons(g, gr) =>
+        [] => "ok"
+        _ :: _ => "mismatch trivia-count got=fewer at idx={show_int(idx)}"
+    g :: gr =>
       match want of
-        Nil => "mismatch trivia-count got=more at idx={show_int(idx)}"
-        Cons(w, wr) =>
+        [] => "mismatch trivia-count got=more at idx={show_int(idx)}"
+        w :: wr =>
           if triv_key(g) == triv_key(w) then
             cmp_trivs(gr, wr, idx + 1)
           else

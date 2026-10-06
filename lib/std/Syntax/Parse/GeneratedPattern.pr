@@ -77,13 +77,16 @@ pub fn generated_pattern_note_receipt(
     c
   else
     match receipt of
-      PRPlain => cursor_note(c, TFixed("|"))
+      PRPlain => note_pattern_infix(c)
       PRBareUid =>
-        cursor_note(
+        note_pattern_infix(
             cursor_note(cursor_note(c, TFixed("(")), TFixed("\{")),
-            TFixed("|"),
           )
-      PRBareQual => cursor_note(cursor_note(c, TFixed("(")), TFixed("|"))
+      PRBareQual => note_pattern_infix(cursor_note(c, TFixed("(")))
+
+-- The two infix pattern operators, either of which may follow any pattern.
+fn note_pattern_infix(c : Cursor) : Cursor =
+  cursor_note(cursor_note(c, TFixed("::")), TFixed("|"))
 
 pub fn generated_let_note_receipt(
   c : Cursor,
@@ -114,7 +117,7 @@ fn generated_pattern_body(
   depth : Int
 ) : Parsed(GeneratedPatternDone) =
   let start = c
-  generated_bind(generated_pat_alt(c, depth)) fn(first, c1)
+  generated_bind(generated_pat_cons(c, depth)) fn(first, c1)
     if at_fixed(c1, "|") then
       generated_or_tail(start, depth, c1, [pattern_value(first)])
     else
@@ -126,12 +129,48 @@ fn generated_or_tail(
   c : Cursor,
   rev : List(Sp(Pat))
 ) : Parsed(GeneratedPatternDone) =
-  generated_bind(generated_pat_alt(cursor_advance(c), depth)) fn(next, c1)
+  generated_bind(generated_pat_cons(cursor_advance(c), depth)) fn(next, c1)
     let rev1 = Cons(pattern_value(next), rev)
     if at_fixed(c1, "|") then
       generated_or_tail(start, depth, c1, rev1)
     else
       pattern_done(POr(reverse(rev1)), start, c1, pattern_receipt(next))
+
+-- `h :: t`: right associative, so the chain is read flat and folded from the
+-- right. Each cell spans its head through the end of the whole chain.
+fn generated_pat_cons(c : Cursor, depth : Int) : Parsed(GeneratedPatternDone) =
+  generated_cons_chain(depth, c, Nil)
+
+fn generated_cons_chain(
+  depth : Int,
+  c : Cursor,
+  rev : List((Cursor, Sp(Pat)))
+) : Parsed(GeneratedPatternDone) =
+  generated_bind(generated_pat_alt(c, depth)) fn(item, c1)
+    if at_fixed(c1, "::") then
+      generated_cons_chain(
+          depth,
+          cursor_advance(c1),
+          Cons((c, pattern_value(item)), rev),
+        )
+    else
+      PTook(
+          PatternDone(
+              cons_fold(rev, pattern_value(item), c1),
+              pattern_receipt(item),
+            ),
+          c1,
+        )
+
+fn cons_fold(
+  rev : List((Cursor, Sp(Pat))),
+  tail : Sp(Pat),
+  end : Cursor
+) : Sp(Pat) =
+  match rev of
+    [] => tail
+    (start, head) :: rest =>
+      cons_fold(rest, pattern_sp(PCtor("Cons", [head, tail]), start, end), end)
 
 fn generated_let_body(c : Cursor, depth : Int) : Parsed(GeneratedLetDone) =
   match cursor_kind(c) of
@@ -140,10 +179,13 @@ fn generated_let_body(c : Cursor, depth : Int) : Parsed(GeneratedLetDone) =
     Some(TFixed(s)) =>
       if s == "(" then
         generated_bind(generated_tuple(c, depth)) fn(done, c1)
-          PTook(LetDone(pattern_value(done), GLClosed), c1)
+          generated_let_cons(c, pattern_value(done), c1, depth)
+      elif s == "[" then
+        generated_bind(generated_list(c, depth)) fn(done, c1)
+          generated_let_cons(c, pattern_value(done), c1, depth)
       else
-        generated_let_miss(c)
-    _ => generated_let_miss(c)
+        generated_let_head(c, depth)
+    _ => generated_let_head(c, depth)
 
 fn generated_let_ctor(c : Cursor, depth : Int) : Parsed(GeneratedLetDone) =
   let start = c
@@ -151,12 +193,51 @@ fn generated_let_ctor(c : Cursor, depth : Int) : Parsed(GeneratedLetDone) =
   let c1 = cursor_advance(c)
   if at_fixed(c1, "(") then
     generated_bind(generated_args(c1, depth)) fn(args, c2)
-      PTook(LetDone(pattern_sp(PCtor(name, args), start, c2), GLClosed), c2)
+      generated_let_cons(
+          start,
+          pattern_sp(PCtor(name, args), start, c2),
+          c2,
+          depth,
+        )
+  elif at_fixed(c1, "::") then
+    generated_let_cons(
+        start,
+        pattern_sp(PCtor(name, Nil), start, c1),
+        c1,
+        depth,
+      )
   else
     PTook(LetDone(pattern_sp(PCtor(name, Nil), start, c1), GLNamed), c1)
 
+-- A closed head may continue as `head :: tail`; any other head must.
+fn generated_let_cons(
+  start : Cursor,
+  head : Sp(Pat),
+  c : Cursor,
+  depth : Int
+) : Parsed(GeneratedLetDone) =
+  if at_fixed(c, "::") then
+    generated_bind(generated_cons_chain(depth, cursor_advance(c), [(start, head)])) fn(done, c1)
+      PTook(LetDone(pattern_value(done), GLClosed), c1)
+  else
+    PTook(LetDone(head, GLClosed), c)
+
+fn generated_let_head(c : Cursor, depth : Int) : Parsed(GeneratedLetDone) =
+  match generated_pat_alt(c, depth) of
+    PTook(done, c1) =>
+      if at_fixed(c1, "::") then
+        generated_let_cons(c, pattern_value(done), c1, depth)
+      else
+        PStuck(cursor_note(c1, TFixed("::")))
+    _ => generated_let_miss(c)
+
 fn generated_let_miss(c : Cursor) : Parsed(GeneratedLetDone) =
-  PStuck(cursor_note(cursor_note(cursor_note(c, TUid), TQual), TFixed("(")))
+  PStuck(
+      cursor_note(
+          cursor_note(cursor_note(cursor_note(c, TUid), TQual), TFixed("(")),
+          TFixed("["),
+        ),
+    )
 
 fn generated_pat_alt(c : Cursor, depth : Int) : Parsed(GeneratedPatternDone) =
   match cursor_kind(c) of

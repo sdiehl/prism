@@ -2,8 +2,8 @@
 
 use crate::core::builtins::Builtin;
 use crate::core::effect_abi::{
-    BOUNCE_TAG, EBIND, EBOUNCE, EFF_CTORS, EOP, EPURE, ERESUME, OP_TAG, PURE_TAG, QAPPLY,
-    RESUME_TAG, TQCONS, TQCONS_TAG, TQNIL, TQNIL_TAG,
+    BOUNCE_TAG, EBIND, EBOUNCE, EFF_CTORS, EOP, EPURE, ERESUME, OP_TAG, PEND, PENDING, PEND_TAG,
+    PURE_TAG, QAPPLY, RESUME_TAG, TQCONS, TQCONS_TAG, TQNIL, TQNIL_TAG,
 };
 use crate::types::ty::EffRow;
 use crate::types::Type;
@@ -256,6 +256,41 @@ pub fn insert(env: &mut VerifyEnv) {
             pure(eff(residual)),
         ),
     );
+}
+
+/// The type of an operation argument carried beside its pending cleanups.
+#[must_use]
+pub fn pending() -> CoreType {
+    source(Type::Con(Sym::from(PENDING), Vec::new()))
+}
+
+/// Declare the pending carrier, for a program whose operations carry one.
+pub fn insert_pending(env: &mut VerifyEnv) {
+    env.insert_constructor(
+        Sym::from(PEND),
+        ConstructorSig::new(Vec::new(), PEND_TAG, vec![word(), word()], pending()),
+    );
+}
+
+/// An operation argument beside the queue word of the cleanups it left pending,
+/// as the one word an operation cell carries.
+#[must_use]
+pub fn pend(argument: TypedValue, cleanups: TypedValue) -> TypedValue {
+    lowered_repr(
+        ctor(
+            PEND,
+            PEND_TAG,
+            Vec::new(),
+            vec![argument, cleanups],
+            pending(),
+        ),
+        word(),
+    )
+}
+
+#[must_use]
+pub fn pend_pattern(argument: TypedBinder, cleanups: TypedBinder) -> TypedPattern {
+    ctor_pattern(PEND, Vec::new(), vec![argument, cleanups])
 }
 
 #[must_use]

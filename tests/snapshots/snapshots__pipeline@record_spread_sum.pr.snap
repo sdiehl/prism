@@ -27,6 +27,7 @@ Program {
                             ),
                         ],
                     ),
+                    span: 172..178,
                 },
                 Ctor {
                     name: "Square",
@@ -41,6 +42,7 @@ Program {
                             ),
                         ],
                     ),
+                    span: 197..203,
                 },
             ],
             deriving: [],

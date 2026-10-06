@@ -32,6 +32,7 @@ Program {
                             ),
                         ],
                     ),
+                    span: 259..264,
                 },
             ],
             deriving: [],

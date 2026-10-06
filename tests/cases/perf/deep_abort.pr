@@ -3,8 +3,8 @@ effect Abort
 
 fn first(xs) =
   match xs of
-    Nil => 0
-    Cons(x, _) => x
+    [] => 0
+    x :: _ => x
 
 fn walk(n : Int, acc) : Int ! {Abort} =
   if n == 0 then

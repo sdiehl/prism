@@ -21,6 +21,7 @@ Program {
                         Int,
                     ],
                     fields: None,
+                    span: 128..134,
                 },
             ],
             deriving: [
@@ -42,9 +43,9 @@ Program {
             param: "a",
             supers: [],
             methods: [
-                (
-                    "hash",
-                    Fun(
+                ClassMethod {
+                    name: "hash",
+                    ty: Fun(
                         [
                             Var(
                                 "a",
@@ -53,7 +54,8 @@ Program {
                         Empty,
                         Str,
                     ),
-                ),
+                    span: 16..20,
+                },
             ],
             span: 0..36,
         },

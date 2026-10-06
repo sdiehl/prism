@@ -35,6 +35,7 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use prism_common::format::FormatTag;
 #[cfg(unix)]
 use rustix::fs::{flock, FlockOperation};
 
@@ -58,8 +59,8 @@ const SIG_NAMESPACE: &str = "prism-package-index";
 // Line-oriented, tab-separated artifact formats. A row is one line; hashes and
 // git tags contain no tab, so the separator is unambiguous. This compiler is
 // still pre-stability, so the trust surface accepts only the current protocol.
-const INDEX_HEADER: &str = "prism-pkg-index\tv4";
-const LOG_HEADER: &str = "prism-pkg-log\tv5";
+const INDEX_HEADER: FormatTag = FormatTag::new("prism-pkg-index\tv4");
+const LOG_HEADER: FormatTag = FormatTag::new("prism-pkg-log\tv5");
 const FIELD_SEP: char = '\t';
 
 // The digest a chained log line carries for its predecessor: the previous
@@ -169,15 +170,17 @@ pub fn parse_index(body: &[u8]) -> Vec<IndexRow> {
     let mut lines = text.lines();
     // A body with the wrong header parses to no rows rather than an error: callers
     // that need the distinction check `index_artifact` for presence.
-    let header = lines.next();
-    if header != Some(INDEX_HEADER) {
+    if INDEX_HEADER
+        .expect(lines.next().unwrap_or_default())
+        .is_err()
+    {
         return Vec::new();
     }
     lines
         .filter_map(|line| {
             let fields: Vec<&str> = line.split(FIELD_SEP).collect();
-            match (header, fields.as_slice()) {
-                (Some(INDEX_HEADER), [origin, name, tag, scheme, kind, root])
+            match fields.as_slice() {
+                [origin, name, tag, scheme, kind, root]
                     if !origin.is_empty() && !name.is_empty() =>
                 {
                     Some(IndexRow {
@@ -186,7 +189,7 @@ pub fn parse_index(body: &[u8]) -> Vec<IndexRow> {
                         tag: (*tag).to_string(),
                         scheme: (*scheme).to_string(),
                         kind: (*kind).to_string(),
-                        root: Digest::from(*root),
+                        root: Digest::parse(*root).ok()?,
                     })
                 }
                 _ => None,
@@ -202,7 +205,7 @@ pub fn parse_index(body: &[u8]) -> Vec<IndexRow> {
 pub fn serialize_index(rows: &[IndexRow]) -> Vec<u8> {
     let mut sorted: Vec<&IndexRow> = rows.iter().collect();
     sorted.sort_by(|a, b| (&a.origin, &a.name, &a.tag).cmp(&(&b.origin, &b.name, &b.tag)));
-    let mut body = String::from(INDEX_HEADER);
+    let mut body = String::from(INDEX_HEADER.as_str());
     body.push('\n');
     for r in sorted {
         let _ = writeln!(
@@ -220,25 +223,25 @@ pub fn serialize_index(rows: &[IndexRow]) -> Vec<u8> {
 /// row; the transparency log is what makes that change visible after the fact.
 #[must_use]
 pub fn upsert(rows: &[IndexRow], row: IndexRow) -> Vec<IndexRow> {
-    let mut map: BTreeMap<(String, String, String), (String, String, String)> = rows
+    let mut map: BTreeMap<(String, String, String), (String, String, Digest)> = rows
         .iter()
         .map(|r| {
             (
                 (r.origin.clone(), r.name.clone(), r.tag.clone()),
-                (r.scheme.clone(), r.kind.clone(), r.root.to_string()),
+                (r.scheme.clone(), r.kind.clone(), r.root.clone()),
             )
         })
         .collect();
     map.insert(
         (row.origin.clone(), row.name.clone(), row.tag.clone()),
-        (row.scheme, row.kind, row.root.into_string()),
+        (row.scheme, row.kind, row.root),
     );
     map.into_iter()
         .map(|((origin, name, tag), (scheme, kind, root))| IndexRow {
             origin,
             name,
             tag,
-            root: Digest::from(root),
+            root,
             scheme,
             kind,
         })
@@ -604,13 +607,13 @@ pub struct Repoint {
     /// The repointed tag.
     pub tag: String,
     /// The root it pointed at first.
-    pub from_root: String,
+    pub from_root: Digest,
     /// The hash scheme for `from_root`.
     pub from_scheme: String,
     /// The artifact kind for `from_root`.
     pub from_kind: String,
     /// The root it was later repointed to.
-    pub to_root: String,
+    pub to_root: Digest,
     /// The hash scheme for `to_root`.
     pub to_scheme: String,
     /// The artifact kind for `to_root`.
@@ -682,7 +685,7 @@ impl Log {
         tag: &str,
         scheme: &str,
         kind: &str,
-        root: &str,
+        root: &Digest,
     ) -> io::Result<u64> {
         // The parent must exist before the sibling lock file can be created there.
         if let Some(parent) = self.path.parent() {
@@ -716,16 +719,17 @@ impl Log {
         // them is a single syscall rather than two.
         let mut out = String::new();
         if need_header {
-            out.push_str(LOG_HEADER);
+            out.push_str(LOG_HEADER.as_str());
             out.push('\n');
         }
         // Chained format: each line commits the previous line's bytes, the first
         // entry committing the header itself, so any in-place edit breaks every
         // later link.
+        let header = LOG_HEADER;
         let prev_line = if need_header {
-            LOG_HEADER
+            header.as_str()
         } else {
-            text.lines().last().unwrap_or(LOG_HEADER)
+            text.lines().last().unwrap_or(header.as_str())
         };
         let prev = line_digest(prev_line);
         let _ = writeln!(
@@ -746,7 +750,10 @@ impl Log {
         let Some(text) = self.read_text()? else {
             return Ok(None);
         };
-        if text.lines().next() != Some(LOG_HEADER) {
+        if LOG_HEADER
+            .expect(text.lines().next().unwrap_or_default())
+            .is_err()
+        {
             return Ok(None);
         }
         Ok(text.lines().last().map(line_digest))
@@ -794,13 +801,13 @@ impl Log {
             )
         };
         let mut lines = text.lines();
-        let header = lines.next();
-        if header != Some(LOG_HEADER) {
+        let header = lines.next().unwrap_or_default();
+        if LOG_HEADER.expect(header).is_err() {
             return Err(malformed("unrecognized header"));
         }
         // The chain pointer each v5 line must carry: the digest of the previous
         // line's exact bytes, rooted at the header line.
-        let mut prev_line = header.unwrap_or_default();
+        let mut prev_line = header;
         let parse_seq = |s: &str| {
             s.parse::<u64>()
                 .map_err(|_| malformed(&format!("unparseable sequence number `{s}`")))
@@ -808,8 +815,8 @@ impl Log {
         let mut out = Vec::new();
         for line in lines {
             let fields: Vec<&str> = line.split(FIELD_SEP).collect();
-            match (header, fields.as_slice()) {
-                (Some(LOG_HEADER), [seq, time, prev, origin, name, tag, scheme, kind, root]) => {
+            match fields.as_slice() {
+                [seq, time, prev, origin, name, tag, scheme, kind, root] => {
                     let want = line_digest(prev_line);
                     if *prev != want {
                         return Err(malformed(&format!(
@@ -824,7 +831,7 @@ impl Log {
                         tag: (*tag).to_string(),
                         scheme: (*scheme).to_string(),
                         kind: (*kind).to_string(),
-                        root: Digest::from(*root),
+                        root: Digest::parse(*root).map_err(|e| malformed(&e.to_string()))?,
                         prev: Some((*prev).to_string()),
                     });
                 }
@@ -855,13 +862,13 @@ impl Log {
     /// # Errors
     /// Fails on a filesystem error or a malformed log.
     pub fn repoints(&self) -> io::Result<Vec<Repoint>> {
-        let mut latest: BTreeMap<(String, String, String), (String, String, String)> =
+        let mut latest: BTreeMap<(String, String, String), (String, String, Digest)> =
             BTreeMap::new();
         let mut out = Vec::new();
         for e in self.entries()? {
             let key = (e.origin.clone(), e.name.clone(), e.tag.clone());
             if let Some(prev) = latest.get(&key) {
-                if prev != &(e.scheme.clone(), e.kind.clone(), e.root.to_string()) {
+                if prev != &(e.scheme.clone(), e.kind.clone(), e.root.clone()) {
                     out.push(Repoint {
                         origin: e.origin.clone(),
                         name: e.name.clone(),
@@ -871,11 +878,11 @@ impl Log {
                         from_root: prev.2.clone(),
                         to_scheme: e.scheme.clone(),
                         to_kind: e.kind.clone(),
-                        to_root: e.root.to_string(),
+                        to_root: e.root.clone(),
                     });
                 }
             }
-            latest.insert(key, (e.scheme, e.kind, e.root.into_string()));
+            latest.insert(key, (e.scheme, e.kind, e.root));
         }
         Ok(out)
     }
@@ -1293,7 +1300,7 @@ pub fn publish_source_cmd(
     let store_root = resolve_store_path(cfg.flags().store_path.as_deref());
     let store = Store::open_or_create(&store_root)?;
     let bundle = encode_source_bundle([(name, user_src)]);
-    let root = Digest::from(blake3::hash(&bundle).to_hex().to_string());
+    let root = Digest::of_bytes(blake3::hash(&bundle).as_bytes());
     store.put(&root, &bundle)?;
     store.set_ref(&pkg_root_ref(root.as_str()), root.as_str())?;
     let dst = DiskTransport::open(&store_root)?;
@@ -1407,7 +1414,7 @@ mod tests {
                         "v1",
                         HASH_SCHEME,
                         INDEX_KIND_SOURCE,
-                        "root",
+                        &crate::core::hash_str("root"),
                     )
                     .expect("append");
                 })

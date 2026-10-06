@@ -30,9 +30,9 @@ import Data.Char (is_space, to_upper_c, to_lower_c)
 -- ```
 pub fn str_join(sep, xs) =
   match xs of
-    Nil => ""
-    Cons(x, Nil) => x
-    Cons(x, rest) => concat(x, concat(sep, str_join(sep, rest)))
+    [] => ""
+    [x] => x
+    x :: rest => concat(x, concat(sep, str_join(sep, rest)))
 
 -- | `s` repeated `n` times (the empty string when `n <= 0`).
 -- Time complexity: O(n^2 * |s|), because each immutable suffix is copied again.

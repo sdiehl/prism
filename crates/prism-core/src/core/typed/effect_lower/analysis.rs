@@ -1184,6 +1184,7 @@ fn closure_props(
             body,
             return_binder,
             return_body,
+            finally_body,
             ops,
         } => {
             let id = flow.sites.handle_id(comp);
@@ -1223,6 +1224,9 @@ fn closure_props(
                     updates,
                     on_call,
                 ));
+            }
+            if let Some(finally_body) = finally_body {
+                closure_props(finally_body, loc, flow, updates, on_call);
             }
             if let Some(id) = id {
                 updates.handle_ret[id].merge(&result);

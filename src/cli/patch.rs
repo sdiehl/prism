@@ -5,6 +5,7 @@ use std::io::{self, BufRead, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use prism_common::format::FormatTag;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -14,9 +15,9 @@ use crate::patch::{PatchArtifact, PatchTarget, SurfaceTerm};
 use crate::store::disk::{resolve_store_path, Store};
 use crate::{BehaviorCase, BehaviorCorpus, PatchRefusal, StagedPatch};
 
-pub const PATCH_PROTOCOL_FORMAT: &str = "prism-patch-protocol-v1";
-const PATCH_COMMIT_FORMAT: &str = "prism-patch-commit-v1";
-const PATCH_DISCARD_FORMAT: &str = "prism-patch-discard-v1";
+pub const PATCH_PROTOCOL_FORMAT: FormatTag = FormatTag::new("prism-patch-protocol-v1");
+const PATCH_COMMIT_FORMAT: FormatTag = FormatTag::new("prism-patch-commit-v1");
+const PATCH_DISCARD_FORMAT: FormatTag = FormatTag::new("prism-patch-discard-v1");
 const SOURCE_ADDRESS_DOMAIN: &[u8] = b"prism-patch-source-v1";
 const STAGE_REF_DOMAIN: &[u8] = b"prism-patch-stage-ref-v1";
 const TEMP_PREFIX: &str = ".prism-patch.";
@@ -32,13 +33,13 @@ struct PatchInput {
 
 #[derive(Deserialize)]
 struct BehaviorCorpusSource {
-    format: String,
+    format: FormatTag,
     cases: Vec<BehaviorCase>,
 }
 
 #[derive(Serialize)]
 struct CommitReport<'a> {
-    format: &'static str,
+    format: FormatTag,
     stage: &'a str,
     path: String,
     report: &'a crate::DeltaReport,
@@ -46,13 +47,13 @@ struct CommitReport<'a> {
 
 #[derive(Serialize)]
 struct DiscardReport<'a> {
-    format: &'static str,
+    format: FormatTag,
     discarded: &'a str,
 }
 
 #[derive(Debug, Deserialize)]
 struct ProtocolRequest {
-    protocol: String,
+    protocol: FormatTag,
     #[serde(default)]
     id: Value,
     verb: String,
@@ -68,7 +69,7 @@ struct ProtocolRequest {
 
 #[derive(Serialize)]
 struct ProtocolResponse {
-    protocol: &'static str,
+    protocol: FormatTag,
     id: Value,
     ok: bool,
     payload: Value,
@@ -592,7 +593,7 @@ mod tests {
     #[test]
     fn protocol_request_refuses_a_foreign_version() {
         let request = ProtocolRequest {
-            protocol: "prism-patch-protocol-v0".to_string(),
+            protocol: FormatTag::new("prism-patch-protocol-v0"),
             id: serde_json::json!(7),
             verb: "fetch".to_string(),
             target: Some("main".to_string()),

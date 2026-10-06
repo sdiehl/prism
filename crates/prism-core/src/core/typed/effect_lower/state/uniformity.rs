@@ -447,8 +447,12 @@ pub(super) fn lexical_types(
                     ops,
                     return_binder,
                     return_body,
+                    finally_body,
                 } => {
                     self.comp(body, bound);
+                    if let Some(finally_body) = finally_body {
+                        self.comp(finally_body, bound);
+                    }
                     for arm in ops.arms() {
                         let mut b2 = bound.clone();
                         b2.extend(arm.params().iter().map(TypedBinder::name));
@@ -973,6 +977,21 @@ pub fn fold_uniform(fns: &[TypedCoreFn], analysis: &StateAnalysis<'_>) -> Option
         .filter(|(_, class)| **class == ClauseClass::Abort)
         .map(|(op, _)| *op)
         .collect();
+    // An abandoned cleanup runs as the abort's step propagates outward, which
+    // is before the catching clause body runs where the spec orders it after.
+    // The two orders agree only when no catching clause does anything.
+    if fns.iter().any(|f| walk::contains_cleanup(f.body()))
+        && handles.iter().any(|h| {
+            let TypedCompKind::Handle { ops: arms, .. } = h.kind() else {
+                return false;
+            };
+            arms.arms().iter().any(|arm| {
+                aborts.contains(&arm.name()) && !matches!(arm.body().sig().effects(), EffRow::Empty)
+            })
+        })
+    {
+        return analysis.decline("a cleanup beside an abort clause that performs effects");
+    }
     // An operation whose clause leaves through a further-out abort aborts
     // wherever it is performed, because the handler answers it by not
     // returning. The relation is transitive, so it is closed to a fixpoint.

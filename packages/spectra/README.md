@@ -40,6 +40,8 @@ fn main() =
 ./spectra build examples/spectra-deck --output spectra-intro.pdf
 ```
 
+Both commands shell out to `prism`. Pass `--prism target/release/prism` to pin the compiler you just built; otherwise whichever `prism` is first on `PATH` builds the deck.
+
 Build outputs live under the deck's `target/spectra/` directory:
 
 - `deck.deck.json`: canonical versioned envelope;

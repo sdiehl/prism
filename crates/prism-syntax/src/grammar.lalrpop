@@ -1,6 +1,6 @@
 use marginalia::Span;
-use crate::ast::{Item, Vis, Fip, Total, DataDecl, Ctor, Decl, Param, Ty, Row, Expr, BinOp, Arm, Pattern, PatternDecl, PathOp, PathStep, ReflectKind, S, Spanned, EffectDecl, EffOp, EffLabel, Grade, HandlerArm, HandlerMode, Sugar, SugarArm, IntLit, ClassDecl, InstanceDecl, CanonicalDecl, Constraint, AliasDecl, AliasRhs, SynonymDecl, ErrorDecl, CatchArm, ImportDecl, Qualifier, StableDecl, Rung, RungField, Converter, ConvDir, Migration, MigrationRoute, VersionRoute, MigrationDir, CoeffectRow};
-use crate::sugar::{dot_call, param, params, with_stmt, with_rest, open_if, let_else, let_pat, path_lit, let_stmt, seq_stmt, try_mark, interp_lit, pattern_decl, assign_stmt, compound_stmt, compound_path_op, var_decl, lift_decl_claims, decl_mods, alloc_budget, grade_word_msg, dot_op_removed, mig_dir, reflect_expr, IfTail, FLIP_CLASS, FLIP_INSTANCE, FLIP_EFFECT, DECLINE_DIM_ARITH, GRADE_MANY_CLAUSE, MIGRATE_RESUME, MIGRATE_RET_ORDER};
+use crate::ast::{Item, Vis, Fip, Total, DataDecl, Ctor, ClassMethod, Decl, Param, Ty, Row, Expr, BinOp, Arm, Pattern, PatternDecl, PathOp, PathStep, ReflectKind, S, Spanned, EffectDecl, EffOp, EffLabel, Grade, HandlerArm, HandlerMode, Sugar, SugarArm, IntLit, ClassDecl, InstanceDecl, CanonicalDecl, Constraint, AliasDecl, AliasRhs, SynonymDecl, ErrorDecl, CatchArm, ImportDecl, Qualifier, StableDecl, Rung, RungField, Converter, ConvDir, Migration, MigrationRoute, VersionRoute, MigrationDir, CoeffectRow};
+use crate::sugar::{dot_call, param, params, with_stmt, with_rest, open_if, let_else, let_pat, path_lit, let_stmt, seq_stmt, try_mark, interp_lit, pattern_decl, assign_stmt, compound_stmt, compound_path_op, var_decl, lift_decl_claims, decl_mods, alloc_budget, grade_word_msg, bare_clause_word_msg, dot_op_removed, mig_dir, reflect_expr, IfTail, FLIP_CLASS, FLIP_INSTANCE, FLIP_EFFECT, DECLINE_DIM_ARITH, GRADE_MANY_CLAUSE, MIGRATE_RESUME, MIGRATE_RET_ORDER};
 use crate::lex::Token;
 use crate::kind::Kind;
 use crate::names;
@@ -131,6 +131,8 @@ extern {
         "]"     => Token::RBracket,
         ","     => Token::Comma,
         ":="    => Token::ColonEq,
+        "::"    => Token::ColonColon,
+        "</>"   => Token::PathJoin,
         ":"     => Token::Colon,
         "!"     => Token::Bang,
         "@"     => Token::At,
@@ -398,12 +400,12 @@ ClassD: ClassDecl = {
         Err(lalrpop_util::ParseError::User { error: (Span::new(l, r), FLIP_CLASS.to_string()) }),
 };
 
-ClassSigs: Vec<(String, Ty)> = {
+ClassSigs: Vec<ClassMethod> = {
     <v:(<ClassSig> ArmSep)*> <e:ClassSig?> => { let mut v = v; if let Some(x) = e { v.push(x); } v },
 };
 
-ClassSig: (String, Ty) = {
-    <n:"ident"> ":" <t:Type> => (n, t),
+ClassSig: ClassMethod = {
+    <l:@L> <name:"ident"> <r:@R> ":" <ty:Type> => ClassMethod { name, ty, span: Span::new(l, r) },
 };
 
 InstanceD: InstanceDecl = {
@@ -517,10 +519,10 @@ Ctors: Vec<Ctor> = {
 };
 
 Ctor: Ctor = {
-    <name:"uid"> <args:CtorArgs?> => Ctor { name, args: args.unwrap_or_default(), fields: None },
-    <name:"uid"> "{" <fs:Comma<RecordField>> "}" => {
+    <l:@L> <name:"uid"> <r:@R> <args:CtorArgs?> => Ctor { name, args: args.unwrap_or_default(), fields: None, span: Span::new(l, r) },
+    <l:@L> <name:"uid"> <r:@R> "{" <fs:Comma<RecordField>> "}" => {
         let args: Vec<Ty> = fs.iter().map(|(_, t)| t.clone()).collect();
-        Ctor { name, args, fields: Some(fs) }
+        Ctor { name, args, fields: Some(fs), span: Span::new(l, r) }
     },
 };
 
@@ -620,11 +622,11 @@ EffOpList: Vec<EffOp> = {
 // `never` never resumes. The word is a plain identifier (so `many`/`once`/`never`
 // stay usable as ordinary names elsewhere), validated in the action.
 EffOp: EffOp = {
-    <name:"ident"> "(" <params:Comma<EffOpParam>> ")" ":" <ret:Type> =>
-        EffOp { name, params, ret, grade: Grade::Many },
-    <l:@L> <g:"ident"> <r:@R> <name:"ident"> "(" <params:Comma<EffOpParam>> ")" ":" <ret:Type> =>?
+    <nl:@L> <name:"ident"> <nr:@R> "(" <params:Comma<EffOpParam>> ")" ":" <ret:Type> =>
+        EffOp { name, params, ret, grade: Grade::Many, span: Span::new(nl, nr) },
+    <l:@L> <g:"ident"> <r:@R> <nl:@L> <name:"ident"> <nr:@R> "(" <params:Comma<EffOpParam>> ")" ":" <ret:Type> =>?
         Grade::parse(&g)
-            .map(|grade| EffOp { name, params, ret, grade })
+            .map(|grade| EffOp { name, params, ret, grade, span: Span::new(nl, nr) })
             .ok_or_else(|| lalrpop_util::ParseError::User { error: (Span::new(l, r), grade_word_msg(&g)) }),
 };
 
@@ -1053,6 +1055,9 @@ LetPat: S<Pattern> = {
         let mut ps = vec![p]; ps.extend(rest);
         Spanned::new(Pattern::Tuple(ps), Span::new(l, r))
     },
+    PatList,
+    <l:@L> <h:PatAlt> "::" <t:PatCons> <r:@R> =>
+        Spanned::new(Pattern::Ctor(names::CONS.into(), vec![h, t]), Span::new(l, r)),
 };
 
 MatchArms: Vec<Arm> = {
@@ -1111,6 +1116,17 @@ HandlerArm: HandlerArm = {
             None => Err(lalrpop_util::ParseError::User { error: (Span::new(l, r), grade_word_msg(&g)) }),
         },
     "val" <name:"ident"> "=" <body:ExprOrBlock> => HandlerArm::Sugar(SugarArm::Val(name, body)),
+    // The cleanup clause `finally => body`. The word is contextual, validated
+    // in the action like `resume`, so it stays an ordinary identifier elsewhere;
+    // any other bare word before `=>` is the pointed clause-shape error.
+    <l:@L> <w:"ident"> <r:@R> "=>" <body:ExprOrBlock> =>?
+        if w == kw::FINALLY {
+            Ok(HandlerArm::Finally(body))
+        } else {
+            Err(lalrpop_util::ParseError::User {
+                error: (Span::new(l, r), bare_clause_word_msg(&w)),
+            })
+        },
 };
 
 // The continuation binder of a multishot clause. `resume k` names it explicitly
@@ -1160,10 +1176,18 @@ Arm: Arm = {
 // wherever a pattern is, so it nests inside constructor arguments, tuples, lists,
 // and record fields.
 Pattern: S<Pattern> = {
-    <l:@L> <first:PatAlt> <rest:("|" <PatAlt>)+> <r:@R> => {
+    <l:@L> <first:PatCons> <rest:("|" <PatCons>)+> <r:@R> => {
         let mut ps = vec![first]; ps.extend(rest);
         Spanned::new(Pattern::Or(ps), Span::new(l, r))
     },
+    PatCons,
+};
+
+// `x :: xs`: a list cell. Right-associative, so `a :: b :: rest` peels two, and
+// tighter than `|`, so `x :: A | x :: B` is two alternatives.
+PatCons: S<Pattern> = {
+    <l:@L> <h:PatAlt> "::" <t:PatCons> <r:@R> =>
+        Spanned::new(Pattern::Ctor(names::CONS.into(), vec![h, t]), Span::new(l, r)),
     PatAlt,
 };
 
@@ -1208,20 +1232,25 @@ PatAtom: S<Pattern> = {
         Spanned::new(Pattern::Bool(true), Span::new(l, r)),
     <l:@L> "false" <r:@R> =>
         Spanned::new(Pattern::Bool(false), Span::new(l, r)),
-    <l:@L> "[" "]" <r:@R> =>
-        Spanned::new(Pattern::Ctor("Nil".into(), vec![]), Span::new(l, r)),
-    <l:@L> "[" <ps:CommaPlus<Pattern>> "]" <r:@R> => {
-        let nil_span = Span::new(r, r);
-        let nil = Spanned::new(Pattern::Ctor("Nil".into(), vec![]), nil_span);
-        let result = ps.into_iter().rev().fold(nil, |rest, p| {
-            let s = p.span;
-            Spanned::new(Pattern::Ctor("Cons".into(), vec![p, rest]), s)
-        });
-        Spanned::new(result.node, Span::new(l, r))
-    },
+    PatList,
     <l:@L> "(" <p:Pattern> "," <rest:Comma<Pattern>> ")" <r:@R> => {
         let mut pats = vec![p]; pats.extend(rest);
         Spanned::new(Pattern::Tuple(pats), Span::new(l, r))
+    },
+};
+
+// `[]` and `[a, b]`, the closed list spines.
+PatList: S<Pattern> = {
+    <l:@L> "[" "]" <r:@R> =>
+        Spanned::new(Pattern::Ctor(names::NIL.into(), vec![]), Span::new(l, r)),
+    <l:@L> "[" <ps:CommaPlus<Pattern>> "]" <r:@R> => {
+        let nil_span = Span::new(r, r);
+        let nil = Spanned::new(Pattern::Ctor(names::NIL.into(), vec![]), nil_span);
+        let result = ps.into_iter().rev().fold(nil, |rest, p| {
+            let s = p.span;
+            Spanned::new(Pattern::Ctor(names::CONS.into(), vec![p, rest]), s)
+        });
+        Spanned::new(result.node, Span::new(l, r))
     },
 };
 
@@ -1240,13 +1269,29 @@ And: S<Expr> = {
 };
 
 Cmp: S<Expr> = {
-    <l:@L> <la:Add> <op:CmpOp> <ra:Add> <r:@R> =>
+    <l:@L> <la:PathE> <op:CmpOp> <ra:PathE> <r:@R> =>
         Spanned::new(Expr::Bin(op, Box::new(la), Box::new(ra)), Span::new(l, r)),
     // The retired float dot-comparisons parse structurally so the diagnostic points
     // at the whole comparison with the plain operator that now covers Float.
-    <l:@L> Add <d:DotCmpOp> Add <r:@R> =>? Err(lalrpop_util::ParseError::User {
+    <l:@L> PathE <d:DotCmpOp> PathE <r:@R> =>? Err(lalrpop_util::ParseError::User {
         error: (Span::new(l, r), dot_op_removed(d.0, d.1)),
     }),
+    PathE,
+};
+
+// `dir </> name`: path join. Left-associative, looser than `::` and tighter
+// than comparison, so `root </> a </> b == p` is `((root </> a) </> b) == p`.
+PathE: S<Expr> = {
+    <l:@L> <a:PathE> "</>" <b:ConsE> <r:@R> =>
+        Spanned::new(Expr::Sugar(Sugar::PathJoin(Box::new(a), Box::new(b))), Span::new(l, r)),
+    ConsE,
+};
+
+// `x :: xs`: list cons. Right-associative, looser than arithmetic and tighter
+// than comparison, so `x + 1 :: xs == ys` is `((x + 1) :: xs) == ys`.
+ConsE: S<Expr> = {
+    <l:@L> <h:Add> "::" <t:ConsE> <r:@R> =>
+        Spanned::new(Expr::Sugar(Sugar::Cons(Box::new(h), Box::new(t))), Span::new(l, r)),
     Add,
 };
 

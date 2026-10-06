@@ -1,6 +1,6 @@
 {
   "schema": "prism-parser-compaction-coverage-v1",
-  "oracle_commit": "46886c1fa7064e4809020c1b788b3ee3531d6a63",
+  "oracle_tree": "cd110efef00d124b955cb6648724887e8e5517f4",
   "corpus_version": 2,
   "scope": "declared Type/Pattern/narrow-vertical structural inventory only",
   "semantic_matrix_complete": false,

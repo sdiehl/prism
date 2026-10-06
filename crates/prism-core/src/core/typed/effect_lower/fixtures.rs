@@ -223,6 +223,7 @@ fn handling(operation: &str, body: TypedComp, open: bool, result: EffRow) -> Typ
             body: Box::new(body),
             return_binder: None,
             return_body: None,
+            finally_body: None,
             ops: clauses,
         },
     )
@@ -381,6 +382,7 @@ pub fn transformer_answer_program() -> Vec<TypedCoreFn> {
             body: Box::new(call(BUMP, Vec::new(), asking())),
             return_binder: None,
             return_body: None,
+            finally_body: None,
             ops: clauses,
         },
     );
@@ -425,6 +427,7 @@ pub fn resume_capturing_program() -> Vec<TypedCoreFn> {
             body: Box::new(call(BUMP, Vec::new(), asking())),
             return_binder: None,
             return_body: None,
+            finally_body: None,
             ops: clauses,
         },
     );

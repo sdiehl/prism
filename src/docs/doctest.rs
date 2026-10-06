@@ -27,6 +27,7 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 use crate::driver::{example_program, interpret_on, with_prelude};
+use crate::eval::Observed;
 use crate::names::ENTRY_POINT;
 use crate::resolve::Root;
 
@@ -301,10 +302,6 @@ pub(crate) fn actual_output(
         return Err("example has no `main` and no expression to run".into());
     }
     let run = interpret_on(&full, roots).map_err(|e| format!("run error: {e}"))?;
-    let text = if run.term.is_empty() {
-        run.value.show()
-    } else {
-        run.term
-    };
+    let (Observed::Printed(text) | Observed::Value(text)) = run.observed();
     Ok(text.lines().map(|l| l.trim_end().to_string()).collect())
 }

@@ -4,9 +4,8 @@
   "status": "curated-tranche-2",
   "gate_ready": false,
   "oracle": {
-    "commit": "46886c1fa7064e4809020c1b788b3ee3531d6a63",
     "tree": "cd110efef00d124b955cb6648724887e8e5517f4",
-    "executable_blake3": "6a1e6b2c0e6c1cb9621c653714f96321563cb7ff26e3cb73ebc1fdc46c49141a",
+    "executable_blake3": "6fecaa577719b10af194947976307260ccbe03661676cd6ac35abb23747470bb",
     "build_command": "cargo build --locked --bin prism",
     "toolchain": {
       "rustc": "rustc 1.96.0 (ac68faa20 2026-05-25)\nbinary: rustc\ncommit-hash: ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96\ncommit-date: 2026-05-25\nhost: aarch64-apple-darwin\nrelease: 1.96.0\nLLVM version: 22.1.2",
@@ -15,7 +14,7 @@
   },
   "rust_inventory": {
     "source": "crates/prism-syntax/src/grammar.lalrpop",
-    "source_commit": "46886c1fa7064e4809020c1b788b3ee3531d6a63",
+    "source_tree": "cd110efef00d124b955cb6648724887e8e5517f4",
     "ids": [
       "pattern.Comma.Pattern",
       "pattern.CommaPlus.Pattern",

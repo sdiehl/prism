@@ -38,6 +38,7 @@
 // and the node numbering punched out, since neither belongs to the document.
 // Reseat with `PRISM_ACCEPT_RESOLVED_FIXTURES=1`.
 
+use prism::DumpPhase;
 use std::collections::HashSet;
 use std::env;
 use std::fmt::Write as _;
@@ -51,9 +52,9 @@ use super::fixture_stems;
 
 const FIXTURE_DIR: &str = "tests/fixtures/syntax";
 const HARNESS: &str = "roundtrip.pr";
-const ARTIFACT: &str = "resolved-syntax";
+const ARTIFACT: DumpPhase = DumpPhase::ResolvedSyntax;
 // The checker's fact-table seam the resolved leaves are joined against.
-const FACTS_PHASE: &str = "tc-facts";
+const FACTS_PHASE: DumpPhase = DumpPhase::TcFacts;
 // Rewrites the committed goldens from the live exporter, for a reviewed
 // boundary change or a release version bump.
 const ACCEPT: &str = "PRISM_ACCEPT_RESOLVED_FIXTURES";
@@ -161,14 +162,14 @@ fn leaf_ids(node: &Value, out: &mut Vec<i64>) {
 // prelude, resolved against the fixture roots. Both sides of the join are
 // produced this way, from the same source through the same roots, so the two
 // seams' NodeId identities are comparable by construction.
-fn dump_stem(stem: &str, phase: &str) -> String {
+fn dump_stem(stem: &str, phase: DumpPhase) -> String {
     let src = fs::read_to_string(fixture_dir().join(format!("{stem}.pr")))
         .unwrap_or_else(|e| panic!("{stem}: source: {e}"));
     dump_at(phase, &with_prelude(&src), &fixture_dir())
         .unwrap_or_else(|e| panic!("{stem}.{phase}: dump: {e}"))
 }
 
-fn dump_stem_json(stem: &str, phase: &str) -> Value {
+fn dump_stem_json(stem: &str, phase: DumpPhase) -> Value {
     serde_json::from_str(&dump_stem(stem, phase))
         .unwrap_or_else(|e| panic!("{stem}.{phase}: JSON: {e}"))
 }

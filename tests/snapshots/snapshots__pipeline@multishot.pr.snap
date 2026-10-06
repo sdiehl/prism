@@ -21,6 +21,7 @@ Program {
                     ],
                     ret: Bool,
                     grade: Many,
+                    span: 15..20,
                 },
             ],
             span: 0..32,

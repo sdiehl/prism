@@ -52,8 +52,8 @@ pub fn scope_lookup(
   spelling : String
 ) : Result(Binder(space), ScopeError) =
   match stack_of(sc, spelling) of
-    Nil => Err(ScopeUnknown(spelling))
-    Cons(b, _rest) => Ok(b)
+    [] => Err(ScopeUnknown(spelling))
+    b :: _rest => Ok(b)
 
 -- | Leave the innermost binding for `spelling`, restoring whatever it
 -- shadowed; popping a spelling with no active binder is `ScopeUnderflow`.
@@ -62,8 +62,8 @@ pub fn scope_pop(
   spelling : String
 ) : Result(Scope(space), ScopeError) =
   match stack_of(sc, spelling) of
-    Nil => Err(ScopeUnderflow(spelling))
-    Cons(_b, rest) =>
+    [] => Err(ScopeUnderflow(spelling))
+    _b :: rest =>
       Ok(Scope { spellings = map_insert(spelling, rest, sc.spellings) })
 
 -- | How many binders are in force for `spelling`; zero for an unknown one.
@@ -72,5 +72,5 @@ pub fn scope_depth(borrow sc : Scope(space), spelling : String) : Int =
 
 fn depth_go(bs : List(Binder(space)), n : Int) : Int =
   match bs of
-    Nil => n
-    Cons(_b, rest) => depth_go(rest, n + 1)
+    [] => n
+    _b :: rest => depth_go(rest, n + 1)

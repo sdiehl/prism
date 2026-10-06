@@ -338,3 +338,34 @@ fn stdlib_index_addresses_match_the_committed_reference_badges() {
         "expected to cross-check many reference badges, only matched {checked}"
     );
 }
+
+// One analysis is the three passes an editor used to run: the same verdict,
+// warnings, hover types, and occurrences, over a program that imports a module
+// and carries a lint.
+#[test]
+fn one_analysis_matches_the_three_passes() {
+    use prism::{analyze, check_validated_on_in, dump_on, Config, DumpPhase, TypeSpans};
+    let src = prism::with_prelude(
+        "import Data.List (map)\n\nfn twice(x : Int) : Int =\n  let unused = 1\n  x * 2\n\nfn main() : Unit = println(show_int(length(map(twice, [1, 2]))))\n",
+    );
+    let roots = prism::default_roots(Path::new("."));
+    let cfg = Config::default();
+    let analysis = analyze(&src, &roots, &cfg).expect("analyze");
+    let checked = check_validated_on_in(&src, &roots, &cfg).expect("check");
+    let render = |c: &prism::types::Checked| {
+        c.reports
+            .warnings
+            .iter()
+            .map(|w| format!("{:?} {}", w.span, w.msg))
+            .collect::<Vec<_>>()
+    };
+    assert!(!render(&checked).is_empty(), "the lint fires");
+    assert_eq!(render(&analysis.checked), render(&checked));
+    let spans = dump_on(DumpPhase::Typespans, &src, &roots, &cfg).expect("typespans");
+    assert_eq!(
+        analysis.typespans,
+        TypeSpans::from_json(&spans).expect("decode")
+    );
+    let occurrences = prism::index::occurrences::extract(&src, &roots).expect("occurrences");
+    assert_eq!(analysis.occurrences, occurrences);
+}

@@ -18,6 +18,7 @@ use crate::syntax::desugar::desugar_with_scope;
 use crate::syntax::reflect::parse_unit;
 use crate::tc::parse_checked_signature;
 use crate::types::{check_seeded, Checked, DeclInfo, TypecheckSeed};
+use prism_common::format::FormatTag;
 use serde::{Deserialize, Serialize};
 
 use super::decision::{persist_facts, DecisionTracker, ModuleQueryDecision};
@@ -44,7 +45,7 @@ const CHECKED_BODY_QUERY: &str = "checked-body";
 // effect labels, and an open-row marker). A v1 body cannot be promoted by
 // defaulting those facts away: typed residual lowering must never reconstruct
 // operation provenance from an effect-label-only interface.
-const CHECKED_BODY_FORMAT: &str = "prism-checked-body-v2";
+const CHECKED_BODY_FORMAT: FormatTag = FormatTag::new("prism-checked-body-v2");
 const STANDARD_FOUNDATION_SCHEMA: &[u8] = b"prism-standard-foundation-input-v1";
 const INJECTED_FOUNDATION_NAME: &str = "__query_injected_foundation";
 const INJECTED_FOUNDATION_SOURCE: &str = "fn __query_injected_foundation() : Unit = ()\n";
@@ -124,6 +125,14 @@ struct ModuleJob {
 /// whole-program fallback documented above, and only that checker's own
 /// failures surface.
 pub fn check_modules_on(
+    src: &str,
+    roots: &[Root],
+    cfg: &Config,
+) -> Result<ModuleCheckReport, Error> {
+    check_modules_located(src, roots, cfg).map_err(|e| crate::resolve::with_origin_source(e, roots))
+}
+
+fn check_modules_located(
     src: &str,
     roots: &[Root],
     cfg: &Config,
@@ -625,7 +634,7 @@ fn standard_foundation_identity(src: &str) -> String {
 
 #[derive(Clone, Serialize, Deserialize)]
 struct CheckedBody {
-    format: String,
+    format: FormatTag,
     public_interface: ModuleInterface,
     seed_interface: ModuleInterface,
     decls: Vec<DeclWire>,
@@ -644,7 +653,7 @@ struct DeclWire {
 
 #[derive(Serialize)]
 struct CheckedBodyPayload<'a> {
-    format: &'a str,
+    format: &'a FormatTag,
     public_interface: &'a ModuleInterface,
     seed_interface: &'a ModuleInterface,
     decls: &'a [DeclWire],
@@ -742,7 +751,7 @@ impl CheckedBody {
             checked.interface.seeds,
         )?;
         Ok(Some(Self {
-            format: CHECKED_BODY_FORMAT.to_string(),
+            format: CHECKED_BODY_FORMAT,
             public_interface: public_interface.clone(),
             seed_interface,
             decls,
@@ -776,7 +785,7 @@ impl CheckedBody {
         seed.try_extend(
             self.seed_interface
                 .rehydrate()
-                .map_err(Error::ResolveModule)?
+                .map_err(|e| Error::ResolveModule(e.to_string()))?
                 .typecheck_seed(),
         )
         .map_err(|error| Error::ResolveModule(error.to_string()))?;
@@ -796,7 +805,8 @@ impl CheckedBody {
                 })
             })
             .collect::<Result<Vec<_>, Error>>()?;
-        let facts = NodeFacts::from_json(&self.facts).map_err(Error::ResolveModule)?;
+        let facts =
+            NodeFacts::from_json(&self.facts).map_err(|e| Error::ResolveModule(e.to_string()))?;
         let checked = seed.into_rehydrated_checked(decls, facts, self.seeds);
         Ok((checked, self.public_interface))
     }
@@ -810,7 +820,7 @@ fn checked_body_digest(
     seeds: u32,
 ) -> Result<String, Error> {
     let bytes = serde_json::to_vec(&CheckedBodyPayload {
-        format: CHECKED_BODY_FORMAT,
+        format: &CHECKED_BODY_FORMAT,
         public_interface,
         seed_interface,
         decls,
@@ -857,8 +867,11 @@ impl DurableInterfaceCache {
         let text = str::from_utf8(&bytes).map_err(|error| {
             Error::ResolveModule(format!("checked interface is not UTF-8: {error}"))
         })?;
-        let interface = ModuleInterface::from_json(text).map_err(Error::ResolveModule)?;
-        interface.rehydrate().map_err(Error::ResolveModule)?;
+        let interface =
+            ModuleInterface::from_json(text).map_err(|e| Error::ResolveModule(e.to_string()))?;
+        interface
+            .rehydrate()
+            .map_err(|e| Error::ResolveModule(e.to_string()))?;
         Ok(Some(interface))
     }
 
@@ -1031,7 +1044,7 @@ fn query_key<'a>(
     );
     field(
         &mut hasher,
-        cfg.artifact_identity_for("module-check")
+        cfg.artifact_identity_for(crate::driver::ArtifactBackend::ModuleCheck)
             .fingerprint()
             .as_bytes(),
     );
@@ -1066,7 +1079,7 @@ where
         seed.try_extend(
             interface
                 .rehydrate()
-                .map_err(Error::ResolveModule)?
+                .map_err(|e| Error::ResolveModule(e.to_string()))?
                 .typecheck_seed(),
         )
         .map_err(|error| Error::ResolveModule(error.to_string()))?;

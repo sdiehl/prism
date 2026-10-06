@@ -12,8 +12,9 @@ use super::{
 
 #[cfg(test)]
 use super::faults::{self, FaultPoint};
+use prism_common::format::FormatTag;
 
-const QUERY_FORMAT: &str = "prism-query-index-v1";
+const QUERY_FORMAT: FormatTag = FormatTag::new("prism-query-index-v1");
 
 // The query layer's own layout version, stamped at `queries/LAYOUT` when the
 // first binding is published. It moves independently of the store-wide
@@ -24,7 +25,7 @@ const QUERY_FORMAT: &str = "prism-query-index-v1";
 // bindings read as ordinary misses, and `sweep_stale` removes its relic files
 // unconditionally rather than migrating them.
 const QUERY_LAYOUT_FILE: &str = "LAYOUT";
-const QUERY_LAYOUT: &str = "prism-query-layout-v2";
+const QUERY_LAYOUT: FormatTag = FormatTag::new("prism-query-layout-v2");
 
 // Tripwire threshold for a broken eviction path: a kind holding this many
 // bindings is worth naming (once per process, see `runaway_estimate`) long
@@ -61,10 +62,10 @@ fn path(root: &Path, kind: &str, key: &StoreHash<'_>) -> io::Result<PathBuf> {
 // the format tag, then the bound output hash, and nothing else.
 fn decode_output(text: &str) -> io::Result<String> {
     let mut lines = text.lines();
-    if lines.next() != Some(QUERY_FORMAT) {
+    if let Err(e) = QUERY_FORMAT.expect(lines.next().unwrap_or_default()) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            "query entry has an unknown format",
+            format!("query entry has an unknown format: {e}"),
         ));
     }
     let output = lines.next().unwrap_or_default();

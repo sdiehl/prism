@@ -15,16 +15,16 @@ use crate::core::{
     elaborate_typed, newtype_ctors, reachable_fns, Core, ElaboratedCore, Hashes, TypedCore,
     TypedElaborated, VerifyEnv,
 };
-use crate::error::Error;
+use crate::error::{Error, TypeError};
 use crate::flags::WarnDupes;
 use crate::names::ENTRY_POINT;
 use crate::resolve::{
-    lint_prelude_captures, prelude_capture, resolve_loaded_modules, resolve_modules_in, Module,
-    Root,
+    lint_prelude_captures, prelude_capture, resolve_loaded_modules, resolve_modules_in,
+    resolve_modules_seeing, Module, Root, Seen,
 };
 use crate::sym::Sym;
 use crate::syntax::ast::{self, Core as CorePhase, Program};
-use crate::syntax::desugar::{desugar, retarget_cooperative};
+use crate::syntax::desugar::{check_portable_captures_checked, desugar, retarget_cooperative};
 use crate::syntax::reflect::parse_unit;
 use crate::tc::{check_tooltips, Warning, WarningOrigin};
 use crate::types::{check as typecheck, check_allow_holes, Checked};
@@ -98,6 +98,9 @@ pub(super) enum FrontRequest {
     TypedTooltips,
     /// The rendered-pipeline inspection surface (`report`).
     Report,
+    /// The editor's analysis: the `CheckValidated` verdict with per-node type
+    /// strings collected on the way.
+    Analyze,
 }
 
 impl FrontRequest {
@@ -117,6 +120,7 @@ impl FrontRequest {
             Self::IdentityTooltips => FrontOpts::IDENTITY_TOOLTIPS,
             Self::TypedTooltips => FrontOpts::TYPED_TOOLTIPS,
             Self::Report => FrontOpts::REPORT,
+            Self::Analyze => FrontOpts::ANALYZE,
         }
     }
 }
@@ -313,6 +317,19 @@ impl FrontOpts {
         typed_tooltips: false,
         entry_closure: false,
     };
+    // The editor's analysis: `CHECK_VALIDATED`, so its verdict is the one
+    // `prism check` gives, plus the per-node strings a hover shows. The tooltip
+    // judgment is re-taken plainly before elaboration, as for `IDENTITY_TOOLTIPS`.
+    const ANALYZE: Self = Self {
+        stop: FrontStop::Elaborated,
+        diagnostics: true,
+        scheduler_retarget: false,
+        validate: true,
+        pre_opt: false,
+        allow_holes: false,
+        typed_tooltips: true,
+        entry_closure: false,
+    };
 }
 
 // The staged frontend result. The variant is the stage: there is no checked-only
@@ -450,6 +467,16 @@ pub(super) fn run_front(
     cfg: &Config,
     request: FrontRequest,
 ) -> Result<Front, Error> {
+    run_front_located(src, roots, cfg, request)
+        .map_err(|e| crate::resolve::with_origin_source(e, roots))
+}
+
+fn run_front_located(
+    src: &str,
+    roots: &[Root],
+    cfg: &Config,
+    request: FrontRequest,
+) -> Result<Front, Error> {
     let opts = request.policy();
     let Some(session) = cfg.session() else {
         return run_front_uncached(src, roots, cfg, opts);
@@ -526,7 +553,7 @@ fn front_key_for(schema: &[u8], input: &str, cfg: &Config, opts: FrontOpts) -> S
     field(&mut h, input.as_bytes());
     field(
         &mut h,
-        cfg.artifact_identity_for("frontend")
+        cfg.artifact_identity_for(crate::driver::ArtifactBackend::Frontend)
             .fingerprint()
             .as_bytes(),
     );
@@ -587,6 +614,28 @@ pub(super) fn run_front_verdict(
         Ok(_) => Ok((program, None)),
         Err(error) => Ok((program, Some(error))),
     }
+}
+
+/// [`run_front`] over a resolution that also records every reference and
+/// definition the renamer saw, so one pass yields both the front and the
+/// occurrence document. Not cached: the resolver's observations are not part of
+/// a cached front.
+///
+/// # Errors
+/// Fails exactly as [`run_front`] does for the same request.
+pub(super) fn run_front_seeing(
+    src: &str,
+    roots: &[Root],
+    cfg: &Config,
+    request: FrontRequest,
+) -> Result<(Front, Seen), Error> {
+    let run = || {
+        let opts = request.policy();
+        let (program, seen) = resolve_modules_seeing(parse_unit(src)?, src, roots)?;
+        let prepared = prepare_resolved_front(src, cfg, opts, program)?;
+        Ok((finish_front(src, cfg, opts, prepared)?, seen))
+    };
+    run().map_err(|e| crate::resolve::with_origin_source(e, roots))
 }
 
 fn run_front_uncached(
@@ -710,6 +759,17 @@ fn apply_prelude_captures(
     Ok(())
 }
 
+// Attach the surface lints to the judgment the front returns and print its
+// warnings, when the preset asks for diagnostics.
+fn diagnose(src: &str, cfg: &Config, opts: FrontOpts, checked: &mut Checked, lints: Vec<Warning>) {
+    if opts.diagnostics {
+        checked.extend_warnings(lints);
+        if !cfg.flags().quiet {
+            emit_warnings(src, checked);
+        }
+    }
+}
+
 fn finish_front(
     src: &str,
     cfg: &Config,
@@ -723,23 +783,21 @@ fn finish_front(
         Phase::Typecheck,
         src,
         || {
-            if opts.typed_tooltips {
+            let checked = if opts.typed_tooltips {
                 check_tooltips(&program)
             } else if opts.allow_holes {
                 check_allow_holes(&program)
             } else {
                 typecheck(&program)
-            }
+            }?;
+            // The `@ portable` capture contract reads inferred `let` types.
+            check_portable_captures_checked(&program, &checked)?;
+            Ok::<_, TypeError>(checked)
         },
         |c: &Checked| RowExtras::default().count(CountKey::Defs, c.defs.decls.len()),
     )?;
-    if opts.diagnostics {
-        checked.extend_warnings(lints);
-        if !cfg.flags().quiet {
-            emit_warnings(src, &checked);
-        }
-    }
     if opts.stop == FrontStop::Checked {
+        diagnose(src, cfg, opts, &mut checked, lints);
         return Ok(Front::Checked(CheckedFront { program, checked }));
     }
     // The instrumented tooltip checker delimits a fresh effect row around every
@@ -755,6 +813,7 @@ fn finish_front(
     } else {
         checked
     };
+    diagnose(src, cfg, opts, &mut checked, lints);
     // The whole program has been judged above; the executable presets now
     // narrow to the entry point's closure so elaboration and everything after
     // it pay only for definitions that can run.

@@ -47,8 +47,8 @@ pub fn pattern_list(items : List(Sp(Pat)), outer : Span) : Sp(Pat) =
 
 fn pattern_list_tail(items : List(Sp(Pat)), rest : Sp(Pat)) : Sp(Pat) =
   match items of
-    Nil => rest
-    Cons(head, tail) =>
+    [] => rest
+    head :: tail =>
       authored(
           PCtor("Cons", [head, pattern_list_tail(tail, rest)]),
           head.span.lo,

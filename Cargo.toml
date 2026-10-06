@@ -1,6 +1,6 @@
 [package]
 name = "prism"
-version = "0.23.0"
+version = "0.24.0"
 authors = ["Stephen Diehl <stephen.m.diehl@gmail.com>"]
 categories = ["compilers"]
 default-run = "prism"
@@ -86,13 +86,16 @@ harness = false
 [features]
 default = ["native"]
 native = [
+  "project",
   "dep:prism-native",
   "dep:clap",
   "dep:rustyline",
   "dep:glob",
-  "dep:toml",
   "prism-core/native",
 ]
+# Project manifests and the package layout, without the native backend: what an
+# editor needs to resolve a file's search path the way `prism check` does.
+project = ["dep:toml", "prism-core/native"]
 mlir = ["native", "prism-native/mlir"]
 wasm = ["dep:wasm-bindgen", "prism-syntax/wasm"]
 # Opt-in: route the native C runtime allocator through mimalloc. The mi_*
@@ -191,7 +194,7 @@ exclude = ["tools/prismup"]
 resolver = "2"
 
 [workspace.package]
-version = "0.23.0"
+version = "0.24.0"
 authors = ["Stephen Diehl <stephen.m.diehl@gmail.com>"]
 edition = "2021"
 license = "MIT"

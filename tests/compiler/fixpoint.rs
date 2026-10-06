@@ -11,6 +11,7 @@
 // independence from relation construction order, and bounded failure for a
 // transfer function that ascends forever.
 
+use prism::DumpPhase;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::fs;
@@ -107,7 +108,7 @@ fn print_flow(d : ResolvedDoc) =
   println(str_join(" ", Cons("recursive", fl_recursive(d))))
 "#;
 
-const ARTIFACT: &str = "resolved-syntax";
+const ARTIFACT: DumpPhase = DumpPhase::ResolvedSyntax;
 // The tag the harness prints the transitive reach under.
 const REACHES: &str = "reaches";
 

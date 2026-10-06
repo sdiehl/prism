@@ -273,13 +273,13 @@ enum Cmd {
     },
     /// Print one pipeline phase artifact
     ///
-    /// PHASE is one of: tokens, syntax-tokens, surface-syntax, ast, types, typespans,
-    /// occurrences, hir,
-    /// interface, module-graph, core, core-json, core-identity, core-hash, tc-input, tc-facts,
-    /// elab-input, native-kont-table, native-kont-state-map, shape, dupes,
-    /// namespace, stdlib-hash, fbip, lowered, tier, effect-plan, tier-explain, captures,
-    /// optimizer-facts, usage-summary,
-    /// usage-summary-md, usage-summary-json, llvm, mlir, verify, smt, totality.
+    /// PHASE is one of: tokens, ast, syntax-tokens, surface-syntax, syntax-diagnostics,
+    /// types, typespans, occurrences, interface, module-graph, hir, tc-input,
+    /// resolved-syntax, tc-rejection, tc-facts, elab-input, verify, smt, totality, core,
+    /// core-json, core-identity, core-hash, native-kont-table, native-kont-state-map,
+    /// shape, dupes, namespace, stdlib-hash, fbip, lowered, tier, effect-plan,
+    /// tier-explain, captures, optimizer-facts, usage-summary, usage-summary-md,
+    /// usage-summary-json, llvm, mlir.
     Dump { phase: String, file: PathBuf },
     /// Behavior or lineage diff by content hash
     ///
@@ -312,6 +312,9 @@ enum Cmd {
         /// Check only: exit 1 if any file is not canonical, write nothing
         #[arg(long)]
         check: bool,
+        /// Print the canonical form of one file to stdout, write nothing
+        #[arg(long, conflicts_with = "check")]
+        stdout: bool,
     },
     /// Judge source files against the house style rules
     Lint {
@@ -431,6 +434,12 @@ enum Cmd {
         /// Make an empty selection a command failure
         #[arg(long)]
         fail_if_no_tests: bool,
+        /// Run only tests carrying TAG (repeatable; any listed tag selects)
+        #[arg(long = "tag", value_name = "TAG")]
+        tags: Vec<String>,
+        /// Also write a `JUnit` XML report to PATH
+        #[arg(long, value_name = "PATH")]
+        junit: Option<PathBuf>,
         /// Keep the compiler session alive and re-run tests when sources change
         #[arg(long)]
         watch: bool,
@@ -929,6 +938,42 @@ fn main() -> ExitCode {
     }
 }
 
+// Run `prism test` from its parsed command.
+fn test_dispatch(cmd: Cmd, cfg: &prism::Config) -> CmdResult {
+    let Cmd::Test {
+        file,
+        filter,
+        exact,
+        list,
+        no_run,
+        format,
+        show_output,
+        fail_if_no_tests,
+        tags,
+        junit,
+        watch,
+    } = cmd
+    else {
+        unreachable!("test_dispatch takes a test command")
+    };
+    let options = cli::test::TestOptions {
+        filter,
+        exact,
+        list,
+        no_run,
+        json: format == "json",
+        show_output,
+        fail_if_no_tests,
+        tags,
+        junit,
+    };
+    if watch {
+        cli::watch_test_cmd(file.as_deref(), &options, cfg)
+    } else {
+        cli::test::test_cmd(file.as_deref(), &options, cfg)
+    }
+}
+
 fn dispatch(cmd: Cmd, cfg: &prism::Config) -> CmdResult {
     match cmd {
         Cmd::Run {
@@ -1118,32 +1163,7 @@ fn dispatch(cmd: Cmd, cfg: &prism::Config) -> CmdResult {
             cli::bootstrap::check_cmd(&files, json, cfg)
         }
         Cmd::Explain { code } => cli::explain::explain_cmd(&code),
-        Cmd::Test {
-            file,
-            filter,
-            exact,
-            list,
-            no_run,
-            format,
-            show_output,
-            fail_if_no_tests,
-            watch,
-        } => {
-            let options = cli::test::TestOptions {
-                filter,
-                exact,
-                list,
-                no_run,
-                json: format == "json",
-                show_output,
-                fail_if_no_tests,
-            };
-            if watch {
-                cli::watch_test_cmd(file.as_deref(), &options, cfg)
-            } else {
-                cli::test::test_cmd(file.as_deref(), &options, cfg)
-            }
-        }
+        cmd @ Cmd::Test { .. } => test_dispatch(cmd, cfg),
         Cmd::Verify {
             file,
             solver,
@@ -1159,7 +1179,11 @@ fn dispatch(cmd: Cmd, cfg: &prism::Config) -> CmdResult {
             prism::repl::repl(!no_banner);
             Ok(())
         }
-        Cmd::Fmt { files, check } => cli::fmt::fmt_cmd(&files, check),
+        Cmd::Fmt {
+            files,
+            check,
+            stdout,
+        } => cli::fmt::fmt_cmd(&files, check, stdout),
         Cmd::Lint {
             paths,
             json,

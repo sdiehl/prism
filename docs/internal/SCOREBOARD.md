@@ -24,11 +24,12 @@ compaction, above it is not.
 
 | component        | Rust raw | Rust code | Prism raw | Prism code | ratio |
 | ---------------- | -------: | --------: | --------: | ---------: | ----: |
-| lexer and layout |    1,563 |     1,238 |     1,684 |      1,234 |  1.00 |
-| parser           |    2,607 |     1,963 |     7,538 |      6,484 |  3.30 |
-| surface AST      |    2,092 |     1,483 |       354 |        199 |  0.13 |
-| syntax codecs    |     none |      none |     2,902 |      2,382 |   n/a |
-| checker          |   12,319 |     9,728 |     4,233 |      3,386 |  0.35 |
+| lexer and layout |    1,572 |     1,244 |     1,686 |      1,236 |  0.99 |
+| parser           |    2,664 |     2,002 |     7,777 |      6,687 |  3.34 |
+| surface AST      |    2,125 |     1,502 |       363 |        205 |  0.14 |
+| syntax codecs    |     none |      none |     2,996 |      2,456 |   n/a |
+| lint             |     none |      none |     1,190 |        866 |   n/a |
+| checker          |   12,726 |    10,049 |     4,239 |      3,390 |  0.34 |
 
 What each row counts:
 
@@ -47,6 +48,9 @@ What each row counts:
 - **surface AST**: Rust `crates/prism-syntax/src/ast.rs`; Prism
   `lib/std/Syntax/Ast.pr`.
 - **syntax codecs**: Rust none; Prism `lib/std/Syntax/Codec.pr`.
+- **lint**: Rust none; Prism `packages/lint/src/Findings.pr`,
+  `packages/lint/src/Limits.pr`, `packages/lint/src/Lint.pr`,
+  `packages/lint/src/Pragma.pr`, `packages/lint/src/Rules.pr`.
 - **checker**: Rust `src/tc/classes.rs`, `src/tc/context.rs`,
   `src/tc/coverage.rs`, `src/tc/env.rs`, `src/tc/infer.rs`, `src/tc/mod.rs`,
   `src/tc/pat.rs`, `src/tc/product.rs`, `src/tc/seed.rs`, `src/tc/session.rs`,
@@ -58,10 +62,10 @@ What each row counts:
 ## Verdicts
 
 - **lexer and layout**, threshold control, recorded rather than judged: recorded
-  at 1.00. The Prism side was deliberately written to track the Rust side token
+  at 0.99. The Prism side was deliberately written to track the Rust side token
   for token so the two can be diffed, so what this row measures is that decision
   and not the language.
-- **parser**, threshold ratio 0.50 or lower: FAILED at 3.30. The pre-registered
+- **parser**, threshold ratio 0.50 or lower: FAILED at 3.34. The pre-registered
   bet was that the library floor had absorbed the plumbing. The first judgment
   decomposed the gap into three named causes, and the two that were compiler
   work have landed: the sequencing rewrite and the `let ... else` early-return
@@ -78,7 +82,7 @@ What each row counts:
   tables derive. No further compiler work is pre-registered against this row; it
   stays failed rather than re-excused, and the rise is recorded rather than
   netted against the earlier fall.
-- **surface AST**, threshold not evidence for the claim: not evidence at 0.13.
+- **surface AST**, threshold not evidence for the claim: not evidence at 0.14.
   The Rust file carries derives and hand-written trait impls alongside the
   declarations and the Prism file carries declarations only, so most of the gap
   is a difference in what the two files hold. It becomes a comparison when the
@@ -89,8 +93,12 @@ What each row counts:
   out by hand, one arm per constructor, which is the finding this row exists to
   record. There is no Rust counterpart to divide by because that side is derived
   and occupies no lines, and that asymmetry is exactly the gap.
+- **lint**, threshold size published, not judged: recorded with 13 rules. The
+  house-style linter exists only in Prism, so there is no Rust side to divide
+  by; the row is here so the package's growth per rule stays public. Its own
+  tests are left out of the count.
 - **checker**, threshold ratio 0.50 or lower at full coverage: recorded, not
-  judged, at 0.35. The Prism side checks the subset the bootstrap workbench
+  judged, at 0.34. The Prism side checks the subset the bootstrap workbench
   supports, so the number says what a subset costs, not what the full checker
   will. That subset is no longer the pure first-order one it was: this release
   added written effect rows, parameterized effect labels, shared handler effect
@@ -192,6 +200,8 @@ Where the other pairs stand on cost:
   report.
 - **syntax codecs**: executes, but no paired driver runs the same bytes through
   both sides, so the ratio is unmeasured rather than favorable.
+- **lint**: runs in the interpreter on every `prism lint`; no native build of
+  the package has been timed against it, so the cost is unmeasured.
 - **checker**: the reproducible figure is end to end: the shipped workbench,
   which is `just tc` on the committed bootstrap fixture with the release binary
   hosting the interpreter, takes 2.29 s median of 20 on an Apple M5 measured
@@ -211,6 +221,26 @@ Where the other pairs stand on cost:
   vintage rather than as a number this tree can re-derive, and a committed
   driver that isolates the Rust phase and the compiled checker over one universe
   is what would make that ratio quotable again.
+
+## Documentation debt
+
+Measured 2026-10-05 with `just docs-debt` (rustc 1.96.0): every library checked
+with `-W missing_docs`, one count per warning. The lint is not in the workspace
+table, because the pre-commit clippy run denies every warning and a warn-level
+`missing_docs` would block each commit until the debt reached zero. This is the
+baseline the next release ratchets: a count may fall, and a rise is a regression
+to explain.
+
+| crate         | undocumented |
+| ------------- | -----------: |
+| prism         |          746 |
+| prism-common  |           16 |
+| prism-core    |          556 |
+| prism-lineage |          268 |
+| prism-native  |          112 |
+| prism-store   |            6 |
+| prism-syntax  |        1,584 |
+| total         |        3,288 |
 
 ## Retirements
 

@@ -1,3 +1,5 @@
+import Sequence as Seq
+
 -- Std `Sequence` declares `Step(a) = SDone | SMore(a, ...)` as source
 -- constructors. The control and state erasures synthesize their own ABI `Step`
 -- carrier with the same `SMore`/`SDone` spelling but a different arity and tag
@@ -7,8 +9,6 @@
 -- backend prints the same three lines.
 effect Ask
   ask() : Int
-
-import Sequence as Seq
 
 fn seq_under_handler() =
   handle Seq.sum(Seq.take(Seq.iterate(ask(), \(x) -> x + 1), 4)) with

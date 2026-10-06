@@ -260,7 +260,15 @@ impl Elab<'_> {
         let col_default = if wild.is_empty() {
             default.clone()
         } else {
-            Some(self.compile_sub_arms(field_vars, wild, default.clone())?)
+            match self.compile_sub_arms(field_vars, wild, default.clone()) {
+                Ok(def) => Some(def),
+                // The wildcard rows alone need not be exhaustive: a later column
+                // may be covered only together with the listed heads. That is
+                // sound exactly when those heads cover every value, since then no
+                // value takes the default and there is nothing to compile.
+                Err(_) if self.covers_every_head(&part) => default.clone(),
+                Err(e) => return Err(e),
+            }
         };
 
         // A wildcard also matches every listed head, so `specialize` (in the emit
@@ -290,6 +298,27 @@ impl Elab<'_> {
                 col_default,
             )
         }
+    }
+
+    // Whether the column's listed heads alone cover its type: a tuple, both
+    // booleans, or every constructor of the scrutinee's datatype. Literal columns
+    // of other scalars never do.
+    fn covers_every_head(&self, part: &ArmPartition) -> bool {
+        if !part.tuple.is_empty() {
+            return true;
+        }
+        if part.has_bool {
+            return part.bools.iter().all(|rows| !rows.is_empty());
+        }
+        let Some(info) = part.ctors.keys().next().and_then(|c| self.ctors.get(c)) else {
+            return false;
+        };
+        let siblings = self
+            .ctors
+            .values()
+            .filter(|other| other.type_name == info.type_name)
+            .count();
+        siblings == part.ctors.len()
     }
 
     // Bucket the active column's arms by head-pattern kind, rewriting each row's

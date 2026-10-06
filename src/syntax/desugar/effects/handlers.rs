@@ -187,6 +187,7 @@ pub(super) fn rw_arms(
 ) -> Result<(Vec<HandlerArm<Core>>, Vals), TypeError> {
     let mut vals = Vec::new();
     let mut arms2 = Vec::new();
+    let has_cleanup = arms.iter().any(|a| matches!(a, HandlerArm::Finally(_)));
     for a in arms {
         arms2.push(match a {
             HandlerArm::Return(x, body) => {
@@ -194,6 +195,9 @@ pub(super) fn rw_arms(
                 env2.insert(x.clone(), Binding::Local);
                 HandlerArm::Return(x.clone(), rw(body, &env2, cx)?)
             }
+            // The cleanup clause binds nothing and sees the handler's outer
+            // scope.
+            HandlerArm::Finally(body) => HandlerArm::Finally(rw(body, env, cx)?),
             HandlerArm::Op(op, ps, k, body) => {
                 check_resumable(op, body.span, cx)?;
                 let mut env2 = env.clone();
@@ -203,7 +207,14 @@ pub(super) fn rw_arms(
                 env2.insert(k.clone(), Binding::Local);
                 let body2 = rw(body, &env2, cx)?;
                 // A bare (keyword-free) clause's grade is read from how it uses `k`.
-                check_grade(op, bare_ctl_grade(&body2, k), body.span, cx)?;
+                let grade = bare_ctl_grade(&body2, k);
+                check_grade(op, grade, body.span, cx)?;
+                // A handler with a cleanup clause is left exactly once, so a
+                // clause that may resume more than once is refused whatever
+                // the operation's declared grade allows.
+                if has_cleanup && grade > Grade::Once {
+                    return Err(ErrKind::CleanupHandlerClauseMany { op: op.clone() }.at(body.span));
+                }
                 HandlerArm::Op(op.clone(), ps.clone(), k.clone(), body2)
             }
             HandlerArm::Sugar(SugarArm::Once(op, ps, body)) => {
@@ -255,7 +266,7 @@ pub(super) fn wrap_vals(vals: Vals, handled: S<Expr<Core>>, span: Span) -> S<Exp
 
 const fn arm_op(a: &HandlerArm) -> Option<&String> {
     match a {
-        HandlerArm::Return(..) => None,
+        HandlerArm::Return(..) | HandlerArm::Finally(..) => None,
         HandlerArm::Op(op, ..)
         | HandlerArm::Sugar(
             SugarArm::Once(op, ..) | SugarArm::Never(op, ..) | SugarArm::Val(op, ..),
@@ -267,6 +278,7 @@ fn rename_arm(a: HandlerArm, ops: &BTreeMap<String, String>) -> HandlerArm {
     let m = |op: String| ops.get(&op).cloned().unwrap_or(op);
     match a {
         HandlerArm::Return(x, b) => HandlerArm::Return(x, b),
+        HandlerArm::Finally(b) => HandlerArm::Finally(b),
         HandlerArm::Op(op, ps, k, b) => HandlerArm::Op(m(op), ps, k, b),
         HandlerArm::Sugar(SugarArm::Once(op, ps, b)) => {
             HandlerArm::Sugar(SugarArm::Once(m(op), ps, b))
@@ -334,6 +346,7 @@ pub(super) fn rw_named(
             // The cloned private op keeps the source op's declared grade, so a
             // named handler is checked against the same multiplicity.
             grade: sig.grade,
+            span: Span::default(),
         });
         ops.insert(op.clone(), mangled);
     }

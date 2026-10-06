@@ -29,6 +29,7 @@
 // one. The prefix split makes it impossible rather than merely improbable, but
 // there is no program to regress against.
 
+use prism::DumpPhase;
 use std::path::Path;
 use std::process::Command;
 
@@ -97,7 +98,7 @@ fn check(name: &str) -> Result<(), String> {
     // never satisfy itself from a previously linked artifact.
     cfg.update_flags(|flags| flags.compiler_cache = false);
 
-    let ir = prism::dump_on("llvm", &full, &roots, &cfg)
+    let ir = prism::dump_on(DumpPhase::Llvm, &full, &roots, &cfg)
         .map_err(|e| format!("{name}: llvm dump failed: {e}"))?;
     if !defines(&ir, &symbol) {
         return Err(format!(

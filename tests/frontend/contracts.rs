@@ -1,3 +1,4 @@
+use prism::DumpPhase;
 // `logic fn` declarations and `requires`/`ensures` contract clauses parse and
 // format as surface-only proof data erased before executable Core. The
 // required invariant is that a contract-only edit cannot move any runtime
@@ -25,8 +26,9 @@ fn use_it(): Int = clamp(5, 0, 10)
 
 #[test]
 fn contracts_leave_core_byte_identical() {
-    let with = prism::dump("core-hash", WITH_CONTRACTS).expect("contract program compiles");
-    let without = prism::dump("core-hash", WITHOUT_CONTRACTS).expect("bare program compiles");
+    let with = prism::dump(DumpPhase::CoreHash, WITH_CONTRACTS).expect("contract program compiles");
+    let without =
+        prism::dump(DumpPhase::CoreHash, WITHOUT_CONTRACTS).expect("bare program compiles");
     assert_eq!(
         with, without,
         "a contract-only edit moved the Core hash: contracts are not fully erased"
@@ -119,7 +121,7 @@ fn clamp(x: Int, lo: Int, hi: Int): Int
 // -- Verification interface and the dual determinism invariant -----------------
 
 fn verify_digest(src: &str) -> String {
-    let interface = prism::dump("verify", src).expect("verify dump");
+    let interface = prism::dump(DumpPhase::Verify, src).expect("verify dump");
     interface
         .lines()
         .find_map(|l| l.strip_prefix("digest "))
@@ -142,8 +144,8 @@ fn contract_change_moves_interface_but_not_core() {
         "a changed contract must move the verification interface digest"
     );
     assert_eq!(
-        prism::dump("core-hash", CONTRACT_BODY_A).unwrap(),
-        prism::dump("core-hash", CONTRACT_C).unwrap(),
+        prism::dump(DumpPhase::CoreHash, CONTRACT_BODY_A).unwrap(),
+        prism::dump(DumpPhase::CoreHash, CONTRACT_C).unwrap(),
         "a contract-only edit must not move the Core hash"
     );
 }
@@ -152,8 +154,8 @@ fn contract_change_moves_interface_but_not_core() {
 fn body_change_moves_core_but_not_interface() {
     // A runtime-body-only edit moves Core and leaves the verification interface.
     assert_ne!(
-        prism::dump("core-hash", CONTRACT_BODY_A).unwrap(),
-        prism::dump("core-hash", CONTRACT_BODY_B).unwrap(),
+        prism::dump(DumpPhase::CoreHash, CONTRACT_BODY_A).unwrap(),
+        prism::dump(DumpPhase::CoreHash, CONTRACT_BODY_B).unwrap(),
         "a changed body must move the Core hash"
     );
     assert_eq!(
@@ -179,10 +181,10 @@ fn dump_smt_emits_deterministic_obligations() {
                requires lo <= hi\n  \
                ensures |r| lo <= r\n  \
                = if x < lo then lo else if x > hi then hi else x\n";
-    let out = prism::dump("smt", src).expect("dump smt");
+    let out = prism::dump(DumpPhase::Smt, src).expect("dump smt");
     assert_eq!(
         out,
-        prism::dump("smt", src).unwrap(),
+        prism::dump(DumpPhase::Smt, src).unwrap(),
         "obligation bytes must be deterministic"
     );
     assert!(out.contains("clamp #0"), "names the obligation:\n{out}");

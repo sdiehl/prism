@@ -187,8 +187,8 @@ fn push(ctx : Context, entry : Entry) : Context = Cons(entry, ctx)
 
 fn split_entry(p : (Entry) -> Bool, xs : List(Entry)) : Split =
   match xs of
-    Nil => Missing
-    Cons(entry, rest) =>
+    [] => Missing
+    entry :: rest =>
       if p(entry) then
         Found(Nil, entry, rest)
       else
@@ -250,8 +250,8 @@ fn leave_mark(ctx : Context, a : Int) : Context ! {TypeError} =
 
 fn lookup_term(x : Name(TermSpace), xs : List(Entry)) : RTy ! {TypeError} =
   match xs of
-    Nil => type_error("unbound resolved variable %{name_id(x)}")
-    Cons(entry, rest) =>
+    [] => type_error("unbound resolved variable %{name_id(x)}")
+    entry :: rest =>
       match entry of
         VarBnd(y, ty) =>
           if x == y then
@@ -262,8 +262,8 @@ fn lookup_term(x : Name(TermSpace), xs : List(Entry)) : RTy ! {TypeError} =
 
 fn lookup_solution(a : Int, xs : List(Entry)) : Option(RTy) =
   match xs of
-    Nil => None
-    Cons(entry, rest) =>
+    [] => None
+    entry :: rest =>
       match entry of
         SETVarBnd(b, ty) =>
           if a == b then
@@ -274,16 +274,16 @@ fn lookup_solution(a : Int, xs : List(Entry)) : Option(RTy) =
 
 fn has_tvar(a : Name(TySpace), xs : List(Entry)) : Bool =
   match xs of
-    Nil => false
-    Cons(entry, rest) =>
+    [] => false
+    entry :: rest =>
       match entry of
         TVarBnd(b) => a == b || has_tvar(a, rest)
         _ => has_tvar(a, rest)
 
 fn has_meta(a : Int, xs : List(Entry)) : Bool =
   match xs of
-    Nil => false
-    Cons(entry, rest) =>
+    [] => false
+    entry :: rest =>
       match entry of
         ETVarBnd(b) => a == b || has_meta(a, rest)
         SETVarBnd(b, _ty) => a == b || has_meta(a, rest)
@@ -326,8 +326,8 @@ fn show_ty(ty : RTy) : String = show_ty_at(0, [], ty)
 
 fn hint_for(env : List((Name(TySpace), String)), n : Name(TySpace)) : String =
   match env of
-    Nil => "%{name_id(n)}"
-    Cons((m, hint), rest) =>
+    [] => "%{name_id(n)}"
+    (m, hint) :: rest =>
       if n == m then
         hint
       else
@@ -335,8 +335,8 @@ fn hint_for(env : List((Name(TySpace), String)), n : Name(TySpace)) : String =
 
 fn hint_taken(env : List((Name(TySpace), String)), hint : String) : Bool =
   match env of
-    Nil => false
-    Cons((_m, h), rest) => h == hint || hint_taken(rest, hint)
+    [] => false
+    (_m, h) :: rest => h == hint || hint_taken(rest, hint)
 
 fn free_hint(env : List((Name(TySpace), String)), hint : String) : String =
   if hint_taken(env, hint) then

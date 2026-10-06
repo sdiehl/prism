@@ -129,7 +129,7 @@ pub fn add(arg: &str, cfg: &Config) -> Result<String, Error> {
         lock.set(LockEntry {
             name: name.clone(),
             scheme: pin.scheme.clone(),
-            hash: Digest::from(pin.hash.clone()),
+            hash: pin.hash.clone(),
             source,
         });
         write_lock(&root, &lock)?;
@@ -252,7 +252,7 @@ fn git_name(url: &str) -> String {
 
 struct ResolvedPin {
     scheme: String,
-    hash: String,
+    hash: Digest,
 }
 
 // The root hash a source locks to: a hash pin is its own root hash; a git tag
@@ -267,7 +267,8 @@ fn lockable_pin(
     match source {
         DepSource::Hash(hex) => Ok(Some(ResolvedPin {
             scheme: HASH_SCHEME.to_string(),
-            hash: hex.clone(),
+            hash: Digest::parse(hex.as_str())
+                .map_err(|e| Error::ResolvePackage(format!("dependency `{name}`: {e}")))?,
         })),
         DepSource::Path(_) => Ok(None),
         DepSource::Git { url, version } => {
@@ -275,7 +276,7 @@ fn lockable_pin(
             let pointer = signed_index_pointer(url, name, version, &store_root, cfg.flags())?;
             Ok(Some(ResolvedPin {
                 scheme: pointer.scheme,
-                hash: pointer.root.into_string(),
+                hash: pointer.root,
             }))
         }
     }

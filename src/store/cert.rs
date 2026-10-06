@@ -66,6 +66,7 @@ use crate::store::codec::{put_str, put_uvarint, Reader};
 use crate::store::disk::{Store, Written};
 use crate::store::verify::CheckKind;
 use crate::store::CodecError;
+use prism_common::digest::SchemedDigest;
 
 // The attesting compiler version, the one source of truth being the crate version.
 const COMPILER_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -186,9 +187,9 @@ pub struct Cert {
 /// Build the one live certificate: a parity-passed record for `subject`, attested
 /// by this compiler over the current scheme and the given backend pair.
 #[must_use]
-pub fn parity_cert(subject: &str, backends: (&str, &str)) -> Cert {
+pub fn parity_cert(subject: &Digest, backends: (&str, &str)) -> Cert {
     Cert {
-        subject: Digest::from(subject),
+        subject: subject.clone(),
         claim: Claim::ParityPassed,
         scheme: HASH_SCHEME.to_string(),
         check: CheckKind::Parity.as_str().to_string(),
@@ -238,7 +239,7 @@ pub fn decode_cert(bytes: &[u8]) -> Result<Cert, CodecError> {
         return Err(CodecError::TrailingBytes);
     }
     Ok(Cert {
-        subject: Digest::from(subject),
+        subject: Digest::parse(subject)?,
         claim,
         scheme,
         check,
@@ -429,7 +430,7 @@ pub struct CertRow {
 pub struct LineageCert {
     /// The sidecar digest this vouches for, a `scheme:hex` string (the envelope's
     /// contract digest).
-    pub subject: Digest,
+    pub subject: SchemedDigest,
     /// The property claimed.
     pub claim: LineageClaim,
     /// The hash scheme the certificate's own identity is under; a scheme bump
@@ -452,7 +453,7 @@ fn evidence_row(key: &str, value: &str) -> CertRow {
 /// sidecar whose replay just matched.
 #[must_use]
 pub fn replay_cert(
-    subject: &str,
+    subject: &SchemedDigest,
     trace_digest: &str,
     compiler_fingerprint: &str,
     events: usize,
@@ -460,7 +461,7 @@ pub fn replay_cert(
     input_files: usize,
 ) -> LineageCert {
     LineageCert {
-        subject: Digest::from(subject),
+        subject: subject.clone(),
         claim: LineageClaim::ReplayVerified,
         scheme: HASH_SCHEME.to_string(),
         compiler: COMPILER_VERSION.to_string(),
@@ -478,13 +479,13 @@ pub fn replay_cert(
 /// docs sidecar whose artifacts just rehashed.
 #[must_use]
 pub fn lineage_cert(
-    subject: &str,
+    subject: &SchemedDigest,
     compiler_fingerprint: &str,
     files_rehashed: usize,
     writes_skipped: usize,
 ) -> LineageCert {
     LineageCert {
-        subject: Digest::from(subject),
+        subject: subject.clone(),
         claim: LineageClaim::LineageVerified,
         scheme: HASH_SCHEME.to_string(),
         compiler: COMPILER_VERSION.to_string(),
@@ -578,7 +579,7 @@ pub(crate) fn decode_row_body(bytes: &[u8]) -> Result<RowBody, CodecError> {
 #[must_use]
 pub fn encode_lineage_cert(cert: &LineageCert) -> Vec<u8> {
     encode_row_body(
-        &cert.subject,
+        &cert.subject.to_string(),
         cert.claim.to_varint(),
         &cert.scheme,
         &cert.compiler,
@@ -595,7 +596,7 @@ pub fn encode_lineage_cert(cert: &LineageCert) -> Vec<u8> {
 pub fn decode_lineage_cert(bytes: &[u8]) -> Result<LineageCert, CodecError> {
     let body = decode_row_body(bytes)?;
     Ok(LineageCert {
-        subject: Digest::from(body.subject),
+        subject: SchemedDigest::parse(&body.subject)?,
         claim: LineageClaim::from_varint(body.claim),
         scheme: body.scheme,
         compiler: body.compiler,
@@ -615,7 +616,7 @@ pub fn decode_lineage_cert(bytes: &[u8]) -> Result<LineageCert, CodecError> {
 /// never silently accepted); a recognized claim whose binding holds is
 /// [`CertStatus::Verified`].
 #[must_use]
-pub fn check_lineage_cert(bytes: &[u8], recomputed_subject: &str) -> CertStatus {
+pub fn check_lineage_cert(bytes: &[u8], recomputed_subject: &SchemedDigest) -> CertStatus {
     let cert = match decode_lineage_cert(bytes) {
         Ok(c) => c,
         Err(e) => return CertStatus::Failed(format!("corrupt lineage certificate ({e})")),
@@ -626,11 +627,11 @@ pub fn check_lineage_cert(bytes: &[u8], recomputed_subject: &str) -> CertStatus 
             cert.scheme
         ));
     }
-    if cert.subject.as_str() != recomputed_subject {
+    if &cert.subject != recomputed_subject {
         return CertStatus::Failed(format!(
             "sidecar digest mismatch: certificate vouches for {}, sidecar bytes hash to {}",
-            short(&cert.subject),
-            short(recomputed_subject)
+            short(&cert.subject.to_string()),
+            short(&recomputed_subject.to_string())
         ));
     }
     match &cert.claim {

@@ -2,10 +2,10 @@
 
 use super::{
     abi, forced_var, free_comp_vars, free_value_vars, function_applied_once_tail, names,
-    state_clause, state_return, union_effects, walk, BTreeSet, CompSig, CoreFnSig, CoreOp,
+    state_clause, state_return, union_effects, walk, BTreeSet, Builtin, CompSig, CoreFnSig, CoreOp,
     CoreType, EffRow, Effects, FnAnswerLowering, FreeMonadDriver, Monadic, Refusal,
     ResumeRepresentation, Site, Sym, Type, TypedBinder, TypedComp, TypedCompKind, TypedCoreFn,
-    TypedValue, TypedValueKind,
+    TypedValue, TypedValueKind, EBIND,
 };
 
 impl<'a> Monadic<'a> {
@@ -95,10 +95,13 @@ impl<'a> Monadic<'a> {
         function: &TypedBinder,
         continuation: &TypedComp,
     ) -> Option<FnAnswerLowering> {
+        // A cleanup clause has no lowered form, so a handler carrying one
+        // declines here and stays on the interpreted path.
         let TypedCompKind::Handle {
             body,
             return_binder: Some(return_binder),
             return_body,
+            finally_body: None,
             ops,
         } = comp.kind()
         else {
@@ -495,6 +498,7 @@ impl<'a> Monadic<'a> {
             body,
             return_binder,
             return_body,
+            finally_body: None,
             ops,
         } = comp.kind()
         else {
@@ -938,6 +942,7 @@ impl<'a> Monadic<'a> {
             body,
             return_binder,
             return_body,
+            finally_body: None,
             ops,
         } = comp.kind()
         else {
@@ -991,6 +996,18 @@ impl<'a> Monadic<'a> {
         let skip = TypedBinder::new(self.mint("sk"), CoreType::Source(Type::Int));
         let argument = TypedBinder::new(self.mint("arg"), abi::word());
         let queue = TypedBinder::new(self.mint("k"), abi::queue(self.row.clone()));
+        // In a program with a cleanup clause the operation's word is the
+        // argument beside its pending cleanups: forwarding passes the pair on
+        // untouched, and only a clause that catches it opens it.
+        let pending = self.cleanups.then(|| {
+            (
+                TypedBinder::new(self.mint("arg"), abi::word()),
+                TypedBinder::new(self.mint("pend"), abi::word()),
+            )
+        });
+        let carried = pending
+            .as_ref()
+            .map_or_else(|| argument.clone(), |(packed, _)| packed.clone());
 
         let resume_value = TypedBinder::new(Sym::from(names::RESUME_VAL), abi::word());
         let resumed = TypedBinder::new(Sym::from(names::RESUME_KONT), abi::eff(self.row.clone()));
@@ -1020,7 +1037,7 @@ impl<'a> Monadic<'a> {
             self.forward_eop(
                 Self::var(id.name(), id.ty().clone()),
                 Self::var(skip.name(), skip.ty().clone()),
-                Self::var(argument.name(), argument.ty().clone()),
+                Self::var(carried.name(), carried.ty().clone()),
                 resume.clone(),
             )
         } else {
@@ -1079,12 +1096,16 @@ impl<'a> Monadic<'a> {
                 );
             }
 
+            if let Some((_, cleanups)) = &pending {
+                handled = self.run_pending(handled, cleanups)?;
+            }
+
             let selected = if open {
                 let decremented = TypedBinder::new(self.mint("sk"), CoreType::Source(Type::Int));
                 let forwarded = self.forward_eop(
                     Self::var(id.name(), id.ty().clone()),
                     Self::var(decremented.name(), decremented.ty().clone()),
-                    Self::var(argument.name(), argument.ty().clone()),
+                    Self::var(carried.name(), carried.ty().clone()),
                     resume.clone(),
                 );
                 let subtract = TypedComp::new(
@@ -1171,8 +1192,20 @@ impl<'a> Monadic<'a> {
             );
         }
 
+        if let Some((_, cleanups)) = &pending {
+            dispatch = TypedComp::new(
+                dispatch.sig().clone(),
+                TypedCompKind::Case(
+                    abi::lowered_repr(
+                        Self::var(carried.name(), carried.ty().clone()),
+                        abi::pending(),
+                    ),
+                    vec![(abi::pend_pattern(argument, cleanups.clone()), dispatch)],
+                ),
+            );
+        }
         let op_arm = (
-            abi::eop_pattern(self.row.clone(), id, skip, argument, queue),
+            abi::eop_pattern(self.row.clone(), id, skip, carried, queue),
             dispatch,
         );
         let driver_body_signature = CompSig::new(
@@ -1209,6 +1242,310 @@ impl<'a> Monadic<'a> {
         Some(TypedComp::new(
             driver_call.sig().clone(),
             TypedCompKind::Bind(Box::new(body), initial, Box::new(driver_call)),
+        ))
+    }
+
+    /// Bind a cell's answer to `parameter` and continue with `tail` through
+    /// the monadic bind, so an operation the head performs carries the tail in
+    /// its queue.
+    fn ebind_then(
+        &mut self,
+        head: TypedComp,
+        parameter: TypedBinder,
+        tail: TypedComp,
+    ) -> TypedComp {
+        let result = TypedBinder::new(self.mint("m"), abi::eff(self.row.clone()));
+        let lambda = Self::lam(vec![parameter], tail);
+        let continuation = TypedValue::new(
+            CoreType::Thunk(Box::new(lambda.sig().clone())),
+            TypedValueKind::Thunk(Box::new(lambda)),
+        );
+        let call = TypedComp::new(
+            CompSig::new(abi::eff(self.row.clone()), self.row.clone()),
+            TypedCompKind::Call {
+                callee: Sym::from(EBIND),
+                instantiation: abi::row_instantiation(self.row.clone()),
+                args: vec![Self::var(result.name(), result.ty().clone()), continuation],
+            },
+        );
+        TypedComp::new(
+            call.sig().clone(),
+            TypedCompKind::Bind(Box::new(head), result, Box::new(call)),
+        )
+    }
+
+    /// A catching clause's answer, after the cleanups its operation left
+    /// pending. Each pending cleanup answers with the value it was given, so
+    /// the queue applied to the clause's answer runs them innermost first and
+    /// hands the answer back; one whose resumption the clause took is disarmed
+    /// and passes it straight on.
+    fn run_pending(&mut self, handled: TypedComp, cleanups: &TypedBinder) -> Option<TypedComp> {
+        let answer = TypedBinder::new(self.mint("x"), abi::word());
+        let pending = abi::unpack_queue_word(
+            Self::var(cleanups.name(), cleanups.ty().clone()),
+            self.row.clone(),
+        )?;
+        let run = abi::qapply(
+            pending,
+            Self::var(answer.name(), answer.ty().clone()),
+            self.row.clone(),
+        );
+        Some(self.ebind_then(handled, answer, run))
+    }
+
+    /// The cleanup body, then `value` as the answer.
+    fn cleanup_then(
+        &mut self,
+        cleanup: &TypedComp,
+        captures: &[TypedBinder],
+        value: &TypedBinder,
+    ) -> Option<TypedComp> {
+        let lowered = self.with_source_binders(captures, |this| this.comp(cleanup))?;
+        let ignored = TypedBinder::new(self.mint("u"), abi::word());
+        let answer = abi::epure(
+            Self::var(value.name(), value.ty().clone()),
+            self.row.clone(),
+        );
+        Some(self.ebind_then(lowered, ignored, answer))
+    }
+
+    /// A handler with a `finally` clause, as the handler without it inside a
+    /// bracket driver that runs the clause when the handler is left.
+    ///
+    /// The bracket handles no operation. On the pure arm the handler's answer
+    /// is complete, so the cleanup runs and the answer passes on. An operation
+    /// leaving the handler is forwarded with one armed cell: the resumption the
+    /// bracket forwards disarms it, and the operation carries, beside its
+    /// argument, a pending entry that runs the cleanup while the cell is still
+    /// armed. The handler that catches the operation runs its pending entries
+    /// once its clause is done, so a clause that drops the continuation leaves
+    /// through every cleanup it crossed, innermost first, and one that resumed
+    /// leaves none to run. The handler's own clauses catch inside the bracket,
+    /// so their answers reach the pure arm like any other.
+    pub(super) fn bracket(&mut self, comp: &TypedComp) -> Option<TypedComp> {
+        let TypedCompKind::Handle {
+            body,
+            return_binder,
+            return_body,
+            finally_body: Some(cleanup),
+            ops,
+        } = comp.kind()
+        else {
+            return None;
+        };
+        if return_binder.is_some() != return_body.is_some() {
+            return None;
+        }
+        let inner = if !ops.arms().is_empty() {
+            let handler = TypedComp::new(
+                comp.sig().clone(),
+                TypedCompKind::Handle {
+                    body: body.clone(),
+                    return_binder: return_binder.clone(),
+                    return_body: return_body.clone(),
+                    finally_body: None,
+                    ops: ops.clone(),
+                },
+            );
+            self.handle(&handler, true)?
+        } else if let (Some(binder), Some(return_body)) = (return_binder, return_body) {
+            self.comp(&TypedComp::new(
+                comp.sig().clone(),
+                TypedCompKind::Bind(body.clone(), binder.clone(), return_body.clone()),
+            ))?
+        } else {
+            self.comp(body)?
+        };
+
+        let mut free: Vec<Sym> = free_comp_vars(cleanup).into_iter().collect();
+        free.sort_by(|left, right| left.as_str().cmp(right.as_str()));
+        let captures = free
+            .into_iter()
+            .map(|name| Some(TypedBinder::new(name, self.locals.get(&name)?.clone())))
+            .collect::<Option<Vec<_>>>()?;
+
+        let driver = self.mint_driver(FreeMonadDriver::Handle);
+        let result = TypedBinder::new(self.mint("res"), abi::eff(self.row.clone()));
+        let mut driver_params = vec![result.ty().clone()];
+        driver_params.extend(captures.iter().map(|capture| capture.ty().clone()));
+        let driver_signature = CoreFnSig::new(
+            self.quantifiers.clone(),
+            driver_params,
+            CompSig::new(abi::eff(self.row.clone()), self.row.clone()),
+        );
+        self.generated_signatures
+            .insert(driver, driver_signature.clone());
+        let capture_args = || -> Vec<TypedValue> {
+            captures
+                .iter()
+                .map(|capture| Self::var(capture.name(), capture.ty().clone()))
+                .collect::<Vec<_>>()
+        };
+
+        let pure_value = TypedBinder::new(self.mint("x"), abi::word());
+        let pure_body = self.cleanup_then(cleanup, &captures, &pure_value)?;
+        let pure_arm = (abi::epure_pattern(self.row.clone(), pure_value), pure_body);
+
+        let id = TypedBinder::new(self.mint("id"), CoreType::Source(Type::Int));
+        let skip = TypedBinder::new(self.mint("sk"), CoreType::Source(Type::Int));
+        let carried = TypedBinder::new(self.mint("arg"), abi::word());
+        let queue = TypedBinder::new(self.mint("k"), abi::queue(self.row.clone()));
+        let argument = TypedBinder::new(self.mint("arg"), abi::word());
+        let pending = TypedBinder::new(self.mint("pend"), abi::word());
+        let armed = TypedBinder::new(
+            self.mint("armed"),
+            CoreType::Ref(Box::new(CoreType::Source(Type::Bool))),
+        );
+        let armed_var = || Self::var(armed.name(), armed.ty().clone());
+        let bool_value =
+            |value| TypedValue::new(CoreType::Source(Type::Bool), TypedValueKind::Bool(value));
+
+        // The resumption the bracket forwards: taking it disarms the entry.
+        let resume_value = TypedBinder::new(Sym::from(names::RESUME_VAL), abi::word());
+        let resumed = TypedBinder::new(Sym::from(names::RESUME_KONT), abi::eff(self.row.clone()));
+        let applied = abi::qapply(
+            Self::var(queue.name(), queue.ty().clone()),
+            Self::var(resume_value.name(), resume_value.ty().clone()),
+            self.row.clone(),
+        );
+        let mut redrive_args = vec![Self::var(resumed.name(), resumed.ty().clone())];
+        redrive_args.extend(capture_args());
+        let redrive = self.call(driver, redrive_args)?;
+        let resume_body = TypedComp::new(
+            redrive.sig().clone(),
+            TypedCompKind::Bind(Box::new(applied), resumed, Box::new(redrive)),
+        );
+        let disarm = TypedComp::new(
+            CompSig::new(CoreType::Source(Type::Unit), EffRow::Empty),
+            TypedCompKind::RefSet(armed_var(), bool_value(false)),
+        );
+        let disarmed = TypedBinder::new(self.mint("u"), CoreType::Source(Type::Unit));
+        let resume_body = TypedComp::new(
+            resume_body.sig().clone(),
+            TypedCompKind::Bind(Box::new(disarm), disarmed, Box::new(resume_body)),
+        );
+        let resume_lambda = Self::lam(vec![resume_value], resume_body);
+        let resume = TypedValue::new(
+            CoreType::Thunk(Box::new(resume_lambda.sig().clone())),
+            TypedValueKind::Thunk(Box::new(resume_lambda)),
+        );
+
+        // The pending entry: the cleanup while still armed, then its input.
+        let passed = TypedBinder::new(self.mint("x"), abi::word());
+        let run = self.cleanup_then(cleanup, &captures, &passed)?;
+        let skipped = abi::epure(
+            Self::var(passed.name(), passed.ty().clone()),
+            self.row.clone(),
+        );
+        let still = TypedBinder::new(self.mint("b"), CoreType::Source(Type::Bool));
+        let read = TypedComp::new(
+            CompSig::new(CoreType::Source(Type::Bool), EffRow::Empty),
+            TypedCompKind::RefGet(armed_var()),
+        );
+        let chosen = TypedComp::new(
+            CompSig::new(
+                abi::eff(self.row.clone()),
+                union_effects(run.sig().effects(), skipped.sig().effects()),
+            ),
+            TypedCompKind::If(
+                Self::var(still.name(), still.ty().clone()),
+                Box::new(run),
+                Box::new(skipped),
+            ),
+        );
+        let entry_body = TypedComp::new(
+            chosen.sig().clone(),
+            TypedCompKind::Bind(Box::new(read), still, Box::new(chosen)),
+        );
+        let entry_lambda = Self::lam(vec![passed], entry_body);
+        let entry = TypedValue::new(
+            CoreType::Thunk(Box::new(entry_lambda.sig().clone())),
+            TypedValueKind::Thunk(Box::new(entry_lambda)),
+        );
+
+        let extended = TypedBinder::new(self.mint("pend"), abi::queue(self.row.clone()));
+        let snoc = TypedComp::new(
+            CompSig::new(abi::queue(self.row.clone()), EffRow::Empty),
+            TypedCompKind::StrBuiltin {
+                op: Builtin::TaqSnoc,
+                instantiation: abi::row_instantiation(self.row.clone()),
+                args: vec![
+                    abi::unpack_queue_word(
+                        Self::var(pending.name(), pending.ty().clone()),
+                        self.row.clone(),
+                    )?,
+                    entry,
+                ],
+            },
+        );
+        let forwarded = self.forward_eop(
+            Self::var(id.name(), id.ty().clone()),
+            Self::var(skip.name(), skip.ty().clone()),
+            abi::pend(
+                Self::var(argument.name(), argument.ty().clone()),
+                abi::pack_queue_word(Self::var(extended.name(), extended.ty().clone()))?,
+            ),
+            resume,
+        );
+        let forwarded = TypedComp::new(
+            forwarded.sig().clone(),
+            TypedCompKind::Bind(Box::new(snoc), extended, Box::new(forwarded)),
+        );
+        let opened = TypedComp::new(
+            forwarded.sig().clone(),
+            TypedCompKind::Case(
+                abi::lowered_repr(
+                    Self::var(carried.name(), carried.ty().clone()),
+                    abi::pending(),
+                ),
+                vec![(abi::pend_pattern(argument, pending), forwarded)],
+            ),
+        );
+        let arm = TypedComp::new(
+            CompSig::new(armed.ty().clone(), EffRow::Empty),
+            TypedCompKind::RefNew(bool_value(true)),
+        );
+        let op_body = TypedComp::new(
+            opened.sig().clone(),
+            TypedCompKind::Bind(Box::new(arm), armed.clone(), Box::new(opened)),
+        );
+        let op_arm = (
+            abi::eop_pattern(self.row.clone(), id, skip, carried, queue),
+            op_body,
+        );
+
+        let driver_body = TypedComp::new(
+            CompSig::new(
+                abi::eff(self.row.clone()),
+                union_effects(pure_arm.1.sig().effects(), op_arm.1.sig().effects()),
+            ),
+            TypedCompKind::Case(
+                Self::var(result.name(), result.ty().clone()),
+                vec![pure_arm, op_arm],
+            ),
+        );
+        let mut generated_params = vec![result];
+        generated_params.extend(captures.iter().cloned());
+        self.generated.push(TypedCoreFn::new(
+            driver,
+            generated_params,
+            driver_body,
+            driver_signature,
+            0,
+        ));
+
+        let initial = TypedBinder::new(self.mint("r0"), abi::eff(self.row.clone()));
+        let mut driver_args = vec![Self::var(initial.name(), initial.ty().clone())];
+        driver_args.extend(
+            captures
+                .iter()
+                .map(|capture| self.value(&Self::var(capture.name(), capture.ty().clone())))
+                .collect::<Option<Vec<_>>>()?,
+        );
+        let driver_call = self.call(driver, driver_args)?;
+        Some(TypedComp::new(
+            driver_call.sig().clone(),
+            TypedCompKind::Bind(Box::new(inner), initial, Box::new(driver_call)),
         ))
     }
 }

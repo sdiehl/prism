@@ -39,6 +39,13 @@ pub const STEP: &str = "Eff@Step";
 pub const SMORE: &str = "Eff@SMore";
 pub const SDONE: &str = "Eff@SDone";
 
+pub const PEND_TAG: usize = 0;
+/// Private carrier of an operation's argument in a program with a `finally`
+/// clause: the argument, beside the queue of cleanups the operation left
+/// pending on its way out to the handler that catches it.
+pub const PENDING: &str = "Eff@Pending";
+pub const PEND: &str = "Eff@Pend";
+
 /// The residual free-monad driver templates that typed lowering generates.
 ///
 /// Lowering and codegen share this enum so driver names and recognition cannot
@@ -101,6 +108,7 @@ pub fn add_synthetic_ctor(ctors: &mut BTreeMap<String, CtorInfo>, name: &str) ->
         TQCONS => synth_ctor(TQ, TQCONS_TAG, 2),
         SMORE => synth_ctor(STEP, MORE_TAG, 1),
         SDONE => synth_ctor(STEP, DONE_TAG, 1),
+        PEND => synth_ctor(PENDING, PEND_TAG, 2),
         _ => return false,
     };
     ctors.insert(name.to_string(), ctor);

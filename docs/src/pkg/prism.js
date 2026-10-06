@@ -1,134 +1,6 @@
 /* @ts-self-types="./prism.d.ts" */
 
 /**
- * Run the boids swarm for `steps` deterministic steps and return the whole
- * trajectory as text.
- *
- * The first line is `W H` (the toroidal world dimensions); each following line
- * is one frame, a space-separated list of `x,y` integer positions. Frame N is
- * `step` composed N times on the seeded swarm, a pure function of the index, so
- * the browser scrubber positions its playhead at any frame by replaying to it.
- * On any front-end or runtime error, returns the rendered diagnostic instead.
- * @param {number} steps
- * @returns {string}
- */
-export function boids_run(steps) {
-    let deferred1_0;
-    let deferred1_1;
-    try {
-        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        wasm.boids_run(retptr, steps);
-        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
-        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
-        deferred1_0 = r0;
-        deferred1_1 = r1;
-        return getStringFromWasm0(r0, r1);
-    } finally {
-        wasm.__wbindgen_add_to_stack_pointer(16);
-        wasm.__wbindgen_export3(deferred1_0, deferred1_1, 1);
-    }
-}
-
-/**
- * Continue the boids swarm from an arbitrary state `state` for `steps` steps,
- * returning the full-state trajectory (`boids_run_full`'s format) from that
- * state.
- *
- * `state` is one full-state frame: a space-separated list of `x,y,vx,vy`
- * integer boids, exactly a line of [`boids_run_full`]'s output. The branching
- * demo forks a timeline by taking frame N of the base run, perturbing one boid,
- * and passing the perturbed frame here. Because `run_trace_from` is a pure
- * function of the swarm and the step count, replaying a branch with the same
- * perturbed state is byte-identical: that is the determinism claim the two
- * side-by-side timelines rest on. A malformed `state` returns an `error:` line.
- * @param {string} state
- * @param {number} steps
- * @returns {string}
- */
-export function boids_run_from(state, steps) {
-    let deferred2_0;
-    let deferred2_1;
-    try {
-        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        const ptr0 = passStringToWasm0(state, wasm.__wbindgen_export, wasm.__wbindgen_export2);
-        const len0 = WASM_VECTOR_LEN;
-        wasm.boids_run_from(retptr, ptr0, len0, steps);
-        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
-        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
-        deferred2_0 = r0;
-        deferred2_1 = r1;
-        return getStringFromWasm0(r0, r1);
-    } finally {
-        wasm.__wbindgen_add_to_stack_pointer(16);
-        wasm.__wbindgen_export3(deferred2_0, deferred2_1, 1);
-    }
-}
-
-/**
- * Run the boids swarm for `steps` steps and return the whole trajectory in
- * FULL state: like [`boids_run`], but each boid is `x,y,vx,vy` (position and
- * velocity), not just `x,y`.
- *
- * The velocity is what a branching timeline needs: to fork at frame N and
- * continue the run, the frontend perturbs that frame's full state and hands it
- * to [`boids_run_from`]. Positions alone cannot be continued (one `step` reads
- * each boid's velocity), so the branch demo drives on this trajectory.
- * @param {number} steps
- * @returns {string}
- */
-export function boids_run_full(steps) {
-    let deferred1_0;
-    let deferred1_1;
-    try {
-        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        wasm.boids_run_full(retptr, steps);
-        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
-        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
-        deferred1_0 = r0;
-        deferred1_1 = r1;
-        return getStringFromWasm0(r0, r1);
-    } finally {
-        wasm.__wbindgen_add_to_stack_pointer(16);
-        wasm.__wbindgen_export3(deferred1_0, deferred1_1, 1);
-    }
-}
-
-/**
- * Run one batch of `count` hostile schedules of the concurrent swarm, starting
- * at seed index `start`, and report how many landed on the reference final
- * state.
- *
- * Returns three lines: `<agreed> <count> <refhash>` (agreed is how many of the
- * batch's schedules matched the global reference hash; it is always `count`,
- * which is the determinism claim), then the interleaving of the batch's first
- * two schedules as space-separated fiber ids. Each schedule is a distinct
- * seeded-shuffle of the same fibers over the same channel, so the two
- * interleavings differ while the hash does not. The browser calls this in
- * growing batches to tick a progressive counter without freezing the tab: the
- * count is what the frame budget affords, but every schedule genuinely agrees.
- * On any error, returns the rendered diagnostic instead.
- * @param {number} start
- * @param {number} count
- * @returns {string}
- */
-export function chaos_run(start, count) {
-    let deferred1_0;
-    let deferred1_1;
-    try {
-        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        wasm.chaos_run(retptr, start, count);
-        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
-        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
-        deferred1_0 = r0;
-        deferred1_1 = r1;
-        return getStringFromWasm0(r0, r1);
-    } finally {
-        wasm.__wbindgen_add_to_stack_pointer(16);
-        wasm.__wbindgen_export3(deferred1_0, deferred1_1, 1);
-    }
-}
-
-/**
  * The fully lowered CBPV core IR of the snippet's own functions.
  *
  * Prelude elided: effects lowered, reference counting and FBIP reuse applied.
@@ -212,11 +84,12 @@ export function dump(src) {
 }
 
 /**
- * The checked-HIR fixture of the snippet: the versioned deterministic JSON the
- * `dump hir` phase emits (schema `prism-hir-fixture-v2`), carrying the
- * per-declaration schemes and effect rows plus the per-node checker facts
- * (resolution, dictionary evidence, numeric lane, zonked type, and handler
- * residual operations).
+ * The versioned checked-HIR fixture for the snippet.
+ *
+ * This is the deterministic JSON emitted by `dump hir` (schema
+ * `prism-hir-fixture-v2`). It carries per-declaration schemes and effect rows,
+ * plus per-node resolution, dictionary, numeric-lane, zonked-type, and handler
+ * residual-operation facts.
  *
  * The prelude is prepended so snippets that reference it type-check; the
  * browser strips the prelude declarations for display the same way the Core IR
@@ -337,34 +210,94 @@ export function incr_run(payload) {
 }
 
 /**
- * Run the double pendulum for `steps` frames and return the whole trajectory as
- * text.
+ * The content hash of one definition in a resident, the identity a page shows
+ * for it (the world shows its law's `step_*` function).
  *
- * The first line is the maximum reach (rod length + rod length), so the renderer
- * can scale the pivot's disk to the canvas; each following line is one frame,
- * `x1,y1,x2,y2`, the two bob centers with the pivot at the origin and y pointing
- * down. Frame N is the symplectic integrator composed N times on the chaotic
- * initial condition, a pure function of the index, so the scrubber positions its
- * playhead at any frame by replaying to it. Every op is IEEE Float over the
- * vendored libm, so the chaos is bit-identical on every backend and every replay.
- * On any front-end or runtime error, returns the rendered diagnostic instead.
- * @param {number} steps
+ * It is the compiler's own Merkle hash of the elaborated Core, so it moves when
+ * and only when the definition's behaviour moves. Returns an `error:` line for
+ * an unknown resident or definition, or a front-end failure.
+ * @param {string} name
+ * @param {string} def
  * @returns {string}
  */
-export function pendulum_run(steps) {
-    let deferred1_0;
-    let deferred1_1;
+export function resident_hash(name, def) {
+    let deferred3_0;
+    let deferred3_1;
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        wasm.pendulum_run(retptr, steps);
+        const ptr0 = passStringToWasm0(name, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(def, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len1 = WASM_VECTOR_LEN;
+        wasm.resident_hash(retptr, ptr0, len0, ptr1, len1);
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
         var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
-        deferred1_0 = r0;
-        deferred1_1 = r1;
+        deferred3_0 = r0;
+        deferred3_1 = r1;
         return getStringFromWasm0(r0, r1);
     } finally {
         wasm.__wbindgen_add_to_stack_pointer(16);
-        wasm.__wbindgen_export3(deferred1_0, deferred1_1, 1);
+        wasm.__wbindgen_export3(deferred3_0, deferred3_1, 1);
+    }
+}
+
+/**
+ * Run a resident's kernel under `fn main() = print(<expr>)` and return the
+ * printed term, or an `error:` line for an unknown resident or any front-end or
+ * runtime failure.
+ *
+ * The page owns the call: boids and pendulum replay `run_trace(n)`, the branch
+ * demo continues `run_trace_from(swarm, n)`, the world evolves `trace(...)`, and
+ * the chaos counter reports `batch_report(start, count, n_workers)`. Every
+ * kernel function is pure in its arguments, so the same expression is the same
+ * bytes on every replay.
+ * @param {string} name
+ * @param {string} expr
+ * @returns {string}
+ */
+export function resident_run(name, expr) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passStringToWasm0(name, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(expr, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len1 = WASM_VECTOR_LEN;
+        wasm.resident_run(retptr, ptr0, len0, ptr1, len1);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        deferred3_0 = r0;
+        deferred3_1 = r1;
+        return getStringFromWasm0(r0, r1);
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+        wasm.__wbindgen_export3(deferred3_0, deferred3_1, 1);
+    }
+}
+
+/**
+ * The Prism kernel of a resident, exactly as it runs, so a page's source face
+ * shows the real definitions rather than a paraphrase.
+ * @param {string} name
+ * @returns {string}
+ */
+export function resident_source(name) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passStringToWasm0(name, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.resident_source(retptr, ptr0, len0);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        deferred2_0 = r0;
+        deferred2_1 = r1;
+        return getStringFromWasm0(r0, r1);
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+        wasm.__wbindgen_export3(deferred2_0, deferred2_1, 1);
     }
 }
 
@@ -436,8 +369,8 @@ export function run_with_modules(src, names, sources) {
  * The code-identity digest (namespace root) of the baked teleport program.
  *
  * Both tabs compute this from the same embedded source, so it is the hash the
- * receiver checks an incoming envelope against; the demo shows it as the proof
- * that teleport verifies code identity, not just moves bytes.
+ * receiver checks an incoming envelope against. This proves code identity during
+ * teleport.
  * @returns {string}
  */
 export function teleport_bundle() {
@@ -605,104 +538,10 @@ export function tokens(src) {
         wasm.__wbindgen_export3(deferred2_0, deferred2_1, 1);
     }
 }
-
-/**
- * The content hash of a law's `step` function, the identity the resident shows
- * as its law hash.
- *
- * It is the compiler's own Merkle hash of the elaborated Core, so it moves when
- * and only when the rule's behaviour moves, and is independent of the grid the
- * law runs on. Returns `error: ...` for an unknown law or a front-end failure.
- * @param {string} law
- * @returns {string}
- */
-export function world_law_hash(law) {
-    let deferred2_0;
-    let deferred2_1;
-    try {
-        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        const ptr0 = passStringToWasm0(law, wasm.__wbindgen_export, wasm.__wbindgen_export2);
-        const len0 = WASM_VECTOR_LEN;
-        wasm.world_law_hash(retptr, ptr0, len0);
-        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
-        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
-        deferred2_0 = r0;
-        deferred2_1 = r1;
-        return getStringFromWasm0(r0, r1);
-    } finally {
-        wasm.__wbindgen_add_to_stack_pointer(16);
-        wasm.__wbindgen_export3(deferred2_0, deferred2_1, 1);
-    }
-}
-
-/**
- * Evolve a seed grid under a law for `ticks` generations and return the whole
- * trajectory.
- *
- * Each output line is one tick, `<state-hash> <bits>`: the blake3 digest of the
- * canonical grid encoding (see `examples/world.pr`) and the raw row-major 0/1
- * string. Line 0 is the seed itself, so its hash is the seed hash.
- *
- * `seed_bits` is a `w * h` string of `0`/`1` (the browser generates the pattern,
- * so the seed is data too); `law` selects the step function. Because `trace` is
- * a pure function of the seed, law, and tick count, forking a timeline is just
- * re-running from a perturbed grid, and two clients evolving the same seed under
- * the same law print identical hashes with no coordination. A malformed seed,
- * unknown law, or front-end error returns an `error:` line.
- * @param {string} law
- * @param {number} w
- * @param {number} h
- * @param {string} seed_bits
- * @param {number} ticks
- * @returns {string}
- */
-export function world_run(law, w, h, seed_bits, ticks) {
-    let deferred3_0;
-    let deferred3_1;
-    try {
-        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        const ptr0 = passStringToWasm0(law, wasm.__wbindgen_export, wasm.__wbindgen_export2);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(seed_bits, wasm.__wbindgen_export, wasm.__wbindgen_export2);
-        const len1 = WASM_VECTOR_LEN;
-        wasm.world_run(retptr, ptr0, len0, w, h, ptr1, len1, ticks);
-        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
-        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
-        deferred3_0 = r0;
-        deferred3_1 = r1;
-        return getStringFromWasm0(r0, r1);
-    } finally {
-        wasm.__wbindgen_add_to_stack_pointer(16);
-        wasm.__wbindgen_export3(deferred3_0, deferred3_1, 1);
-    }
-}
-
-/**
- * The Prism source of the world laws, exactly as it runs: the same definitions
- * the hash and evolution paths compile, so the resident's source face shows the
- * real law, not a paraphrase.
- * @returns {string}
- */
-export function world_source() {
-    let deferred1_0;
-    let deferred1_1;
-    try {
-        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        wasm.world_source(retptr);
-        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
-        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
-        deferred1_0 = r0;
-        deferred1_1 = r1;
-        return getStringFromWasm0(r0, r1);
-    } finally {
-        wasm.__wbindgen_add_to_stack_pointer(16);
-        wasm.__wbindgen_export3(deferred1_0, deferred1_1, 1);
-    }
-}
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
-        __wbg___wbindgen_string_get_b0ca35b86a603356: function(arg0, arg1) {
+        __wbg___wbindgen_string_get_d154f1e671052120: function(arg0, arg1) {
             const obj = getObject(arg1);
             const ret = typeof(obj) === 'string' ? obj : undefined;
             var ptr1 = isLikeNone(ret) ? 0 : passStringToWasm0(ret, wasm.__wbindgen_export, wasm.__wbindgen_export2);
@@ -710,7 +549,7 @@ function __wbg_get_imports() {
             getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
             getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
         },
-        __wbg___wbindgen_throw_344f42d3211c4765: function(arg0, arg1) {
+        __wbg___wbindgen_throw_bb96b2010945f0bc: function(arg0, arg1) {
             throw new Error(getStringFromWasm0(arg0, arg1));
         },
         __wbindgen_object_drop_ref: function(arg0) {

@@ -1,0 +1,2 @@
+-- test: skip
+test fn no_reason() = ()

@@ -1,0 +1,18 @@
+-- A let-bound value read by the body, an operation clause, and a `finally`
+-- clause is computed once. A tier that recomputes it for the cleanup prints
+-- `shared` twice.
+effect Ask
+  ask() : Int
+
+fn shared(n : Int) : Int ! {IO} =
+  println("shared {n}")
+  n + 1
+
+fn main() =
+  let v = shared(41)
+  let r =
+    handle ask() + v with
+      ask() resume k => k(v)
+      return x => x * 2
+      finally => println("cleanup {v}")
+  println(r)

@@ -9,9 +9,9 @@
 
 fn chunks(xs : List(Int)) : List(String) =
   match xs of
-    Nil => Nil
-    Cons(x, Nil) => Cons(show_int(x), Nil)
-    Cons(x, rest) => Cons(show_int(x), Cons(", ", chunks(rest)))
+    [] => Nil
+    [x] => Cons(show_int(x), Nil)
+    x :: rest => Cons(show_int(x), Cons(", ", chunks(rest)))
 
 fn render(xs : List(Int)) : String =
   concat_all(Cons("[", append(chunks(xs), Cons("]", Nil))))

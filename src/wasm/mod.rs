@@ -3,6 +3,7 @@
 //! The whole compiler front-end and tree-walking interpreter run in wasm. Only
 //! the LLVM/MLIR back-ends are absent (the `native` feature is off in a wasm
 //! build).
+use crate::DumpPhase;
 use wasm_bindgen::prelude::*;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -14,6 +15,7 @@ use serde_json::Value;
 
 use crate::core::HASH_PREFIX_HEX;
 use crate::error::line_col;
+use crate::eval::Observed;
 use crate::lex::highlight::token_spans;
 use crate::resolve::{default_roots, Root};
 use crate::{
@@ -70,10 +72,9 @@ pub fn run_with_modules(src: &str, names: Vec<String>, sources: Vec<String>) -> 
 
 fn run_on_roots(src: &str, roots: &[Root]) -> String {
     // A doc snippet without `main` (a bare expression or `let`-block) is wrapped
-    // as an implicit `main`; when wrapped, its result value is shown (`=> v`)
-    // since it prints nothing. A full program is run and its transcript shown.
+    // as an implicit `main`. What it shows is what its doctest expectation
+    // holds: the transcript if it printed, otherwise its value (`=> v`).
     let program = example_program(src);
-    let wrapped = program != src;
     let full = with_prelude(&program);
     match off_platform_builtins(&full, roots) {
         Ok(off) => {
@@ -91,196 +92,99 @@ fn run_on_roots(src: &str, roots: &[Root]) -> String {
         Err(e) => return format!("error: {e}"),
     }
     match interpret_on(&full, roots) {
-        // A full program: the exact transcript (real emitted newlines,
-        // byte-for-byte what the oracle compares). A wrapped expression: the
-        // value, after any transcript it produced.
-        Ok(r) => {
-            if wrapped {
-                let v = r.value.show();
-                if r.term.is_empty() {
-                    format!("=> {v}")
-                } else {
-                    format!("{}\n=> {v}", r.term.trim_end_matches('\n'))
-                }
-            } else {
-                r.term
-            }
-        }
+        // The transcript is the exact bytes emitted, what the oracle compares.
+        Ok(r) => match r.observed() {
+            Observed::Printed(term) => term,
+            Observed::Value(v) => format!("=> {v}"),
+        },
         Err(e) => format!("error: {e}"),
     }
 }
 
-// The scrubber-style residents (boids, pendulum). Each example's definitions are
-// shared verbatim with its terminal corpus form; the browser appends its own
-// `main` that prints the whole trajectory, so nothing about the motion depends on
-// which entry point runs it. The split marker fences off the example's own `main`
-// so the two entry points never collide in one program. The same sentinel lives
-// in the examples and in tests/*_scrubber.rs.
-const SCRUBBER_MAIN_SPLIT: &str = "-- @scrubber:main-below";
-const BOIDS_SRC: &str = include_str!("../../examples/boids.pr");
-const PENDULUM_SRC: &str = include_str!("../../examples/pendulum.pr");
+// The residents the browser drives. Each example's definitions above its
+// sentinel are shared verbatim with its terminal corpus form, and the page
+// supplies the expression its own `main` prints, so nothing about the behaviour
+// depends on which entry point runs it. The sentinel fences off the example's
+// own `main` so the two never collide in one program; the same sentinels live in
+// the examples and in their acceptance tests.
+const RESIDENTS: &[(&str, &str, &str)] = &[
+    (
+        "boids",
+        include_str!("../../examples/boids.pr"),
+        "-- @scrubber:main-below",
+    ),
+    (
+        "pendulum",
+        include_str!("../../examples/pendulum.pr"),
+        "-- @scrubber:main-below",
+    ),
+    (
+        "world",
+        include_str!("../../examples/world.pr"),
+        "-- @world:main-below",
+    ),
+    (
+        "chaos",
+        include_str!("../../examples/chaos_swarm.pr"),
+        "-- @chaos:main-below",
+    ),
+];
 
-// Prism World: the shared cellular universe. Its kernel (everything above the
-// sentinel) is a set of pure life-like laws over integer state; the browser
-// appends a `main` that either evolves a seed or hashes a law.
-const WORLD_MAIN_SPLIT: &str = "-- @world:main-below";
-const WORLD_SRC: &str = include_str!("../../examples/world.pr");
-
-// The curated law set as (public law id, step-function name) pairs. Both the
-// hash path and the run path read this one table, so a renamed law cannot drift
-// between the identity a client sees and the code that actually evolves it.
-const WORLD_LAWS: &[(&str, &str)] = &[("conway", "step_conway"), ("highlife", "step_highlife")];
-
-// The chaos-counter swarm: a concurrent fiber swarm over a channel under a
-// seeded-shuffle scheduler. Its kernel (everything above the sentinel) is reused
-// verbatim; the browser appends a `main` that reports one batch of schedules.
-const CHAOS_MAIN_SPLIT: &str = "-- @chaos:main-below";
-const CHAOS_SRC: &str = include_str!("../../examples/chaos_swarm.pr");
-
-// Slice a scrubber resident's kernel (everything above the sentinel) and run it
-// under a `main` that prints the whole trajectory for `steps` frames. Both
-// residents expose a `run_trace(n)` with the same contract.
-fn scrubber_trace(src: &str, steps: u32) -> String {
-    let defs = src.split(SCRUBBER_MAIN_SPLIT).next().unwrap_or(src);
-    let driver = format!("{defs}\nfn main() = print(run_trace({steps}))\n");
-    match interpret(&with_prelude(&driver)) {
-        Ok(r) => r.term,
-        Err(e) => format!("error: {e}"),
-    }
+// A resident's whole example source and its kernel (everything above the
+// sentinel).
+fn resident(name: &str) -> Result<(&'static str, &'static str), String> {
+    RESIDENTS
+        .iter()
+        .find(|(id, _, _)| *id == name)
+        .map(|(_, src, split)| (*src, src.split(split).next().unwrap_or(src)))
+        .ok_or_else(|| format!("unknown resident '{name}'"))
 }
 
-/// Run the boids swarm for `steps` deterministic steps and return the whole
-/// trajectory as text.
-///
-/// The first line is `W H` (the toroidal world dimensions); each following line
-/// is one frame, a space-separated list of `x,y` integer positions. Frame N is
-/// `step` composed N times on the seeded swarm, a pure function of the index, so
-/// the browser scrubber positions its playhead at any frame by replaying to it.
-/// On any front-end or runtime error, returns the rendered diagnostic instead.
+/// The Prism kernel of a resident, exactly as it runs, so a page's source face
+/// shows the real definitions rather than a paraphrase.
 #[wasm_bindgen]
 #[must_use]
-pub fn boids_run(steps: u32) -> String {
-    scrubber_trace(BOIDS_SRC, steps)
+pub fn resident_source(name: &str) -> String {
+    resident(name).map_or_else(|e| format!("error: {e}"), |(_, k)| k.trim_end().to_string())
 }
 
-/// Run the boids swarm for `steps` steps and return the whole trajectory in
-/// FULL state: like [`boids_run`], with each boid represented as `x,y,vx,vy`.
+/// Run a resident's kernel under `fn main() = print(<expr>)` and return the
+/// printed term, or an `error:` line for an unknown resident or any front-end or
+/// runtime failure.
 ///
-/// The velocity is what a branching timeline needs: to fork at frame N and
-/// continue the run, the frontend perturbs that frame's full state and hands it
-/// to [`boids_run_from`]. Positions alone cannot be continued (one `step` reads
-/// each boid's velocity), so the branch demo drives on this trajectory.
+/// The page owns the call: boids and pendulum replay `run_trace(n)`, the branch
+/// demo continues `run_trace_from(swarm, n)`, the world evolves `trace(...)`, and
+/// the chaos counter reports `batch_report(start, count, n_workers)`. Every
+/// kernel function is pure in its arguments, so the same expression is the same
+/// bytes on every replay.
 #[wasm_bindgen]
 #[must_use]
-pub fn boids_run_full(steps: u32) -> String {
-    let defs = BOIDS_SRC
-        .split(SCRUBBER_MAIN_SPLIT)
-        .next()
-        .unwrap_or(BOIDS_SRC);
-    let driver = format!("{defs}\nfn main() = print(run_trace_full({steps}))\n");
-    match interpret(&with_prelude(&driver)) {
-        Ok(r) => r.term,
-        Err(e) => format!("error: {e}"),
-    }
-}
-
-/// Continue the boids swarm from an arbitrary state `state` for `steps` steps,
-/// returning the full-state trajectory (`boids_run_full`'s format) from that
-/// state.
-///
-/// `state` is one full-state frame: a space-separated list of `x,y,vx,vy`
-/// integer boids, exactly a line of [`boids_run_full`]'s output. The branching
-/// demo forks a timeline by taking frame N of the base run, perturbing one boid,
-/// and passing the perturbed frame here. Because `run_trace_from` is a pure
-/// function of the swarm and the step count, replaying a branch with the same
-/// perturbed state is byte-identical: that is the determinism claim the two
-/// side-by-side timelines rest on. A malformed `state` returns an `error:` line.
-#[wasm_bindgen]
-#[must_use]
-pub fn boids_run_from(state: &str, steps: u32) -> String {
-    let swarm = match boids_state_literal(state) {
-        Ok(lit) => lit,
+pub fn resident_run(name: &str, expr: &str) -> String {
+    let kernel = match resident(name) {
+        Ok((_, k)) => k,
         Err(e) => return format!("error: {e}"),
     };
-    let defs = BOIDS_SRC
-        .split(SCRUBBER_MAIN_SPLIT)
-        .next()
-        .unwrap_or(BOIDS_SRC);
-    let driver = format!("{defs}\nfn main() = print(run_trace_from({swarm}, {steps}))\n");
+    let driver = format!("{kernel}\nfn main() = print({expr})\n");
     match interpret(&with_prelude(&driver)) {
         Ok(r) => r.term,
         Err(e) => format!("error: {e}"),
     }
 }
 
-// How many integers describe one boid in a full-state frame: `x,y,vx,vy`.
-const BOID_FIELDS: usize = 4;
-
-// Parse a full-state frame ("x,y,vx,vy x,y,vx,vy ...") into a Prism list literal
-// of 4-tuples, `[(x,y,vx,vy), ...]`, validating every field is an integer so a
-// hand-edited or truncated state is rejected up front rather than producing a
-// parse error deep in the generated driver. The ints are re-emitted verbatim, so
-// the swarm the frontend forked is the swarm the kernel continues.
-fn boids_state_literal(state: &str) -> Result<String, String> {
-    let mut tuples: Vec<String> = Vec::new();
-    for boid in state.split_whitespace() {
-        let fields: Vec<&str> = boid.split(',').collect();
-        if fields.len() != BOID_FIELDS {
-            return Err(format!("malformed boid state '{boid}' (want x,y,vx,vy)"));
-        }
-        for f in &fields {
-            if f.parse::<i64>().is_err() {
-                return Err(format!("non-integer boid field '{f}'"));
-            }
-        }
-        tuples.push(format!("({})", fields.join(",")));
-    }
-    if tuples.is_empty() {
-        return Err("empty boid state".to_string());
-    }
-    Ok(format!("[{}]", tuples.join(",")))
-}
-
-// The world kernel: every definition above the sentinel, shared by both the hash
-// and run drivers.
-fn world_defs() -> &'static str {
-    WORLD_SRC
-        .split(WORLD_MAIN_SPLIT)
-        .next()
-        .unwrap_or(WORLD_SRC)
-}
-
-// The step-function name for a law id, or `None` for an unknown law.
-fn world_step_fn(law: &str) -> Option<&'static str> {
-    WORLD_LAWS
-        .iter()
-        .find(|(id, _)| *id == law)
-        .map(|(_, step)| *step)
-}
-
-/// The Prism source of the world laws, exactly as it runs: the same definitions
-/// the hash and evolution paths compile, so the resident's source face shows the
-/// real law, not a paraphrase.
-#[wasm_bindgen]
-#[must_use]
-pub fn world_source() -> String {
-    world_defs().trim_end().to_string()
-}
-
-/// The content hash of a law's `step` function, the identity the resident shows
-/// as its law hash.
+/// The content hash of one definition in a resident, the identity a page shows
+/// for it (the world shows its law's `step_*` function).
 ///
 /// It is the compiler's own Merkle hash of the elaborated Core, so it moves when
-/// and only when the rule's behaviour moves, and is independent of the grid the
-/// law runs on. Returns `error: ...` for an unknown law or a front-end failure.
+/// and only when the definition's behaviour moves. Returns an `error:` line for
+/// an unknown resident or definition, or a front-end failure.
 #[wasm_bindgen]
 #[must_use]
-pub fn world_law_hash(law: &str) -> String {
-    let Some(step) = world_step_fn(law) else {
-        return format!("error: unknown law '{law}'");
+pub fn resident_hash(name: &str, def: &str) -> String {
+    let src = match resident(name) {
+        Ok((src, _)) => src,
+        Err(e) => return format!("error: {e}"),
     };
-    let full = with_prelude(WORLD_SRC);
-    let ns = match crate::dump("namespace", &full) {
+    let ns = match crate::dump(DumpPhase::Namespace, &with_prelude(src)) {
         Ok(s) => s,
         Err(e) => return format!("error: {e}"),
     };
@@ -291,7 +195,7 @@ pub fn world_law_hash(law: &str) -> String {
     let hash = doc.get("defs").and_then(Value::as_array).and_then(|defs| {
         defs.iter().find_map(|d| {
             let name = d.pointer("/meta/name").and_then(Value::as_str)?;
-            if name == step {
+            if name == def {
                 d.get("hash").and_then(Value::as_str)
             } else {
                 None
@@ -299,92 +203,9 @@ pub fn world_law_hash(law: &str) -> String {
         })
     });
     hash.map_or_else(
-        || format!("error: law '{law}' has no '{step}' definition"),
+        || format!("error: resident '{name}' has no '{def}' definition"),
         |h| h[..h.len().min(HASH_PREFIX_HEX)].to_string(),
     )
-}
-
-/// Evolve a seed grid under a law for `ticks` generations and return the whole
-/// trajectory.
-///
-/// Each output line is one tick, `<state-hash> <bits>`: the blake3 digest of the
-/// canonical grid encoding (see `examples/world.pr`) and the raw row-major 0/1
-/// string. Line 0 is the seed itself, so its hash is the seed hash.
-///
-/// `seed_bits` is a `w * h` string of `0`/`1` (the browser generates the pattern,
-/// so the seed is data too); `law` selects the step function. Because `trace` is
-/// a pure function of the seed, law, and tick count, forking a timeline is just
-/// re-running from a perturbed grid, and two clients evolving the same seed under
-/// the same law print identical hashes with no coordination. A malformed seed,
-/// unknown law, or front-end error returns an `error:` line.
-#[wasm_bindgen]
-#[must_use]
-pub fn world_run(law: &str, w: u32, h: u32, seed_bits: &str, ticks: u32) -> String {
-    let Some(step) = world_step_fn(law) else {
-        return format!("error: unknown law '{law}'");
-    };
-    let cells = (w as usize) * (h as usize);
-    if seed_bits.len() != cells {
-        return format!(
-            "error: seed has {} cells, expected {w}x{h} = {cells}",
-            seed_bits.len()
-        );
-    }
-    if !seed_bits.bytes().all(|b| b == b'0' || b == b'1') {
-        return "error: seed must be a string of 0 and 1".to_string();
-    }
-    let defs = world_defs();
-    let driver = format!(
-        "{defs}\nfn main() = print(trace({w}, {h}, grid_of(\"{seed_bits}\"), {step}, {ticks}))\n"
-    );
-    match interpret(&with_prelude(&driver)) {
-        Ok(r) => r.term,
-        Err(e) => format!("error: {e}"),
-    }
-}
-
-/// Run the double pendulum for `steps` frames and return the whole trajectory as
-/// text.
-///
-/// The first line is the maximum reach (rod length + rod length), so the renderer
-/// can scale the pivot's disk to the canvas; each following line is one frame,
-/// `x1,y1,x2,y2`, the two bob centers with the pivot at the origin and y pointing
-/// down. Frame N is the symplectic integrator composed N times on the chaotic
-/// initial condition, a pure function of the index, so the scrubber positions its
-/// playhead at any frame by replaying to it. Every op is IEEE Float over the
-/// vendored libm, so the chaos is bit-identical on every backend and every replay.
-/// On any front-end or runtime error, returns the rendered diagnostic instead.
-#[wasm_bindgen]
-#[must_use]
-pub fn pendulum_run(steps: u32) -> String {
-    scrubber_trace(PENDULUM_SRC, steps)
-}
-
-/// Run one batch of `count` hostile schedules of the concurrent swarm, starting
-/// at seed index `start`, and report how many landed on the reference final
-/// state.
-///
-/// Returns three lines: `<agreed> <count> <refhash>` (agreed is how many of the
-/// batch's schedules matched the global reference hash; it is always `count`,
-/// which is the determinism claim), then the interleaving of the batch's first
-/// two schedules as space-separated fiber ids. Each schedule is a distinct
-/// seeded-shuffle of the same fibers over the same channel, so the two
-/// interleavings differ while the hash does not. The browser calls this in
-/// growing batches to tick a progressive counter without freezing the tab: the
-/// count is what the frame budget affords, but every schedule genuinely agrees.
-/// On any error, returns the rendered diagnostic instead.
-#[wasm_bindgen]
-#[must_use]
-pub fn chaos_run(start: u32, count: u32) -> String {
-    let defs = CHAOS_SRC
-        .split(CHAOS_MAIN_SPLIT)
-        .next()
-        .unwrap_or(CHAOS_SRC);
-    let driver = format!("{defs}\nfn main() = print(batch_report({start}, {count}, n_workers))\n");
-    match interpret(&with_prelude(&driver)) {
-        Ok(r) => r.term,
-        Err(e) => format!("error: {e}"),
-    }
 }
 
 // The teleport resident: a small deterministic program the browser suspends into
@@ -630,7 +451,7 @@ pub fn core_ir(src: &str) -> String {
 #[wasm_bindgen]
 #[must_use]
 pub fn dump_hir(src: &str) -> String {
-    match crate::dump_at("hir", &with_prelude(src), Path::new(".")) {
+    match crate::dump_at(DumpPhase::Hir, &with_prelude(src), Path::new(".")) {
         Ok(fixture) => fixture,
         Err(e) => format!("error: {e}"),
     }
@@ -674,7 +495,7 @@ pub fn hash_defs(src: &str) -> String {
     let err = |m: &str| serde_json::json!({ "error": m }).to_string();
     // Parse a `dump namespace` export (taken over elaborated core) into its doc.
     let namespace = |full: &str| -> Result<serde_json::Value, String> {
-        let ns = crate::dump("namespace", full).map_err(|e| format!("{e}"))?;
+        let ns = crate::dump(DumpPhase::Namespace, full).map_err(|e| format!("{e}"))?;
         serde_json::from_str::<serde_json::Value>(&ns)
             .map_err(|_| "could not read namespace export".to_string())
     };

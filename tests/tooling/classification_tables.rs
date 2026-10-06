@@ -1,10 +1,12 @@
-// Two boundaries answer a small integer rather than a message, so that the same
-// failure is the same Prism value whichever tier a program is running on and
-// whoever wrote the handler: the socket table shared by `src/eval/net.rs`,
-// `runtime/prism_net.c`, and `lib/std/Net.pr`, and the mobility table shared by
-// `src/eval/mobility.rs`, `runtime/prism_mobility.c`, and `lib/std/Teleport.pr`.
+// Three boundaries answer a small integer rather than a message, so that the
+// same failure is the same Prism value whichever tier a program is running on
+// and whoever wrote the handler: the socket table shared by `src/eval/net.rs`,
+// `runtime/prism_net.c`, and `lib/std/Net.pr`, the mobility table shared by
+// `src/eval/mobility.rs`, `runtime/prism_mobility.c`, and `lib/std/Teleport.pr`,
+// and the child-process table shared by `src/eval/proc.rs`,
+// `runtime/prism_proc.c`, and `lib/std/Proc.pr`.
 //
-// Each of those six lists is a plain sequence of constants in a different
+// Each of those nine lists is a plain sequence of constants in a different
 // language, which is exactly the shape that drifts silently: renumbering one
 // list does not fail to compile anywhere, it just makes one tier report
 // `Refused` where the other reports `Unreachable`. Nothing in the build can
@@ -116,6 +118,18 @@ fn the_mobility_classification_table_is_one_table() {
         // `Undelivered` runs the other way: it is a `MoveError` no runtime can
         // raise, so it has a constructor and no code in any of the three files.
         &[],
+    );
+}
+
+#[test]
+fn the_process_classification_table_is_one_table() {
+    agree(
+        "Proc",
+        &c_table(&read("runtime/prism_proc.c"), "PRISM_PROC_"),
+        &rust_table(&read("src/eval/proc.rs")),
+        &prism_table(&read("lib/std/Proc.pr"), "proc_code_"),
+        // `HostError` is the fallback `proc_error` reaches, as `Other` is for Net.
+        &["other"],
     );
 }
 

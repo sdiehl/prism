@@ -27,6 +27,7 @@ Program {
                             ),
                         ],
                     ),
+                    span: 84..85,
                 },
                 Ctor {
                     name: "B",
@@ -41,6 +42,7 @@ Program {
                             ),
                         ],
                     ),
+                    span: 100..101,
                 },
             ],
             deriving: [],
@@ -71,6 +73,7 @@ Program {
                             ),
                         ],
                     ),
+                    span: 128..133,
                 },
             ],
             deriving: [],

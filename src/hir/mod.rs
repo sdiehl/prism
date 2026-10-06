@@ -20,6 +20,7 @@ pub mod lint;
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use prism_common::record::RecordError;
 use serde::{Deserialize, Serialize};
 
 use crate::sym::Sym;
@@ -247,11 +248,12 @@ impl NodeFacts {
         serde_json::to_string(&rows)
     }
 
-    pub(crate) fn from_json(text: &str) -> Result<Self, String> {
-        let rows: Vec<NodeFactWire> =
-            serde_json::from_str(text).map_err(|error| error.to_string())?;
+    pub(crate) fn from_json(text: &str) -> Result<Self, RecordError> {
+        let rows: Vec<NodeFactWire> = RecordError::decode(text)?;
         if !rows.windows(2).all(|pair| pair[0].id < pair[1].id) {
-            return Err("checked HIR facts are not in canonical node order".to_string());
+            return Err(RecordError::Invalid(
+                "checked HIR facts are not in canonical node order".to_string(),
+            ));
         }
         let mut facts = Self::empty();
         for row in rows {
@@ -262,7 +264,7 @@ impl NodeFacts {
                 value
                     .map(|ty| {
                         parse_checked_signature("checked-body", &ty)
-                            .map_err(|error| error.to_string())
+                            .map_err(|error| RecordError::invalid(error.to_string()))
                     })
                     .transpose()
             };

@@ -11,7 +11,7 @@ impl Fmt<'_> {
     // Every top-level item rendered in place, as `(start, end, text)` in source
     // order. The one enumeration of what a program prints, shared by whole-file
     // formatting and by rendering a single declaration on its own.
-    fn items(&self, prog: &Program) -> Vec<(usize, usize, String)> {
+    pub(super) fn items(&self, prog: &Program) -> Vec<(usize, usize, String)> {
         let mut items: Vec<(usize, usize, String)> = Vec::new();
         // Restore the visibility marker the parser stripped into `prog.exports` /
         // `prog.opaques` (opaque implies exported, so it is checked first), then
@@ -121,7 +121,62 @@ impl Fmt<'_> {
     }
 
     pub(super) fn fmt_program(&self, prog: &Program) -> String {
-        let items = self.items(prog);
+        self.fmt_program_items(prog, self.items(prog))
+    }
+
+    // The source with every import written below a declaration lifted to the end
+    // of the leading import block, or above the first declaration when there is
+    // none, each carrying the comment lines written directly above it. `None` when
+    // the imports already lead. A module's imports are its header: one read from
+    // the top says what it depends on, and an import further down hides that.
+    pub(super) fn hoisted_imports(
+        &self,
+        prog: &Program,
+        items: &[(usize, usize, String)],
+    ) -> Option<String> {
+        let src = self.source;
+        let imports: BTreeSet<usize> = prog.imports.iter().map(|i| i.span.start).collect();
+        let first_decl = items
+            .iter()
+            .map(|(start, _, _)| *start)
+            .find(|start| !imports.contains(start))?;
+        let late: Vec<(usize, usize)> = prog
+            .imports
+            .iter()
+            .filter(|i| i.span.start > first_decl)
+            .map(|i| (attached_start(src, i.span.start), line_end(src, i.span.end)))
+            .collect();
+        if late.is_empty() {
+            return None;
+        }
+        let lead_end = prog
+            .imports
+            .iter()
+            .filter(|i| i.span.start < first_decl)
+            .map(|i| line_end(src, i.span.end))
+            .max();
+        let (at, sep) =
+            lead_end.map_or_else(|| (attached_start(src, first_decl), "\n"), |end| (end, ""));
+        let mut moved = String::new();
+        let mut rest = String::new();
+        let mut cursor = at;
+        for &(lo, hi) in &late {
+            rest.push_str(&src[cursor..lo]);
+            moved.push_str(&src[lo..hi]);
+            if !moved.ends_with('\n') {
+                moved.push('\n');
+            }
+            cursor = hi;
+        }
+        rest.push_str(&src[cursor..]);
+        Some(format!("{}{moved}{sep}{rest}", &src[..at]))
+    }
+
+    pub(super) fn fmt_program_items(
+        &self,
+        prog: &Program,
+        items: Vec<(usize, usize, String)>,
+    ) -> String {
         let import_starts: BTreeSet<usize> = prog.imports.iter().map(|i| i.span.start).collect();
         let mut out = String::new();
         let mut prev_end: usize = 0;
@@ -171,4 +226,27 @@ impl Fmt<'_> {
 
         out
     }
+}
+
+fn line_start(src: &str, at: usize) -> usize {
+    src[..at].rfind('\n').map_or(0, |i| i + 1)
+}
+
+fn line_end(src: &str, at: usize) -> usize {
+    src[at..].find('\n').map_or(src.len(), |i| at + i + 1)
+}
+
+// The start of the comment block written directly above the line holding `at`:
+// the column-zero `--` lines with no blank line between them and it, which the
+// formatter treats as belonging to the item below.
+fn attached_start(src: &str, at: usize) -> usize {
+    let mut lo = line_start(src, at);
+    while lo > 0 {
+        let prev = line_start(src, lo - 1);
+        if !src[prev..lo].starts_with("--") {
+            break;
+        }
+        lo = prev;
+    }
+    lo
 }

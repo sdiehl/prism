@@ -51,8 +51,8 @@ fn print_findings(
   fs : List(Finding)
 ) : Unit ! {IO} =
   match fs of
-    Nil => ()
-    Cons(f, rest) =>
+    [] => ()
+    f :: rest =>
       match line_col(text, f.span.lo) of
         (line, col) =>
           println(

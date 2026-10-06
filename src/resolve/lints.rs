@@ -237,6 +237,7 @@ impl Lints {
         let body = match a {
             HandlerArm::Return(_, b)
             | HandlerArm::Op(_, _, _, b)
+            | HandlerArm::Finally(b)
             | HandlerArm::Sugar(
                 SugarArm::Once(_, _, b) | SugarArm::Never(_, _, b) | SugarArm::Val(_, b),
             ) => b,
@@ -327,7 +328,11 @@ impl Lints {
                     self.arm_body(a);
                 }
             }
-            Sugar::Default(a, b) | Sugar::Transact(a, b) | Sugar::Compose(_, a, b) => {
+            Sugar::Default(a, b)
+            | Sugar::Transact(a, b)
+            | Sugar::Compose(_, a, b)
+            | Sugar::Cons(a, b)
+            | Sugar::PathJoin(a, b) => {
                 self.expr(a);
                 self.expr(b);
             }

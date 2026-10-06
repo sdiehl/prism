@@ -1,0 +1,330 @@
+-- | Shell: a small vocabulary for script-shaped programs, over `Proc` and `Path`.
+--
+-- Nothing here is a second process model. A command is still a `Proc.Command`,
+-- adjusted with the modifiers below, and every run is still one `Proc` step:
+-- `run` checks the status and keeps what a script needs to report a failure,
+-- `run_text` and `run_lines` decode the output, and `pipe` runs a pipeline
+-- under `check_pipefail`. Import it qualified, since its names are the short
+-- ones a script reaches for.
+--
+-- ```prism,no_run
+-- import Proc (..)
+-- import Shell as Sh
+--
+-- fn main() : Unit ! {IO} =
+--   match run_proc(\() -> Sh.run_lines(command("git", ["status", "--short"]))) of
+--     Ok(changed) => println(Sh.unlines(Sh.grep(".pr", changed)))
+--     Err(e) => println(Sh.render(e))
+-- ```
+--
+-- The text helpers are pure: `lines`, `unlines`, `uniq`, `numbered`, and
+-- `grep` work on values a run already returned, so a script's filtering is
+-- ordinary code a test can call without spawning anything.
+--
+-- `unsafe_shell` is the one way to hand a string to the platform shell, and its
+-- name says so. No other function here parses, quotes, or expands a string.
+
+import Path (Path, path, path_str, join, is_absolute, components)
+import Proc (..)
+import Data.String (contains)
+
+-- | A run that a script treats as failed: the program that failed, how, and its
+-- captured error stream; or a program whose output was not UTF-8 text.
+-- lint: allow(L0203)
+pub type ShellError = Failed(String, ExitStatus, Buf) | NotText(String)
+
+let shell_newline : Int = ord('\n')
+
+let shell_path_separator : Int = ord(':')
+
+-- | The program `unsafe_shell` hands its script to.
+pub let platform_shell : String = "/bin/sh"
+
+-- | `c` run in directory `p`.
+pub fn in_dir(c : Command, p : Path) : Command = { c | directory = Some(p) }
+
+-- | `c` with variable `k` set to `v`, after the edits it already has.
+pub fn set_env(c : Command, k : String, v : String) : Command =
+  { c | env_edits = shell_snoc(c.env_edits, SetVar(k, v)) }
+
+-- | `c` with variable `k` removed, after the edits it already has.
+pub fn unset_env(c : Command, k : String) : Command =
+  { c | env_edits = shell_snoc(c.env_edits, UnsetVar(k)) }
+
+-- | `c` with an environment holding only the variables it sets.
+pub fn clean_env(c : Command) : Command = { c | base_env = Clean }
+
+-- | `c` with `s` as its standard input.
+pub fn feed_text(c : Command, s : String) : Command =
+  { c | input = Feed(buf_of_string(s)) }
+
+-- | `c` killed if it is still running after `ms` milliseconds.
+pub fn within(c : Command, ms : Int) : Command = { c | deadline_ms = Some(ms) }
+
+-- | `c` with its error stream discarded.
+pub fn quiet(c : Command) : Command = { c | stderr_policy = Discard }
+
+-- | A command that runs `script` through `platform_shell`, as `sh -c script`.
+--
+-- Use it only when a script needs what only a shell has: expansion, compound
+-- syntax, or a tool distributed as shell code. Three things follow from it, and
+-- none of them hold for `command`:
+--
+-- 1. Text interpolated into `script` is shell syntax. A value that carries
+--    a quote, `;`, `$(...)`, or a newline runs as code, so a script built from
+--    input it does not control is a command injection. Nothing here quotes or
+--    sanitizes a string, because no quoting is right for every shell.
+-- 2. What `script` means is up to the platform shell: its quoting rules,
+--    builtins, and expansions differ between hosts and between shells.
+-- 3. It is not `command(program, arguments)`. The program the shell runs is
+--    found on the child's `PATH`, after the child's environment edits, and
+--    its arguments are words the shell split, not the list a caller wrote.
+pub fn unsafe_shell(script : String) : Command =
+  command(platform_shell, ["-c", script])
+
+-- | The output of `c`, when it exits with code 0.
+pub fn run(c : Command) : Result(Buf, ShellError) ! {Proc} =
+  let o = collect(c)
+  match o.status of
+    Exited(0) => Ok(o.out)
+    s => Err(Failed(c.program, s, o.err))
+
+-- | The output of `c` as text, when it exits with code 0 and wrote UTF-8.
+pub fn run_text(c : Command) : Result(String, ShellError) ! {Proc} =
+  match run(c) of
+    Ok(b) => shell_text(c.program, b)
+    Err(e) => Err(e)
+
+-- | The output of `c` as `lines`, when it exits with code 0 and wrote UTF-8.
+pub fn run_lines(c : Command) : Result(List(String), ShellError) ! {Proc} =
+  match run_text(c) of
+    Ok(s) => Ok(lines(s))
+    Err(e) => Err(e)
+
+-- | True when `c` exits with code 0.
+pub fn exits_ok(c : Command) : Bool ! {Proc} =
+  match collect(c).status of
+    Exited(0) => true
+    _ => false
+
+-- | The output of the pipeline `cs`, when every stage exits with code 0; else
+-- the last stage that did not, as a shell under `pipefail` reports it.
+pub fn pipe(cs : List(Command)) : Result(Buf, ShellError) ! {Proc} =
+  let r = collect_pipeline(pipeline(cs))
+  match check_pipefail(r) of
+    Ok(out) => Ok(out)
+    Err(StageFailure { stage = i, status = s }) =>
+      Err(Failed(shell_program_at(cs, i), s, shell_buf_at(r.errs, i)))
+
+-- | `e` as one line for a person: the program, what happened to it, and the
+-- first line of what it wrote to its error stream.
+pub fn render(e : ShellError) : String =
+  match e of
+    NotText(program) => "{program}: output is not UTF-8 text"
+    Failed(program, s, err) =>
+      let line = shell_first_line(err)
+      if line == "" then
+        "{program}: {describe(s)}"
+      else
+        "{program}: {describe(s)}: {line}"
+
+-- | How a run ended, in words.
+pub fn describe(s : ExitStatus) : String =
+  match s of
+    Exited(n) => "exited with code {show(n)}"
+    Signaled(n) => "killed by signal {show(n)}"
+    SpawnFailed(e) => "could not start: {shell_reason(e)}"
+    OutputLimit(Stdout) => "wrote past its output limit"
+    OutputLimit(Stderr) => "wrote past its error limit"
+    DeadlineExceeded => "ran past its deadline"
+    Aborted(e) => "stopped by the host: {shell_reason(e)}"
+
+-- | The first directory in `dirs` holding a file called `name`, as that file's
+-- path. A `name` that is not a single path component is never searched for,
+-- and neither is a directory that is not absolute, as for `Proc`'s own search.
+-- The file is only known to exist: whether it may be executed is the host's
+-- answer when it is run.
+pub fn which(name : String, dirs : List(Path)) : Option(Path) ! {FileSystem} =
+  match path(name) of
+    Ok(p) =>
+      if not(is_absolute(p)) && components(p) == [name] then
+        shell_which(p, dirs)
+      else
+        None
+    Err(_) => None
+
+-- | The absolute directories of a `PATH`-style value, in order. Empty and
+-- relative entries are dropped.
+pub fn search_path(value : String) : List(Path) =
+  shell_absolute(shell_split(buf_of_string(value), shell_path_separator))
+
+-- | The lines of `s`. A newline ends a line rather than separating two, so a
+-- final newline does not add an empty line and text without one still ends in
+-- a line. A carriage return is kept as part of its line.
+--
+-- ```prism
+-- import Shell (lines)
+-- lines("a\nb\n")
+-- ```
+-- ```output
+-- [a, b]
+-- ```
+pub fn lines(s : String) : List(String) =
+  let b = buf_of_string(s)
+  let n = buf_len(b)
+  if n == 0 then
+    Nil
+  elif buf_get(b, n - 1) == shell_newline then
+    shell_split(buf_slice(b, 0, n - 1), shell_newline)
+  else
+    shell_split(b, shell_newline)
+
+-- | `xs` as text, each line ended by a newline. `lines(unlines(xs))` is `xs`
+-- for lines without a newline of their own.
+pub fn unlines(xs : List(String)) : String = concat_all(shell_ended(xs))
+
+-- | `xs` without adjacent repeats, as `uniq` prints them.
+--
+-- ```prism
+-- import Shell (uniq)
+-- uniq(["a", "a", "b", "a"])
+-- ```
+-- ```output
+-- [a, b, a]
+-- ```
+pub fn uniq(xs : List(String)) : List(String) =
+  match xs of
+    [] => Nil
+    x :: rest => Cons(x, shell_uniq(x, rest))
+
+-- | Each of `xs` with its line number, counted from 1.
+pub fn numbered(xs : List(String)) : List((Int, String)) = shell_number(xs, 1)
+
+-- | The lines of `xs` that contain `needle`.
+--
+-- ```prism
+-- import Shell (grep)
+-- grep("an", ["banana", "cherry", "mango"])
+-- ```
+-- ```output
+-- [banana, mango]
+-- ```
+pub fn grep(needle : String, xs : List(String)) : List(String) =
+  match xs of
+    [] => Nil
+    x :: rest =>
+      if contains(needle, x) then
+        Cons(x, grep(needle, rest))
+      else
+        grep(needle, rest)
+
+fn shell_text(program : String, b : Buf) : Result(String, ShellError) =
+  match text(b) of
+    Some(s) => Ok(s)
+    None => Err(NotText(program))
+
+fn shell_snoc(xs : List(a), x : a) : List(a) =
+  match xs of
+    [] => [x]
+    y :: rest => Cons(y, shell_snoc(rest, x))
+
+fn shell_program_at(cs : List(Command), i : Int) : String =
+  match cs of
+    [] => ""
+    c :: rest =>
+      if i <= 0 then
+        c.program
+      else
+        shell_program_at(rest, i - 1)
+
+fn shell_buf_at(bs : List(Buf), i : Int) : Buf =
+  match bs of
+    [] => buf_empty()
+    b :: rest =>
+      if i <= 0 then
+        b
+      else
+        shell_buf_at(rest, i - 1)
+
+fn shell_first_line(err : Buf) : String =
+  match text(err) of
+    Some(s) =>
+      match lines(s) of
+        line :: _ => line
+        [] => ""
+    None => ""
+
+fn shell_reason(e : ProcError) : String =
+  match e of
+    NotFound => "not found"
+    PermissionDenied => "permission denied"
+    BadCommand => "malformed command"
+    ResourceLimit => "out of resources"
+    HostError => "host error"
+
+fn shell_which(p : Path, dirs : List(Path)) : Option(Path) ! {FileSystem} =
+  match dirs of
+    [] => None
+    d :: rest =>
+      let candidate = join(d, p)
+      if is_absolute(d) && file_exists(path_str(candidate)) then
+        Some(candidate)
+      else
+        shell_which(p, rest)
+
+fn shell_absolute(entries : List(String)) : List(Path) =
+  match entries of
+    [] => Nil
+    e :: rest =>
+      match path(e) of
+        Ok(p) =>
+          if is_absolute(p) then
+            Cons(p, shell_absolute(rest))
+          else
+            shell_absolute(rest)
+        Err(_) => shell_absolute(rest)
+
+-- The pieces of `b` between each `sep` byte, scanned from the end so the list
+-- is built in order without a reverse. A separator byte never occurs inside
+-- a multi-byte UTF-8 sequence, so every piece of valid text is valid text.
+fn shell_split(b : Buf, sep : Int) : List(String) =
+  shell_split_go(b, sep, buf_len(b) - 1, buf_len(b), Nil)
+
+fn shell_split_go(
+  b : Buf,
+  sep : Int,
+  i : Int,
+  hi : Int,
+  acc : List(String)
+) : List(String) =
+  if i < 0 then
+    Cons(string_of_buf(buf_slice(b, 0, hi)), acc)
+  elif buf_get(b, i) == sep then
+    shell_split_go(
+        b,
+        sep,
+        i - 1,
+        i,
+        Cons(string_of_buf(buf_slice(b, i + 1, hi - i - 1)), acc),
+      )
+  else
+    shell_split_go(b, sep, i - 1, hi, acc)
+
+fn shell_ended(xs : List(String)) : List(String) =
+  match xs of
+    [] => Nil
+    x :: rest => Cons(x, Cons("\n", shell_ended(rest)))
+
+fn shell_uniq(prev : String, xs : List(String)) : List(String) =
+  match xs of
+    [] => Nil
+    x :: rest =>
+      if x == prev then
+        shell_uniq(prev, rest)
+      else
+        Cons(x, shell_uniq(x, rest))
+
+fn shell_number(xs : List(String), n : Int) : List((Int, String)) =
+  match xs of
+    [] => Nil
+    x :: rest => Cons((n, x), shell_number(rest, n + 1))

@@ -163,6 +163,15 @@ pow(2, 10)
 1024
 ```
 
+### `PathJoin`
+
+```prism,def,h-5903ade2d1d2ab622d4f4bfbc9123b6eb6f24386b11071363dd03a8d957747d1
+class PathJoin(a)
+  path_append : (a, a) -> a
+```
+
+Path join, the class `a </> b` desugars to. `Path` carries the instance, so `dir </> name` reads as "name, inside dir"; the operator is not arithmetic and has no instance at `String` or the number types.
+
 ### `Num`
 
 ```prism,def,h-554927b68be403b023b779d6f063e4ad1371ae94b3da148664acd6373a2f5bb7
@@ -1128,8 +1137,8 @@ None
 
 ### `optional`
 
-```prism,sig,h-839afce72c8e8757aae9010dcc3584a0d9165a609628c130a4dc2f4ddd6e413b
-optional : forall e0 a. (() -> a ! {e0}) -> Option(a) ! {e0}
+```prism,sig,h-810cf54fb9910a6f13e749c5b7b74f3c86b59b6a00f9f5f3909372a10c8ae2a6
+optional : forall e0 a. (() -> a ! {Fail, e0}) -> Option(a) ! {e0}
 ```
 
 Run `thunk`, returning `Some(result)`, or `None` if it calls `fail()`.
@@ -1160,8 +1169,8 @@ true
 
 ### `default`
 
-```prism,sig,h-b07e25611ed3d01d624823fc503d507c4ba6cdcf22edb9f491762a47e0723d41
-default : forall e0 a. (() -> a ! {e0}, a) -> a ! {e0}
+```prism,sig,h-d0f4fe1d17d0560221a385a9f8ca6575b232d6045ca352f27c847acd53bab0eb
+default : forall e0 a. (() -> a ! {Fail, e0}, a) -> a ! {e0}
 ```
 
 Run `thunk`, returning its result or the default `d` if it calls `fail()`.

@@ -1,0 +1,81 @@
+-- The `Shell` vocabulary against the host: each line runs one helper and prints
+-- what a script would see, so the line is the same on every host that has
+-- `/bin/sh` and the POSIX tools.
+
+import Path (root, relative, join, path_str)
+import Proc (..)
+import Shell as Sh
+
+fn show_result(r : Result(String, Sh.ShellError)) : String =
+  match r of
+    Ok(s) => "ok {show(s)}"
+    Err(e) => "err {Sh.render(e)}"
+
+fn show_lines(r : Result(List(String), Sh.ShellError)) : String =
+  match r of
+    Ok(xs) => "ok {show(xs)}"
+    Err(e) => "err {Sh.render(e)}"
+
+fn show_buf(r : Result(Buf, Sh.ShellError)) : String =
+  match r of
+    Ok(b) => "ok {show(text(b))}"
+    Err(e) => "err {Sh.render(e)}"
+
+fn show_path(p : Option(Path.Path)) : String =
+  match p of
+    Some(q) => path_str(q)
+    None => "none"
+
+fn bin() : Path.Path = join(root(), relative(["bin"]))
+
+fn shell() : Unit ! {Proc, IO} =
+  let printf = command("printf", ["a\\nb\\n"])
+  println("text {show_result(Sh.run_text(printf))}")
+  println("lines {show_lines(Sh.run_lines(printf))}")
+  println(
+      "failed {show_result(Sh.run_text(Sh.unsafe_shell("echo nope >&2; exit 2")))}",
+    )
+  println(
+      "missing {show_result(Sh.run_text(command("prism-no-such-program", [])))}",
+    )
+  println("bytes {show_result(Sh.run_text(Sh.unsafe_shell("printf '\\377'")))}")
+  println(
+      "quiet {show_result(Sh.run_text(Sh.quiet(Sh.unsafe_shell("echo hidden >&2; exit 1"))))}",
+    )
+  println(
+      "exits-ok {show(Sh.exits_ok(command("true", [])))} {show(Sh.exits_ok(command("false", [])))}",
+    )
+  let env = Sh.set_env(
+      Sh.unset_env(Sh.clean_env(Sh.unsafe_shell("echo $A$B")), "A"),
+      "B",
+      "set",
+    )
+  println("env {show_result(Sh.run_text(env))}")
+  println(
+      "dir {show_result(Sh.run_text(Sh.in_dir(command("pwd", []), root())))}",
+    )
+  println(
+      "feed {show_result(Sh.run_text(Sh.feed_text(command("cat", []), "fed")))}",
+    )
+  println(
+      "within {show_result(Sh.run_text(Sh.within(command("sleep", ["5"]), 50)))}",
+    )
+  println("pipe {show_buf(Sh.pipe([printf, command("sort", ["-r"])]))}")
+  println(
+      "pipefail {show_buf(Sh.pipe([Sh.unsafe_shell("echo e >&2; exit 3"), command("cat", [])]))}",
+    )
+  println("argv {show_result(Sh.run_text(command("echo", ["$HOME;", "`x`"])))}")
+
+fn offline() : Unit ! {IO, FileSystem} =
+  println("which {show_path(Sh.which("sh", [relative(["bin"]), bin()]))}")
+  println("which-none {show_path(Sh.which("../bin/sh", [bin()]))}")
+  println("search {show(map(path_str, Sh.search_path("/usr/bin::rel:/bin")))}")
+  println(
+      "lines {show(Sh.lines(""))} {show(Sh.lines("\n"))} {show(Sh.lines("a\r\nb"))}",
+    )
+  println("unlines {show(Sh.unlines(["a", "b"]))}")
+  println("numbered {show(Sh.numbered(Sh.uniq(["x", "x", "y"])))}")
+
+fn main() : Unit ! {IO} =
+  run_proc(shell)
+  offline()

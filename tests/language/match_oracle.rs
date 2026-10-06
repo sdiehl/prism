@@ -215,3 +215,27 @@ fn match_compiler_selects_first_match() {
         "oracle ran only {ran} cases; generator is too rejective"
     );
 }
+
+// The oracle above skips every program that fails to compile, so a compiler
+// fault on an exhaustive match is invisible to it. This is the shape that hit
+// one: the wildcard row on the first column is exhaustive only together with the
+// row that names the single constructor, so the default the case would take for
+// an unlisted constructor cannot be compiled from the wildcard row alone, and
+// must not be, since no value reaches it.
+#[test]
+fn a_column_covered_only_with_the_listed_constructor_compiles() {
+    let src = r"
+type P = P(Bool, Int)
+
+fn pick(p : P, q : P) : Int =
+  match (p, q) of
+    (_, P(true, n)) => n
+    (P(_, m), P(false, _)) => m
+
+fn main() =
+  println(pick(P(true, 1), P(false, 2)))
+  println(pick(P(false, 3), P(true, 4)))
+";
+    let run = interpret(src).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(run.term, "1\n4\n");
+}

@@ -4,11 +4,11 @@
 
 Spectra's command grammar, built applicatively with Std `Cli`.
 
-The executable understands three subcommands, each defaulting its project path to the current directory:
+The executable understands three subcommands, each defaulting its project path to the current directory. `check` and `build` shell out to the compiler named by `--prism`, so a fresh build can pin itself instead of trusting whichever `prism` is first on `PATH`:
 
 ```text
-spectra check [PATH]
-spectra build [PATH] --output deck.pdf --open
+spectra check [PATH] --prism prism
+spectra build [PATH] --output deck.pdf --open --prism prism
 spectra clean [PATH]
 ```
 
@@ -23,7 +23,7 @@ fn main() =
 ```
 
 ```output
-SpectraCli.Build("talk", "deck.pdf", true)
+SpectraCli.Build("talk", "deck.pdf", true, "prism")
 ```
 
 ## Types
@@ -32,13 +32,13 @@ SpectraCli.Build("talk", "deck.pdf", true)
 
 ```prism,def
 type SpectraCommand
-  = Check(String)
-  | Build(String, String, Bool)
+  = Check(String, String)
+  | Build(String, String, Bool, String)
   | Clean(String)
   deriving (Eq, Show)
 ```
 
-One parsed subcommand: check a project, build it to a named PDF and optionally open it, or clean its build directory.
+One parsed subcommand: check a project, build it to a named PDF and optionally open it, or clean its build directory. The last field of `Check` and `Build` is the compiler binary their shell steps invoke.
 
 ## Functions and Values
 

@@ -18,11 +18,13 @@ Program {
                     name: "A",
                     args: [],
                     fields: None,
+                    span: 46..47,
                 },
                 Ctor {
                     name: "B",
                     args: [],
                     fields: None,
+                    span: 50..51,
                 },
             ],
             deriving: [
@@ -48,9 +50,9 @@ Program {
             param: "a",
             supers: [],
             methods: [
-                (
-                    "eq",
-                    Fun(
+                ClassMethod {
+                    name: "eq",
+                    ty: Fun(
                         [
                             Var(
                                 "a",
@@ -62,7 +64,8 @@ Program {
                         Empty,
                         Bool,
                     ),
-                ),
+                    span: 14..16,
+                },
             ],
             span: 0..33,
         },

@@ -1,0 +1,14 @@
+effect Ask
+  ask() : Int
+
+fn inner() : Int ! {Ask, IO} =
+  handle mask<Ask>(ask()) with
+    return x => x
+    ask() resume k => k(1)
+    finally => println("inner cleanup")
+
+fn main() : Unit ! {IO} =
+  println(handle inner() with {
+    once ask() => 7,
+    return r => r
+  })

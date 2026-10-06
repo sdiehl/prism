@@ -37,6 +37,7 @@ use std::io;
 use std::time::Duration;
 
 use prism_common::digest::Digest;
+use prism_common::format::FormatTag;
 
 use crate::core::HASH_SCHEME;
 use crate::driver::PhaseTally;
@@ -55,7 +56,7 @@ const COMPILER_VERSION: &str = env!("CARGO_PKG_VERSION");
 const TIMING_KIND: &str = "shadow-parse-timing";
 // The versioned tag the timing decision's bytes lead with, so a reader that finds
 // an older shape rejects it instead of misreading it.
-const TIMING_FORMAT: &str = "prism-shadow-parse-timing-v1";
+const TIMING_FORMAT: FormatTag = FormatTag::new("prism-shadow-parse-timing-v1");
 
 // The certificate's evidence-row keys. One home for the family: a minter and a
 // reader never retype a key, and adding a fact means adding it here.
@@ -215,7 +216,7 @@ impl ShadowReceipt {
             .max()
             .unwrap_or(0);
         Ok(Self {
-            subject: Digest::from(subject_of(&comparison)),
+            subject: subject_of(&comparison),
             scheme: HASH_SCHEME.to_string(),
             compiler: COMPILER_VERSION.to_string(),
             comparison,
@@ -285,7 +286,7 @@ fn phase_key(phase: &str, field: &str) -> String {
 // which carries the counters: a counter change with the same inputs must collide
 // with the stored certificate and be reported, not quietly land under a new
 // subject where nobody would look for it.
-fn subject_of(c: &Comparison) -> String {
+fn subject_of(c: &Comparison) -> Digest {
     let mut h = blake3::Hasher::new();
     for field in [
         &c.authority,
@@ -301,7 +302,7 @@ fn subject_of(c: &Comparison) -> String {
     // Full hex, not the display prefix: this is an identity two store layers key
     // on, and a truncation that reads well in a terminal is not a reason to lose
     // collision resistance in a directory name.
-    h.finalize().to_hex().to_string()
+    Digest::of_bytes(h.finalize().as_bytes())
 }
 
 /// Serialize a receipt to its `cert`-kind envelope. The bytes are its identity.
@@ -351,7 +352,7 @@ pub fn decode(bytes: &[u8]) -> Result<ShadowReceipt, CodecError> {
         None => return Err(CodecError::Malformed),
     };
     Ok(ShadowReceipt {
-        subject: Digest::from(body.subject),
+        subject: Digest::parse(body.subject)?,
         scheme: body.scheme,
         compiler: body.compiler,
         comparison: Comparison {
@@ -478,7 +479,10 @@ pub fn get_timing(store: &Store, subject: &str) -> io::Result<Vec<(String, usize
     let text = String::from_utf8(bytes)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
     let mut lines = text.lines();
-    if lines.next() != Some(TIMING_FORMAT) {
+    if TIMING_FORMAT
+        .expect(lines.next().unwrap_or_default())
+        .is_err()
+    {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "shadow timing decision has an unknown format",

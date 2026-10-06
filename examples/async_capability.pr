@@ -26,7 +26,7 @@ fn worker(name : String) : Int ! {Async(Int), Log} =
 
 fn scene() : Int ! {Async(Int), Log} =
   match scope([\() -> worker("A"), \() -> worker("B")]) of
-    Cons(a, Cons(b, Nil)) => a + b
+    [a, b] => a + b
     _ => 0
 
 -- `run_async` discharges `Async` but leaves `Log`; grant the capability here.

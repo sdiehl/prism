@@ -17,8 +17,8 @@ fn fold_with(
   xs : List(a)
 ) : a ! { | e} =
   match xs of
-    Nil => seed
-    Cons(y, ys) => fold_with(combine, combine(seed, y), ys)
+    [] => seed
+    y :: ys => fold_with(combine, combine(seed, y), ys)
 
 fn tick(v : Int) : Int ! {State(Int)} =
   put(get() + v)

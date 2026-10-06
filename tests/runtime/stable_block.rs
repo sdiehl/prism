@@ -6,6 +6,7 @@
 //! safe subset) runs as a committed property test in
 //! `tests/cases/run/stable_ladder.pr`; here we gate the surface and the golden.
 
+use prism::DumpPhase;
 use prism::{format, with_prelude, Error};
 
 // A minimal stable block: `Order` is the current rung, `Order.V1` its frozen
@@ -19,7 +20,7 @@ stable Order {
 ";
 
 fn dump_core(src: &str) -> String {
-    prism::dump("core", &with_prelude(src)).unwrap_or_else(|e| panic!("dump failed: {e}"))
+    prism::dump(DumpPhase::Core, &with_prelude(src)).unwrap_or_else(|e| panic!("dump failed: {e}"))
 }
 
 fn line_of(src: &str, byte: usize) -> usize {

@@ -154,8 +154,8 @@ fn fix_go(
   match st of
     (assign, queue, queued, budget) =>
       match queue of
-        Nil => assign
-        Cons(key, rest) =>
+        [] => assign
+        key :: rest =>
           if budget <= 0 then
             fail()
           else
@@ -190,8 +190,8 @@ fn fix_fresh(
   acc : List(k)
 ) : (List(k), Map(k, Unit)) given Ord(k) =
   match ks of
-    Nil => (acc, queued)
-    Cons(x, rest) =>
+    [] => (acc, queued)
+    x :: rest =>
       if set_member(x, queued) then
         fix_fresh(rest, queued, acc)
       else
@@ -218,8 +218,8 @@ fn fix_reverse_edges(
   ds : List(k)
 ) : Map(k, List(k)) given Ord(k) =
   match ds of
-    Nil => g
-    Cons(d, rest) =>
+    [] => g
+    d :: rest =>
       if set_member(d, nodes) then
         fix_reverse_edges(graph_add_edge(g, d, key), nodes, key, rest)
       else
@@ -270,5 +270,5 @@ fn fix_gather(
   ds : List(k)
 ) : a given Ord(k), Semilattice(a) =
   match ds of
-    Nil => base
-    Cons(d, rest) => fix_gather(lat_join(base, fix_at(cur, d)), cur, rest)
+    [] => base
+    d :: rest => fix_gather(lat_join(base, fix_at(cur, d)), cur, rest)

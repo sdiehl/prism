@@ -54,8 +54,8 @@ pub fn map3(
 -- ```
 pub fn sequence(ms : List(m(a))) : m(List(a)) given Applicative(m) =
   match ms of
-    Nil => pure(Nil)
-    Cons(m, rest) => map2(\(x, xs) -> Cons(x, xs), m, sequence(rest))
+    [] => pure(Nil)
+    m :: rest => map2(\(x, xs) -> Cons(x, xs), m, sequence(rest))
 
 -- | Apply `f` to each element and sequence the wrapped results
 -- (`Applicative`). This is `sequence` after a plain `map`.
@@ -71,5 +71,5 @@ pub fn traverse_list(
   xs : List(a)
 ) : m(List(b)) given Applicative(m) =
   match xs of
-    Nil => pure(Nil)
-    Cons(x, rest) => map2(\(y, ys) -> Cons(y, ys), f(x), traverse_list(f, rest))
+    [] => pure(Nil)
+    x :: rest => map2(\(y, ys) -> Cons(y, ys), f(x), traverse_list(f, rest))

@@ -2,8 +2,10 @@
 //! diagnostic catalogue and warning surfaces, and the formatter's layout and
 //! idempotence laws.
 
+use prism::DumpPhase;
+
 fn ast_no_spans(src: &str) -> String {
-    prism::dump("ast", src)
+    prism::dump(DumpPhase::Ast, src)
         .expect("must parse")
         .lines()
         .filter(|line| {
@@ -47,8 +49,12 @@ mod decl_order;
 mod derive;
 #[path = "language/effect_rows.rs"]
 mod effect_rows;
+#[path = "language/finally.rs"]
+mod finally;
 #[path = "language/grammar_ebnf.rs"]
 mod grammar_ebnf;
+#[path = "language/handled_tail.rs"]
+mod handled_tail;
 #[path = "language/hash_parity.rs"]
 mod hash_parity;
 #[path = "language/let_else.rs"]
@@ -94,6 +100,12 @@ mod fmt_contracts;
 mod fmt_control;
 #[path = "formatter/fmt_deriving.rs"]
 mod fmt_deriving;
+#[path = "formatter/fmt_finally.rs"]
+mod fmt_finally;
+#[path = "formatter/fmt_imports.rs"]
+mod fmt_imports;
+#[path = "formatter/fmt_lambda_block.rs"]
+mod fmt_lambda_block;
 #[path = "formatter/fmt_let_else.rs"]
 mod fmt_let_else;
 #[path = "formatter/fmt_list_patterns.rs"]
@@ -106,6 +118,8 @@ mod fmt_parens;
 mod fmt_path_lit;
 #[path = "formatter/fmt_path_stmt.rs"]
 mod fmt_path_stmt;
+#[path = "formatter/fmt_raw_strings.rs"]
+mod fmt_raw_strings;
 #[path = "formatter/fmt_records_optics.rs"]
 mod fmt_records_optics;
 #[path = "formatter/fmt_stable.rs"]
@@ -129,6 +143,8 @@ mod env_knobs;
 mod error_codes;
 #[path = "frontend/holes.rs"]
 mod holes;
+#[path = "frontend/module_origin.rs"]
+mod module_origin;
 #[path = "frontend/prelude_capture.rs"]
 mod prelude_capture;
 #[path = "frontend/row_laws.rs"]

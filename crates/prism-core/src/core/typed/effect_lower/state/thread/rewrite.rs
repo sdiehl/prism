@@ -1241,7 +1241,13 @@ impl Threader<'_> {
                     Err(why) => return self.bail(why),
                 };
                 let handled: BTreeSet<Sym> = judged.arms.iter().map(|(op, _)| *op).collect();
-                let Some(channel) = self.plan.channel(&handled) else {
+                // A bracket owns no accumulator, so it rides the value channel.
+                let channel = if handled.is_empty() {
+                    Some(Channel::Value)
+                } else {
+                    self.plan.channel(&handled)
+                };
+                let Some(channel) = channel else {
                     return self.bail(format!(
                         "a handle over operations {} that share no channel",
                         op_list(&handled)

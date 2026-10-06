@@ -44,6 +44,10 @@ pub struct TestDescriptor {
     pub dependency_closure_digest: String,
     /// Diagnostic-only source location (file path). Never enters canonical bytes.
     pub diagnostic_location: String,
+    /// The tags a `-- test: tags(..)` pragma above the declaration names, sorted.
+    pub tags: Vec<String>,
+    /// The reason a `-- test: skip(..)` pragma gives, when the test is skipped.
+    pub skip: Option<String>,
 }
 
 /// A discovered test target ready to run: its descriptor plus the resolved
@@ -166,7 +170,14 @@ fn discover_unit(
         .collect();
     let closure = hash_root(&digests).into_string();
     let location = file.display().to_string();
-    for TestSignature { name } in signatures {
+    for TestSignature { name, start } in signatures {
+        let pragmas = pragmas_above(full_src, start).map_err(|why| {
+            Error::ResolveCommand(format!(
+                "test `{}` in {}: {why}",
+                bare_name(&name),
+                file.display()
+            ))
+        })?;
         let logical_id = format!("{module}::{}", bare_name(&name));
         let definition_id = private(module, bare_name(&name));
         let test_core_digest = digests
@@ -181,11 +192,79 @@ fn discover_unit(
                 test_core_digest,
                 dependency_closure_digest: closure.clone(),
                 diagnostic_location: location.clone(),
+                tags: pragmas.tags,
+                skip: pragmas.skip,
             },
             full_src: full_src.to_string(),
             roots: roots.to_vec(),
             entry_name: name,
         });
+    }
+    Ok(())
+}
+
+// What the pragma comments directly above a `test fn` declare.
+#[derive(Default)]
+struct Pragmas {
+    tags: Vec<String>,
+    skip: Option<String>,
+}
+
+// Read the `-- test:` pragmas from the contiguous comment block that ends on the
+// line before a test declaration, the way `-- lint:` pragmas annotate the
+// declaration they precede. `tags(a, b)` names selection tags and `skip(reason)`
+// skips the test with a reason; any other `-- test:` line is an error rather than
+// a silently ignored typo.
+fn pragmas_above(src: &str, start: usize) -> Result<Pragmas, String> {
+    let mut pragmas = Pragmas::default();
+    let head = &src[..src[..start].rfind('\n').map_or(0, |i| i + 1)];
+    for line in head.lines().rev() {
+        let Some(comment) = line.trim_start().strip_prefix("--") else {
+            break;
+        };
+        let Some(pragma) = comment.trim().strip_prefix("test:") else {
+            continue;
+        };
+        let pragma = pragma.trim();
+        let arg = |key: &str| {
+            pragma
+                .strip_prefix(key)
+                .and_then(|rest| rest.trim_start().strip_prefix('('))
+                .and_then(|rest| rest.strip_suffix(')'))
+                .map(str::trim)
+        };
+        if let Some(reason) = arg("skip") {
+            if reason.is_empty() {
+                return Err("`skip` needs a reason".into());
+            }
+            pragma_once(&mut pragmas.skip, reason)?;
+        } else if let Some(list) = arg("tags") {
+            for tag in list.split(',').map(str::trim) {
+                if tag.is_empty()
+                    || !tag
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+                {
+                    return Err(format!(
+                        "`{tag}` is not a tag; a tag is a word of letters, digits, `_`, and `-`"
+                    ));
+                }
+                pragmas.tags.push(tag.to_string());
+            }
+        } else {
+            return Err(format!(
+                "unknown test pragma `{pragma}`; expected `skip(reason)` or `tags(a, b)`"
+            ));
+        }
+    }
+    pragmas.tags.sort();
+    pragmas.tags.dedup();
+    Ok(pragmas)
+}
+
+fn pragma_once(slot: &mut Option<String>, reason: &str) -> Result<(), String> {
+    if slot.replace(reason.to_string()).is_some() {
+        return Err("`skip` is given more than once".into());
     }
     Ok(())
 }

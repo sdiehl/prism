@@ -39,6 +39,20 @@ pub enum CodecError {
     TrailingBytes,
     /// A string field held bytes that were not valid UTF-8.
     Utf8,
+    /// A content-hash field was not a well-formed digest.
+    Digest,
+}
+
+impl From<crate::digest::SchemedDigestError> for CodecError {
+    fn from(_: crate::digest::SchemedDigestError) -> Self {
+        Self::Digest
+    }
+}
+
+impl From<crate::digest::DigestError> for CodecError {
+    fn from(_: crate::digest::DigestError) -> Self {
+        Self::Digest
+    }
 }
 
 impl std::fmt::Display for CodecError {
@@ -53,6 +67,7 @@ impl std::fmt::Display for CodecError {
             Self::DepthLimit => "the reconstructed graph exceeded an expansion or depth budget",
             Self::TrailingBytes => "trailing bytes after the decoded frame",
             Self::Utf8 => "a string field was not valid UTF-8",
+            Self::Digest => "a content-hash field was not a well-formed digest",
         };
         f.write_str(msg)
     }

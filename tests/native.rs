@@ -3,10 +3,11 @@
 //! symbol conformance. One target so the corpus links the compiler once.
 
 use prism::error::Error;
+use prism::DumpPhase;
 use prism::{dump_on, Config, EffectTier, Root};
 
 /// The dump phase rendering the effect plan selected by the lowering cascade.
-const EFFECT_PLAN: &str = "effect-plan";
+const EFFECT_PLAN: DumpPhase = DumpPhase::EffectPlan;
 
 fn effect_plan(full: &str, roots: &[Root], cfg: &Config) -> Result<String, Error> {
     dump_on(EFFECT_PLAN, full, roots, cfg)
@@ -27,6 +28,8 @@ mod support;
 mod compiler_cache;
 #[path = "native/effect_convention.rs"]
 mod effect_convention;
+#[path = "native/finally_parity.rs"]
+mod finally_parity;
 #[path = "native/float_fmt.rs"]
 mod float_fmt;
 #[path = "native/float_math_conformance.rs"]
@@ -45,8 +48,14 @@ mod parity;
 mod partial_handler_fuzz;
 #[path = "native/perf_gate.rs"]
 mod perf_gate;
+#[path = "native/proc_parity.rs"]
+mod proc_parity;
+#[path = "native/recursion_schemes.rs"]
+mod recursion_schemes;
 #[path = "native/sort_kind.rs"]
 mod sort_kind;
+#[path = "native/state_placement.rs"]
+mod state_placement;
 #[path = "native/symbol_namespace.rs"]
 mod symbol_namespace;
 #[path = "native/tier_cross.rs"]

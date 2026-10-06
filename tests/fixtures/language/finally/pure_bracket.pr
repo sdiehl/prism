@@ -1,0 +1,6 @@
+fn go() : Int =
+  handle 41 with
+    return x => x + 1
+    finally => println("closed")
+
+fn main() = println(go())

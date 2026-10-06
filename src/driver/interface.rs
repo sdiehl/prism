@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+use prism_common::record::RecordError;
 use serde::{Deserialize, Serialize};
 
 use crate::sym::Sym;
@@ -326,7 +327,9 @@ pub(super) fn metadata_entries(
     Ok(entries)
 }
 
-pub(super) fn rehydrate(interface: &ModuleInterface) -> Result<RehydratedModuleInterface, String> {
+pub(super) fn rehydrate(
+    interface: &ModuleInterface,
+) -> Result<RehydratedModuleInterface, RecordError> {
     let mut facts = TypecheckSeedBuilder::new(interface.exported_value_env()?);
     for entry in &interface.entries {
         match entry.kind.as_str() {
@@ -338,17 +341,17 @@ pub(super) fn rehydrate(interface: &ModuleInterface) -> Result<RehydratedModuleI
                         parse_type(&entry.name, &payload.scheme)?,
                         parse_constraints(&entry.name, payload.constraints)?,
                     )
-                    .map_err(|error| error.to_string())?;
+                    .map_err(|error| RecordError::invalid(error.to_string()))?;
             }
             DATA_METADATA_KIND => {
                 let payload: DataPayload = parse_payload(entry)?;
                 if payload.params.len() != payload.param_kinds.len() {
-                    return Err(format!(
+                    return Err(RecordError::invalid(format!(
                         "data `{}` has {} parameters but {} kinds",
                         entry.name,
                         payload.params.len(),
                         payload.param_kinds.len()
-                    ));
+                    )));
                 }
                 facts
                     .insert_data(
@@ -364,7 +367,7 @@ pub(super) fn rehydrate(interface: &ModuleInterface) -> Result<RehydratedModuleI
                             repr: payload.repr.into(),
                         },
                     )
-                    .map_err(|error| error.to_string())?;
+                    .map_err(|error| RecordError::invalid(error.to_string()))?;
             }
             CTOR_METADATA_KIND => {
                 let payload: CtorPayload = parse_payload(entry)?;
@@ -387,7 +390,7 @@ pub(super) fn rehydrate(interface: &ModuleInterface) -> Result<RehydratedModuleI
                             fields: payload.fields.into_iter().map(Sym::from).collect(),
                         },
                     )
-                    .map_err(|error| error.to_string())?;
+                    .map_err(|error| RecordError::invalid(error.to_string()))?;
             }
             EFFECT_OP_METADATA_KIND => {
                 let payload: EffectOpPayload = parse_payload(entry)?;
@@ -402,11 +405,14 @@ pub(super) fn rehydrate(interface: &ModuleInterface) -> Result<RehydratedModuleI
                             params: parse_types(&entry.name, payload.params)?,
                             ret: parse_type(&entry.name, &payload.ret)?,
                             grade: Grade::parse(&payload.grade).ok_or_else(|| {
-                                format!("invalid effect grade {:?}", payload.grade)
+                                RecordError::invalid(format!(
+                                    "invalid effect grade {:?}",
+                                    payload.grade
+                                ))
                             })?,
                         },
                     )
-                    .map_err(|error| error.to_string())?;
+                    .map_err(|error| RecordError::invalid(error.to_string()))?;
             }
             CLASS_METADATA_KIND => {
                 let payload: ClassPayload = parse_payload(entry)?;
@@ -420,7 +426,7 @@ pub(super) fn rehydrate(interface: &ModuleInterface) -> Result<RehydratedModuleI
                             parse_type(&entry.name, &method.scheme)?,
                         ))
                     })
-                    .collect::<Result<Vec<_>, String>>()?;
+                    .collect::<Result<Vec<_>, RecordError>>()?;
                 let class_name = Sym::from(entry.name.as_str());
                 let class_param = Sym::from(payload.param.as_str());
                 facts
@@ -433,7 +439,7 @@ pub(super) fn rehydrate(interface: &ModuleInterface) -> Result<RehydratedModuleI
                             .map(|(name, ty, scheme)| SeedClassMethod { name, ty, scheme })
                             .collect(),
                     )
-                    .map_err(|error| error.to_string())?;
+                    .map_err(|error| RecordError::invalid(error.to_string()))?;
             }
             INSTANCE_METADATA_KIND => {
                 let payload: InstancePayload = parse_payload(entry)?;
@@ -452,7 +458,7 @@ pub(super) fn rehydrate(interface: &ModuleInterface) -> Result<RehydratedModuleI
                         },
                         payload.canonical,
                     )
-                    .map_err(|error| error.to_string())?;
+                    .map_err(|error| RecordError::invalid(error.to_string()))?;
             }
             _ => {}
         }
@@ -460,7 +466,7 @@ pub(super) fn rehydrate(interface: &ModuleInterface) -> Result<RehydratedModuleI
     facts
         .finish()
         .map(|seed| RehydratedModuleInterface { seed })
-        .map_err(|error| error.to_string())
+        .map_err(|error| RecordError::invalid(error.to_string()))
 }
 
 fn payload_entry(
@@ -471,16 +477,23 @@ fn payload_entry(
     Ok(interface_entry(kind, name, serde_json::to_string(payload)?))
 }
 
-fn parse_payload<T: for<'de> Deserialize<'de>>(entry: &ModuleInterfaceEntry) -> Result<T, String> {
-    serde_json::from_str(&entry.signature)
-        .map_err(|error| format!("invalid {} row {}: {error}", entry.kind, entry.name))
+fn parse_payload<T: for<'de> Deserialize<'de>>(
+    entry: &ModuleInterfaceEntry,
+) -> Result<T, RecordError> {
+    serde_json::from_str(&entry.signature).map_err(|error| {
+        RecordError::invalid(format!(
+            "invalid {} row {}: {error}",
+            entry.kind, entry.name
+        ))
+    })
 }
 
-fn parse_type(name: &str, ty: &str) -> Result<Type, String> {
-    crate::tc::parse_checked_signature(name, ty).map_err(|error| error.to_string())
+fn parse_type(name: &str, ty: &str) -> Result<Type, RecordError> {
+    crate::tc::parse_checked_signature(name, ty)
+        .map_err(|error| RecordError::invalid(error.to_string()))
 }
 
-fn parse_types(name: &str, types: Vec<String>) -> Result<Vec<Type>, String> {
+fn parse_types(name: &str, types: Vec<String>) -> Result<Vec<Type>, RecordError> {
     types.into_iter().map(|ty| parse_type(name, &ty)).collect()
 }
 
@@ -494,7 +507,7 @@ fn show_constraints(constraints: &[(Sym, Type)]) -> Vec<(String, String)> {
 fn parse_constraints(
     name: &str,
     constraints: Vec<(String, String)>,
-) -> Result<Vec<(Sym, Type)>, String> {
+) -> Result<Vec<(Sym, Type)>, RecordError> {
     constraints
         .into_iter()
         .map(|(class, ty)| Ok((Sym::from(class), parse_type(name, &ty)?)))

@@ -115,7 +115,7 @@ pub fn rn_is_ident(s : String) : Bool =
     Err(_) => false
     Ok(raw) =>
       match raw.tokens of
-        Cons(t, Nil) => t.kind == TIdent
+        [t] => t.kind == TIdent
         _ => false
 
 -- | The span of every identifier token spelling `name`, anywhere in the text.
@@ -149,8 +149,8 @@ pub fn rn_plan(
   to : String
 ) : Result(List(Edit), RenameRefusal) =
   match rn_unaddressed(doc) of
-    Cons(s, _) => Err(RnUnaddressed(s))
-    Nil =>
+    s :: _ => Err(RnUnaddressed(s))
+    [] =>
       if not(rn_is_ident(to)) then
         Err(RnNotAnIdent(to))
       else
@@ -163,11 +163,11 @@ fn rn_plan_checked(
 ) : Result(List(Edit), RenameRefusal) =
   match rn_mentions(doc.source.text, to) of
     Err(e) => Err(RnSourceUnreadable(e))
-    Ok(Cons(_, _)) => Err(RnTaken(to))
-    Ok(Nil) =>
+    Ok(_ :: _) => Err(RnTaken(to))
+    Ok([]) =>
       match rn_mentions(doc.source.text, from) of
         Err(e) => Err(RnSourceUnreadable(e))
-        Ok(Nil) => Err(RnUnknown(from))
+        Ok([]) => Err(RnUnknown(from))
         Ok(mentions) =>
           rn_plan_complete(rn_uses_of(doc, from), mentions, from, to)
 
@@ -178,8 +178,8 @@ fn rn_plan_complete(
   to : String
 ) : Result(List(Edit), RenameRefusal) =
   match uses of
-    Nil => Err(RnUnknown(from))
-    Cons(_, _) =>
+    [] => Err(RnUnknown(from))
+    _ :: _ =>
       match rn_stray(map(use_span, uses), mentions) of
         Some(s) => Err(RnBinderInDocument(from, s))
         None => Ok(map(\(u) -> ed_replace(u.span, to), uses))
@@ -189,8 +189,8 @@ fn use_span(u : RnUse) : Span = u.span
 -- The first mention that is not one of the recorded reference spans.
 fn rn_stray(refs : List(Span), mentions : List(Span)) : Option(Span) =
   match mentions of
-    Nil => None
-    Cons(m, rest) =>
+    [] => None
+    m :: rest =>
       if rn_covers(refs, m) then
         rn_stray(refs, rest)
       else
@@ -198,8 +198,8 @@ fn rn_stray(refs : List(Span), mentions : List(Span)) : Option(Span) =
 
 fn rn_covers(refs : List(Span), m : Span) : Bool =
   match refs of
-    Nil => false
-    Cons(r, rest) =>
+    [] => false
+    r :: rest =>
       if r.lo == m.lo && r.hi == m.hi then
         true
       else

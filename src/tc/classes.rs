@@ -515,7 +515,15 @@ pub(super) fn build_classes(
             .at(c.span));
         }
         let mut infos = Vec::new();
-        for (idx, (mname, sig)) in c.methods.iter().enumerate() {
+        for (
+            idx,
+            ast::ClassMethod {
+                name: mname,
+                ty: sig,
+                ..
+            },
+        ) in c.methods.iter().enumerate()
+        {
             let t = convert_data(sig);
             if !matches!(t, Type::Fun(..)) {
                 return Err(ErrKind::ClassMethodNotFunction {

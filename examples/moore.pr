@@ -23,8 +23,8 @@ type Moore(s, i, o) = Moore { init: s, step: (s, i) -> s, out: (s) -> o }
 -- Direct run: emit the readout of every visited state, threading update.
 fn trace(m : Moore(s, i, o), st : s, ins : List(i)) : List(o) =
   match ins of
-    Nil => Cons((m.out)(st), Nil)
-    Cons(x, rest) => Cons((m.out)(st), trace(m, (m.step)(st, x), rest))
+    [] => Cons((m.out)(st), Nil)
+    x :: rest => Cons((m.out)(st), trace(m, (m.step)(st, x), rest))
 
 fn run(m : Moore(s, i, o), ins : List(i)) : List(o) = trace(m, m.init, ins)
 
@@ -46,7 +46,7 @@ fn run_eff(m : Moore(Int, Int, Int), ins : List(Int)) : List(Int) =
     handle drive(m, m.init) with
       push(b) resume k => \(rem, acc) -> k(())(rem, Cons(b, acc))
       pull() resume k =>
-        \(rem, acc) -> match rem of { Nil => reverse(acc), Cons(x, rest) => k(x)(rest, acc) }
+        \(rem, acc) -> match rem of { [] => reverse(acc), x :: rest => k(x)(rest, acc) }
       return r => \(_rem, acc) -> reverse(acc)
   prog(ins, Nil)
 

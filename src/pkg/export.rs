@@ -22,12 +22,12 @@ use std::path::{Path, PathBuf};
 use crate::driver::{namespace_identity, NamespaceIdentity, NAMESPACE_ARTIFACT_KIND};
 use crate::error::Error;
 use crate::resolve::Root;
+use prism_common::format::FormatTag;
 
 // The manifest that pins an exported `.pr` to the namespace identity it projects.
 // Line-oriented and versioned, in the same house style as the store's own index
 // files.
-const EXPORT_MANIFEST_HEADER_V1: &str = "prism-pkg-export\tv1";
-pub const EXPORT_MANIFEST_HEADER: &str = "prism-pkg-export\tv2";
+pub const EXPORT_MANIFEST_HEADER: FormatTag = FormatTag::new("prism-pkg-export\tv2");
 const MANIFEST_EXT: &str = "namespace";
 const SOURCE_EXT: &str = "pr";
 const FIELD_SEP: char = '\t';
@@ -95,8 +95,11 @@ impl ExportManifest {
 /// Fails on an unrecognized header or a missing identity field.
 pub fn parse_manifest(text: &str) -> Result<ExportManifest, Error> {
     let mut lines = text.lines();
-    let header = lines.next();
-    if header != Some(EXPORT_MANIFEST_HEADER) && header != Some(EXPORT_MANIFEST_HEADER_V1) {
+    // Version 1 manifests carry no kind row; it defaults below.
+    if EXPORT_MANIFEST_HEADER
+        .expect_since(1, lines.next().unwrap_or_default())
+        .is_err()
+    {
         return Err(Error::ResolvePackage(format!(
             "export manifest: missing or unrecognized header (expected {EXPORT_MANIFEST_HEADER:?})"
         )));

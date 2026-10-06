@@ -15,7 +15,7 @@ fn fizzbuzz(n : Int) : String =
 -- the spot where x belongs.
 fn insert(x : Int, xs : List(Int)) : List(Int) =
   match xs of
-    Cons(h, t) if h < x => Cons(h, insert(x, t))
+    h :: t if h < x => Cons(h, insert(x, t))
     _ => Cons(x, xs)
 
 fn isort(xs : List(Int)) : List(Int) = foldr(insert, [], xs)

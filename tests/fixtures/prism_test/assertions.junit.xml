@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="prism test" tests="8" failures="5" errors="0" skipped="1">
+  <testsuite name="assertions" tests="8" failures="5" errors="0" skipped="1">
+    <testcase classname="assertions" name="bare_fail">
+      <failure message="test failed"></failure>
+    </testcase>
+    <testcase classname="assertions" name="equal_fails">
+      <failure message="values differ">expected:
+[1, 2]
+actual:
+[1, 3]
+</failure>
+    </testcase>
+    <testcase classname="assertions" name="equal_passes"/>
+    <testcase classname="assertions" name="expect_fails">
+      <failure message="one is not above two"></failure>
+    </testcase>
+    <testcase classname="assertions" name="fail_with_fails">
+      <failure message="custom reason"></failure>
+    </testcase>
+    <testcase classname="assertions" name="skipped">
+      <skipped message="waiting on the network lane"/>
+    </testcase>
+    <testcase classname="assertions" name="tagged"/>
+    <testcase classname="assertions" name="text_fails">
+      <failure message="values differ">expected:
+a
+b
+actual:
+a
+c
+diff:
+  a
+- b
++ c
+</failure>
+      <system-out>before the assertion
+</system-out>
+    </testcase>
+  </testsuite>
+</testsuites>

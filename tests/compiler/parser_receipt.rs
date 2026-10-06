@@ -19,6 +19,7 @@
 // random sample, and the file count rides in the receipt so a reader always
 // knows which lane produced the bytes they are holding.
 
+use prism::DumpPhase;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::{env, fs};
@@ -34,13 +35,13 @@ use crate::support::TempDir;
 // The differential witness and the phase whose artifact it consumes, shared with
 // the parity lane next door.
 const WITNESS: &str = "tests/fixtures/parser/parity.pr";
-const SURFACE_PHASE: &str = "surface-syntax";
+const SURFACE_PHASE: DumpPhase = DumpPhase::SurfaceSyntax;
 // The canonical Core identity, and the phase whose dump runs the whole front end
 // under a caller's config. They are two dumps because they must be: the identity
 // surface is deliberately config-independent, so it cannot be the run that
 // carries the instrument.
-const CORE_HASH_PHASE: &str = "core-hash";
-const CORE_PHASE: &str = "core";
+const CORE_HASH_PHASE: DumpPhase = DumpPhase::CoreHash;
+const CORE_PHASE: DumpPhase = DumpPhase::Core;
 const OK: &str = "ok";
 
 // Where committed Prism lives. Every corpus file the comparison covers comes
@@ -92,129 +93,8 @@ const MAX_NAMED_DIVERGENCES: usize = 12;
 // so the list cannot outlive the gap it records. A row may only ever be added
 // with the construct that earned it.
 //
-// Two open constructs.
-//
-// The first is a return-position usage claim. `@ linear` and `@ bounded_stack`
-// each set a flag on the authority's fn item; the shadow parser validates the
-// claim but carries no such field in its Decl or its codec, so it leaves the
-// claim on the return type as a usage fact and every fn item that makes one
-// encodes without the flag. The two claims are listed apart because a file
-// making only the stack claim is evidence for only that half. Closing the gap
-// means threading both flags through `lib/std/Syntax` (Ast.pr, Parse/Decl.pr,
-// Codec.pr) the way `no_alloc` already is.
-//
-// The second is a graded budget in decl position. `fip(1) fn f(..)` is a
-// modifier the shadow grammar does not admit at all: it stops at the open
-// paren, so the file is not encoded rather than encoded differently. Closing
-// that gap is a grammar change in `lib/std/Syntax/Parse/Decl.pr`, not a codec
-// one.
-const LINEAR_CLAIM: &str = "fn-item `@ linear` claim dropped by the shadow codec";
-const STACK_CLAIM: &str = "fn-item `@ bounded_stack` claim dropped by the shadow codec";
-const GRADED_BUDGET: &str = "decl-position `fip(n)` budget the shadow grammar does not parse";
-const KNOWN_DIVERGENCES: [(&str, &str); 27] = [
-    (
-        "tests/cases/alloc_certificate/reject/composed_row_fresh.pr",
-        LINEAR_CLAIM,
-    ),
-    (
-        "tests/cases/callable_certificate/reject/graded_budget_callee.pr",
-        GRADED_BUDGET,
-    ),
-    ("tests/cases/fip_budget.pr", GRADED_BUDGET),
-    ("tests/cases/fip_budget_exceeded.pr", GRADED_BUDGET),
-    (
-        "tests/cases/linear_certificate/accept/composed_claims.pr",
-        LINEAR_CLAIM,
-    ),
-    (
-        "tests/cases/linear_certificate/accept/fip_callee.pr",
-        LINEAR_CLAIM,
-    ),
-    (
-        "tests/cases/linear_certificate/accept/immediate_args_callee.pr",
-        LINEAR_CLAIM,
-    ),
-    (
-        "tests/cases/linear_certificate/accept/immediate_duplication.pr",
-        LINEAR_CLAIM,
-    ),
-    (
-        "tests/cases/linear_certificate/accept/unbounded_linear_recursion.pr",
-        LINEAR_CLAIM,
-    ),
-    (
-        "tests/cases/linear_certificate/reject/borrowed_param.pr",
-        LINEAR_CLAIM,
-    ),
-    (
-        "tests/cases/linear_certificate/reject/composed_row_duplicate.pr",
-        LINEAR_CLAIM,
-    ),
-    (
-        "tests/cases/linear_certificate/reject/duplicated_capture.pr",
-        LINEAR_CLAIM,
-    ),
-    (
-        "tests/cases/linear_certificate/reject/duplicated_value.pr",
-        LINEAR_CLAIM,
-    ),
-    (
-        "tests/cases/linear_certificate/reject/fbip_callee.pr",
-        LINEAR_CLAIM,
-    ),
-    (
-        "tests/cases/linear_certificate/reject/indirect_call.pr",
-        LINEAR_CLAIM,
-    ),
-    (
-        "tests/cases/linear_certificate/reject/uncertified_callee.pr",
-        LINEAR_CLAIM,
-    ),
-    (
-        "tests/cases/stack_certificate/accept/allocating_tail_loop.pr",
-        STACK_CLAIM,
-    ),
-    (
-        "tests/cases/stack_certificate/accept/composed_row_callee.pr",
-        LINEAR_CLAIM,
-    ),
-    (
-        "tests/cases/stack_certificate/accept/fip_callee.pr",
-        STACK_CLAIM,
-    ),
-    (
-        "tests/cases/stack_certificate/accept/mutual_all_claimed.pr",
-        STACK_CLAIM,
-    ),
-    (
-        "tests/cases/stack_certificate/accept/trmc_cons_loop.pr",
-        STACK_CLAIM,
-    ),
-    (
-        "tests/cases/stack_certificate/reject/composed_row_nontail.pr",
-        LINEAR_CLAIM,
-    ),
-    (
-        "tests/cases/stack_certificate/reject/fbip_callee.pr",
-        STACK_CLAIM,
-    ),
-    (
-        "tests/cases/stack_certificate/reject/indirect_call.pr",
-        STACK_CLAIM,
-    ),
-    (
-        "tests/cases/stack_certificate/reject/mutual_partial.pr",
-        STACK_CLAIM,
-    ),
-    (
-        "tests/cases/stack_certificate/reject/nontail_recursion.pr",
-        STACK_CLAIM,
-    ),
-    (
-        "tests/cases/stack_certificate/reject/uncertified_callee.pr",
-        STACK_CLAIM,
-    ),
-];
+// No construct is open: the corpus encodes identically on both sides.
+const KNOWN_DIVERGENCES: [(&str, &str); 0] = [];
 
 // The front end runs over these to charge the work counters. Named rather than
 // taken off the top of a sorted directory, because the counters only need a real

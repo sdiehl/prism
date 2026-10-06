@@ -1,3 +1,4 @@
+use prism::DumpPhase;
 // `total fn` / `assume total fn` are contextual claims,
 // checked for the trivial-acyclic and direct-structural fragments, erased before
 // executable Core. `total`/`assume` stay ordinary identifiers.
@@ -27,7 +28,7 @@ total fn bad_rec(n: Nat): Int = bad_rec(n)
 
 #[test]
 fn totality_classifies_every_claim_honestly() {
-    let out = prism::dump("totality", CLAIMS).expect("dump totality");
+    let out = prism::dump(DumpPhase::Totality, CLAIMS).expect("dump totality");
     // Trivial acyclic, and one that only calls another certified-total function.
     assert!(out.contains("double: checked (acyclic)"), "{out}");
     assert!(out.contains("quad: checked (acyclic)"), "{out}");
@@ -52,8 +53,8 @@ fn totality_claim_is_erased_from_core() {
     let with = "total fn double(x: Int): Int = x + x\nfn use_it(): Int = double(21)\n";
     let without = "fn double(x: Int): Int = x + x\nfn use_it(): Int = double(21)\n";
     assert_eq!(
-        prism::dump("core-hash", with).unwrap(),
-        prism::dump("core-hash", without).unwrap(),
+        prism::dump(DumpPhase::CoreHash, with).unwrap(),
+        prism::dump(DumpPhase::CoreHash, without).unwrap(),
         "a `total` claim must not move executable Core"
     );
 }
@@ -105,7 +106,7 @@ fn decreases_measure_reports_ranking_obligations() {
     // Solver-free `dump totality` reports that a `decreases` measure produced
     // ranking obligations to discharge; it never claims (or denies) totality on its
     // own, deferring the verdict to `prism verify`.
-    let out = prism::dump("totality", RANKED).expect("dump totality");
+    let out = prism::dump(DumpPhase::Totality, RANKED).expect("dump totality");
     assert!(out.contains("count: ranking:"), "{out}");
     assert!(out.contains("recursive edge"), "{out}");
     assert!(out.contains("prism verify"), "{out}");
@@ -116,12 +117,12 @@ fn decreases_measure_reports_ranking_obligations() {
 fn dump_smt_emits_termination_obligations() {
     // The ranking obligations appear as canonical SMT queries under a termination
     // banner, distinct from any partial-correctness obligation.
-    let out = prism::dump("smt", RANKED).expect("dump smt");
+    let out = prism::dump(DumpPhase::Smt, RANKED).expect("dump smt");
     assert!(out.contains("count termination #0"), "{out}");
     assert!(out.contains("measure decreases"), "{out}");
     assert!(out.contains("(check-sat)"), "{out}");
     // Deterministic bytes.
-    assert_eq!(out, prism::dump("smt", RANKED).unwrap());
+    assert_eq!(out, prism::dump(DumpPhase::Smt, RANKED).unwrap());
 }
 
 #[test]
@@ -136,8 +137,8 @@ total fn count(n: Int): Int
 ";
     let without = "fn count(n: Int): Int = if n == 0 then 0 else count(n - 1)\n";
     assert_eq!(
-        prism::dump("core-hash", with).unwrap(),
-        prism::dump("core-hash", without).unwrap(),
+        prism::dump(DumpPhase::CoreHash, with).unwrap(),
+        prism::dump(DumpPhase::CoreHash, without).unwrap(),
         "a `decreases` measure must not move executable Core"
     );
 }

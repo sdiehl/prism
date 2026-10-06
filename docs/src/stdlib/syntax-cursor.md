@@ -406,7 +406,7 @@ Parse one expression and require the whole token stream to be consumed. A traili
 
 ### `expr_infix_table`
 
-```prism,sig,h-44d76a6899078896a571f05c71dceb326ce44c266497864e20421cc974ad450d
+```prism,sig,h-e51c266d89f17b5eaeadcc69210dd009d4ccc8aeb31a040f88fdfc9bceccea05
 expr_infix_table : () -> List(Syntax.Cursor.Infix)
 ```
 
@@ -414,7 +414,7 @@ The infix table of Prism's own expression grammar, loosest first. Levels are rel
 
 ### `expr_prefix_table`
 
-```prism,sig,h-229e90dd66f46af778b4dce3d762a6c02f8c18fe5605a02f4354c1038c6202ad
+```prism,sig,h-5d890cb5c4c456d5105679ec7a096a92a10e4fc99551b57ae5b07f241d977389
 expr_prefix_table : () -> List(Syntax.Cursor.Prefix)
 ```
 

@@ -1,5 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
+use prism_common::format::FormatTag;
+use prism_common::record::RecordError;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Error;
@@ -11,7 +13,7 @@ use super::input::field;
 use super::ROOT_MODULE_NAME;
 
 /// Version tag for serialized compiler module-query graphs.
-pub const MODULE_GRAPH_FORMAT: &str = "prism-module-query-graph-v1";
+pub const MODULE_GRAPH_FORMAT: FormatTag = FormatTag::new("prism-module-query-graph-v1");
 const ROOT_NODE_COUNT: usize = 1;
 
 /// One source module and its direct import edges.
@@ -31,7 +33,7 @@ pub struct ModuleGraphNode {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModuleGraph {
     /// Versioned serialization and graph-semantics tag.
-    pub format: String,
+    pub format: FormatTag,
     /// Name-sorted graph nodes.
     pub nodes: Vec<ModuleGraphNode>,
     /// Digest over every ordered node and edge.
@@ -70,8 +72,8 @@ impl ModuleGraph {
     /// # Errors
     /// Fails on malformed JSON, a foreign format, noncanonical ordering, or any
     /// node/graph digest mismatch.
-    pub fn from_json(text: &str) -> Result<Self, String> {
-        let graph: Self = serde_json::from_str(text).map_err(|e| e.to_string())?;
+    pub fn from_json(text: &str) -> Result<Self, RecordError> {
+        let graph: Self = RecordError::decode(text)?;
         graph.validate()?;
         Ok(graph)
     }
@@ -81,7 +83,10 @@ impl ModuleGraph {
     ///
     /// # Errors
     /// Fails if either graph is malformed or self-inconsistent.
-    pub fn invalidation_closure(&self, previous: &Self) -> Result<Vec<ModuleInvalidation>, String> {
+    pub fn invalidation_closure(
+        &self,
+        previous: &Self,
+    ) -> Result<Vec<ModuleInvalidation>, RecordError> {
         self.validate()?;
         previous.validate()?;
         let current = self
@@ -153,38 +158,38 @@ impl ModuleGraph {
             .collect())
     }
 
-    fn validate(&self) -> Result<(), String> {
-        if self.format != MODULE_GRAPH_FORMAT {
-            return Err(format!("unsupported module graph format {:?}", self.format));
-        }
+    fn validate(&self) -> Result<(), RecordError> {
+        RecordError::expect_format("module graph", &MODULE_GRAPH_FORMAT, &self.format)?;
         if !self
             .nodes
             .windows(2)
             .all(|pair| pair[0].name < pair[1].name)
         {
-            return Err("module graph nodes are not in canonical order".to_string());
+            return Err(RecordError::Invalid(
+                "module graph nodes are not in canonical order".to_string(),
+            ));
         }
         for node in &self.nodes {
             if !node.dependencies.windows(2).all(|pair| pair[0] < pair[1]) {
-                return Err(format!(
+                return Err(RecordError::Invalid(format!(
                     "module graph dependencies for {} are not canonical",
                     node.name
-                ));
+                )));
             }
             let derived = node_digest(&node.name, &node.source_digest, &node.dependencies);
             if derived != node.digest {
-                return Err(format!(
+                return Err(RecordError::Invalid(format!(
                     "module graph node {} has digest {}, derived {derived}",
                     node.name, node.digest
-                ));
+                )));
             }
         }
         let derived = graph_digest(&self.nodes);
         if derived != self.digest {
-            return Err(format!(
+            return Err(RecordError::Invalid(format!(
                 "module graph digest mismatch: stored {}, derived {derived}",
                 self.digest
-            ));
+            )));
         }
         Ok(())
     }
@@ -207,7 +212,7 @@ pub fn module_graph(src: &str, roots: &[Root]) -> Result<ModuleGraph, Error> {
     nodes.sort_by(|a, b| a.name.cmp(&b.name));
     let digest = graph_digest(&nodes);
     Ok(ModuleGraph {
-        format: MODULE_GRAPH_FORMAT.to_string(),
+        format: MODULE_GRAPH_FORMAT,
         nodes,
         digest,
     })
@@ -232,7 +237,7 @@ fn graph_node(name: &str, source: &str, imports: &[ImportDecl]) -> ModuleGraphNo
 
 fn node_digest(name: &str, source_digest: &str, dependencies: &[String]) -> String {
     let mut hasher = blake3::Hasher::new();
-    field(&mut hasher, MODULE_GRAPH_FORMAT.as_bytes());
+    field(&mut hasher, MODULE_GRAPH_FORMAT.as_str().as_bytes());
     field(&mut hasher, name.as_bytes());
     field(&mut hasher, source_digest.as_bytes());
     for dependency in dependencies {
@@ -243,7 +248,7 @@ fn node_digest(name: &str, source_digest: &str, dependencies: &[String]) -> Stri
 
 fn graph_digest(nodes: &[ModuleGraphNode]) -> String {
     let mut hasher = blake3::Hasher::new();
-    field(&mut hasher, MODULE_GRAPH_FORMAT.as_bytes());
+    field(&mut hasher, MODULE_GRAPH_FORMAT.as_str().as_bytes());
     for node in nodes {
         field(&mut hasher, node.name.as_bytes());
         field(&mut hasher, node.digest.as_bytes());

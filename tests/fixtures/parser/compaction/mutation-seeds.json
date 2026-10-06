@@ -1,10 +1,10 @@
 {
   "schema": "prism-parser-compaction-mutation-seeds-v1",
-  "oracle_commit": "46886c1fa7064e4809020c1b788b3ee3531d6a63",
+  "oracle_tree": "cd110efef00d124b955cb6648724887e8e5517f4",
   "corpus_version": 2,
   "status": "reviewed-local-micro-sample-full-oracle-execution-pending",
   "prng": "SplitMix64-v1",
-  "implementation_blake3": "06b7ecad7bbf3d763296ec1b814ed19f9c0f845cd05c403e30c64fa06e3a5513",
+  "implementation_blake3": "73aead2b949e76a831bbcfdfefd563b2a56cf1b4ff75d010908fc2bbb2e3aa42",
   "schedule": {
     "mutators": [
       "delete-token",

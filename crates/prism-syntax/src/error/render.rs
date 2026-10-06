@@ -4,7 +4,7 @@ use ariadne::{Color, Config, IndexType, Label, Report, ReportKind, Source};
 use marginalia::Span;
 
 use super::source::SourceMap;
-use super::{Diag, Error, ErrorCode, ParseError, TypeError};
+use super::{Diag, Error, ErrorCode, Origin, ParseError, TypeError};
 
 // The one report configuration, so every diagnostic in the compiler is drawn the
 // same way. Spans here are byte offsets, and the renderer indexes by character
@@ -53,7 +53,17 @@ impl Error {
         }
     }
 
-    /// The byte range in the full source this error points at, if any.
+    /// The imported module whose source the spans index, when not the root.
+    #[must_use]
+    pub fn origin(&self) -> Option<&Origin> {
+        match self {
+            Self::Type(e) => e.origin(),
+            _ => None,
+        }
+    }
+
+    /// The byte range this error points at, if any: in the full source, or in
+    /// the module's own source when [`Self::origin`] is set.
     #[must_use]
     pub fn primary_span(&self) -> Option<Range<usize>> {
         match self {
@@ -78,9 +88,21 @@ impl Error {
     }
 
     fn render_with(&self, src: &str, name: &str, color: bool) -> String {
-        let map = SourceMap::new(src);
         let kind = self.kind();
         let code = self.code();
+        // An error raised inside an imported module indexes that module's text,
+        // not `src`; without the text there is nothing honest to draw a caret on.
+        let (src, name) = match self.origin() {
+            Some(Origin {
+                module,
+                source: Some(text),
+            }) => (text.as_str(), module.as_str()),
+            Some(Origin { module, .. }) => {
+                return format!("{kind}[{code}]: {self} (in module `{module}`)");
+            }
+            None => (src, name),
+        };
+        let map = SourceMap::new(src);
         let mut buf = Vec::<u8>::new();
         let ok = match self {
             Self::Lex(e) => {
@@ -137,8 +159,8 @@ impl Error {
                         expected,
                         found,
                     } => Some((span, format!("expected {expected}, got {found}"))),
-                    TypeError::ScopeFailure { span, msg }
-                    | TypeError::TypeFailure { span, msg } => Some((span, msg.clone())),
+                    TypeError::ScopeFailure { span, msg, .. }
+                    | TypeError::TypeFailure { span, msg, .. } => Some((span, msg.clone())),
                     TypeError::Kind(_) => unreachable!("handled above"),
                     // No span to point at; fall through to the plain message.
                     TypeError::InternalInvariant { .. } => None,

@@ -16,6 +16,7 @@
 // 5. Malformed input. A parse error and a type error are refused by every phase
 //    rather than yielding a partial fixture.
 
+use prism::DumpPhase;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -28,10 +29,10 @@ const POSITIVE_STEM: &str = "program";
 
 // The three seams and their schema tags, re-typed independently of the compiler
 // so an emitter schema drift cannot re-pin the value it is checked against.
-const PHASES: [(&str, &str); 3] = [
-    ("tc-input", "prism-tc-input-v1"),
-    ("tc-facts", "prism-tc-facts-v1"),
-    ("elab-input", "prism-elab-input-v1"),
+const PHASES: [(DumpPhase, &str); 3] = [
+    (DumpPhase::TcInput, "prism-tc-input-v1"),
+    (DumpPhase::TcFacts, "prism-tc-facts-v1"),
+    (DumpPhase::ElabInput, "prism-elab-input-v1"),
 ];
 
 // Sources every seam must refuse.
@@ -109,11 +110,11 @@ fn frontend_seam_goldens_hold() {
 
 // Per-seam semantic probes: each golden must still carry the fact family it exists
 // to pin, so an accepted-but-hollow golden cannot silently drop a family.
-fn assert_phase_facts(phase: &str, doc: &Value) {
+fn assert_phase_facts(phase: DumpPhase, doc: &Value) {
     match phase {
-        "tc-input" => assert_tc_input(doc),
-        "tc-facts" => assert_tc_facts(doc),
-        "elab-input" => {
+        DumpPhase::TcInput => assert_tc_input(doc),
+        DumpPhase::TcFacts => assert_tc_facts(doc),
+        DumpPhase::ElabInput => {
             // Composes both halves under one envelope.
             assert_tc_input(&doc["input"]);
             assert_tc_facts(&doc["facts"]);

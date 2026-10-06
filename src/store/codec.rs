@@ -100,7 +100,7 @@ pub struct AnonEntry<'a> {
     /// Which member this object is keyed by (its hash is the contract).
     pub target: usize,
     /// The target member's content hash: the store key and the frame's contract.
-    pub hash: &'a str,
+    pub hash: &'a Digest,
     /// Content hashes keyed by canonical symbol, so a reference to a definition
     /// outside the group serializes as that definition's hash exactly as the
     /// content hash substitutes it. The whole program's hash map is fine to pass;
@@ -124,13 +124,13 @@ pub struct AnonEntry<'a> {
 #[derive(Debug, Clone)]
 pub struct Decoded {
     /// The content hash the frame carried (the store key of the target member).
-    pub contract: String,
+    pub contract: Digest,
     /// The reconstructed group members. Symbols and binders are fresh.
     pub group: Vec<CoreFn>,
     /// Which member this object is keyed by, an index into `group`.
     pub target: usize,
     /// The external dependency content hashes, in the frame's order.
-    pub dep_hashes: Vec<String>,
+    pub dep_hashes: Vec<Digest>,
     /// The dependency hashes keyed by the fresh symbol the reconstructed bodies
     /// call them through, ready to seed [`crate::core::hash_group`].
     pub deps: Hashes,
@@ -207,6 +207,9 @@ enum Tag {
     VUnboxedTuple,
     VUnboxedRecord,
     CUnboxedProject,
+    // A handler carrying a cleanup clause; a handler without one keeps the
+    // `CHandle` layout byte for byte.
+    CHandleFinally,
 }
 
 const TAGS: &[Tag] = &[
@@ -248,6 +251,7 @@ const TAGS: &[Tag] = &[
     Tag::VUnboxedTuple,
     Tag::VUnboxedRecord,
     Tag::CUnboxedProject,
+    Tag::CHandleFinally,
 ];
 
 impl Tag {
@@ -644,6 +648,7 @@ impl<'a> Encoder<'a> {
                 body,
                 return_var,
                 return_body,
+                finally_body,
                 ops,
             } => {
                 let bi = self.comp(body);
@@ -651,6 +656,9 @@ impl<'a> Encoder<'a> {
                     let binders: Vec<Sym> = return_var.iter().copied().collect();
                     self.scoped(&binders, |e| e.comp(rb))
                 });
+                // The cleanup clause binds nothing, so it encodes in the
+                // handler's own scope.
+                let fbi = finally_body.as_ref().map(|fb| self.comp(fb));
                 let op_idxs: Vec<(&HandleOp, u32)> = ops
                     .iter()
                     .map(|op| {
@@ -660,7 +668,12 @@ impl<'a> Encoder<'a> {
                         (op, oi)
                     })
                     .collect();
-                put_tag(&mut out, Tag::CHandle);
+                let tag = if fbi.is_some() {
+                    Tag::CHandleFinally
+                } else {
+                    Tag::CHandle
+                };
+                put_tag(&mut out, tag);
                 put_uvarint(&mut out, u64::from(bi));
                 out.push(u8::from(return_var.is_some()));
                 match rbi {
@@ -675,6 +688,9 @@ impl<'a> Encoder<'a> {
                     put_str(&mut out, op.name.as_str());
                     put_uvarint(&mut out, op.params.len() as u64);
                     put_uvarint(&mut out, u64::from(oi));
+                }
+                if let Some(i) = fbi {
+                    put_uvarint(&mut out, u64::from(i));
                 }
             }
             Comp::Mask(ops, b) => {
@@ -844,6 +860,7 @@ enum Node {
         ret_var: bool,
         ret_body: Option<u32>,
         ops: Vec<(String, u64, u32)>,
+        fin_body: Option<u32>,
     },
     Mask(Vec<String>, u32),
     StrOp(Builtin, Vec<u32>),
@@ -950,7 +967,7 @@ fn parse_node(
             let op = r.string()?;
             Node::Do(op, r.node_refs(index)?)
         }
-        Tag::CHandle => {
+        tag @ (Tag::CHandle | Tag::CHandleFinally) => {
             let body = r.node_ref(index)?;
             let ret_var = r.bool()?;
             let ret_body = if r.bool()? {
@@ -962,11 +979,17 @@ fn parse_node(
             let ops = (0..n_ops)
                 .map(|_| Ok((r.string()?, r.uvarint()?, r.node_ref(index)?)))
                 .collect::<Result<Vec<_>, CodecError>>()?;
+            let fin_body = if tag == Tag::CHandleFinally {
+                Some(r.node_ref(index)?)
+            } else {
+                None
+            };
             Node::Handle {
                 body,
                 ret_var,
                 ret_body,
                 ops,
+                fin_body,
             }
         }
         Tag::CMask => {
@@ -1235,8 +1258,13 @@ impl Builder<'_> {
                     ret_var,
                     ret_body,
                     ops,
+                    fin_body,
                 } => {
                     let bc = self.comp(body, binders)?;
+                    let fc = match fin_body {
+                        Some(idx) => Some(Box::new(self.comp(idx, binders)?)),
+                        None => None,
+                    };
                     let n_ret = usize::from(ret_var);
                     let (rb, ret_fresh) = self.scoped(binders, n_ret, |s, b| match ret_body {
                         Some(idx) => Ok(Some(s.comp(idx, b)?)),
@@ -1265,6 +1293,7 @@ impl Builder<'_> {
                         body: Box::new(bc),
                         return_var: ret_fresh.first().copied(),
                         return_body: rb.map(Box::new),
+                        finally_body: fc,
                         // A stored handler was validated at commit, but decode still
                         // enforces uniqueness so a corrupt frame cannot reconstruct a
                         // handler with duplicate operation clauses.
@@ -1321,7 +1350,7 @@ pub fn decode_def(bytes: &[u8]) -> Result<Decoded, CodecError> {
     if r.uvarint()? != u64::from(WireKind::Def.varint()) {
         return Err(CodecError::Kind);
     }
-    let contract = r.string()?;
+    let contract = Digest::parse(r.string()?)?;
 
     let member_count = r.bounded_len()?;
     if member_count == 0 {
@@ -1334,8 +1363,8 @@ pub fn decode_def(bytes: &[u8]) -> Result<Decoded, CodecError> {
 
     let dep_count = r.bounded_len()?;
     let dep_hashes = (0..dep_count)
-        .map(|_| r.string())
-        .collect::<Result<Vec<_>, _>>()?;
+        .map(|_| Ok(Digest::parse(r.string()?)?))
+        .collect::<Result<Vec<_>, CodecError>>()?;
 
     let node_count = r.uvarint()?;
     if node_count > MAX_NODES {
@@ -1409,7 +1438,7 @@ pub fn decode_def(bytes: &[u8]) -> Result<Decoded, CodecError> {
     let deps: Hashes = dep_syms
         .iter()
         .copied()
-        .zip(dep_hashes.iter().cloned().map(Digest::from))
+        .zip(dep_hashes.iter().cloned())
         .collect();
 
     Ok(Decoded {
@@ -1437,7 +1466,7 @@ mod table_tests {
         let mut out = Vec::new();
         put_str(&mut out, crate::core::HASH_SCHEME);
         put_uvarint(&mut out, u64::from(WireKind::Def.varint()));
-        put_str(&mut out, "contract");
+        put_str(&mut out, &crate::core::hash_str("contract"));
         put_uvarint(&mut out, 1);
         put_uvarint(&mut out, 0);
         put_uvarint(&mut out, 0);
@@ -1604,11 +1633,13 @@ mod tests {
             (Tag::VUnboxedTuple, 35),
             (Tag::VUnboxedRecord, 36),
             (Tag::CUnboxedProject, 37),
+            // Appended for the handler cleanup clause.
+            (Tag::CHandleFinally, 38),
         ];
         for (tag, wire) in expected {
             assert_eq!(to_wire(TAGS, tag), wire, "a pinned tag moved on the wire");
         }
-        assert_eq!(TAGS.len(), 38, "a tag was added without pinning its value");
+        assert_eq!(TAGS.len(), 39, "a tag was added without pinning its value");
     }
 
     // The encode/decode agreement for the three `as u8`-discriminant tag
@@ -1670,7 +1701,7 @@ mod tests {
         let bytes = encode_def(&AnonEntry {
             group: &group,
             target: 0,
-            hash: "test-hash",
+            hash: &crate::core::hash_str("test-hash"),
             deps: &deps,
             meta: &meta,
         });

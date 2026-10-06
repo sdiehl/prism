@@ -325,17 +325,18 @@ jobs:
         with:
           subject-path: dist/*.tar.gz
 
-      # The release body is the matching CHANGELOG.md section, so notes are
-      # whatever was written for this version rather than auto-generated noise.
+      # The release body is the matching CHANGELOG.md section, header included,
+      # so every release reads "## VERSION - Colour" followed by the notes that
+      # were written for it rather than auto-generated noise.
       - name: Extract changelog section
         run: |
           awk -v v="$VERSION" '
-            $0 ~ "^## +" v "([^0-9]|$)" { f=1; next }
+            $0 ~ "^## +" v "( - [A-Za-z]+)?$" { f=1; print; next }
             f && /^## / { exit }
             f { print }
           ' CHANGELOG.md > RELEASE_NOTES.md
           if [ ! -s RELEASE_NOTES.md ]; then
-            echo "Release ${VERSION}." > RELEASE_NOTES.md
+            echo "## ${VERSION}" > RELEASE_NOTES.md
           fi
 
       - name: Publish GitHub Release

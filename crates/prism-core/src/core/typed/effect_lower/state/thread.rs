@@ -1331,6 +1331,7 @@ impl Threader<'_> {
             ops,
             return_binder,
             return_body,
+            finally_body: None,
         } = c.kind()
         else {
             return None;
@@ -1500,6 +1501,7 @@ impl Threader<'_> {
             ops,
             return_binder,
             return_body,
+            finally_body: None,
         } = c.kind()
         else {
             return None;
@@ -1597,6 +1599,7 @@ impl Threader<'_> {
             ops,
             return_binder,
             return_body,
+            finally_body: None,
         } = c.kind()
         else {
             return None;
@@ -1915,6 +1918,7 @@ impl Threader<'_> {
             ops: clauses,
             return_binder,
             return_body,
+            finally_body: None,
         } = c.kind()
         else {
             return None;

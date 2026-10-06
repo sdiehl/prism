@@ -9,8 +9,8 @@ effect Tick
 
 fn run_all(ts : List(() -> Int ! {Tick})) : Int ! {Tick} =
   match ts of
-    Nil => 0
-    Cons(t, rest) => t() + run_all(rest)
+    [] => 0
+    t :: rest => t() + run_all(rest)
 
 fn ticker() : Int ! {Tick} =
   tick()

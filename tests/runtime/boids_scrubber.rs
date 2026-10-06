@@ -20,7 +20,7 @@ fn kernel() -> String {
 }
 
 // Interpret the kernel under `main` and return its exact printed transcript,
-// the same bytes the wasm `boids_run` hands the browser.
+// the same bytes `resident_run("boids", ...)` hands the browser.
 fn run(main: &str) -> String {
     let full = prism::with_prelude(&format!("{}\n{main}\n", kernel()));
     prism::interpret(&full)

@@ -145,14 +145,19 @@ pub fn merge_cmd(inputs: &[PathBuf], title: String, out: Option<PathBuf>) -> Cmd
             .map_err(|e| (Error::Io(e), String::new(), file.display().to_string()))?;
         indexes.push(Index::from_json(&text).map_err(|e| {
             (
-                Error::CodegenDump(e),
+                Error::CodegenDump(e.to_string()),
                 String::new(),
                 file.display().to_string(),
             )
         })?);
     }
-    let index = Index::merge(title, indexes)
-        .map_err(|e| (Error::CodegenDump(e), String::new(), String::new()))?;
+    let index = Index::merge(title, indexes).map_err(|e| {
+        (
+            Error::CodegenDump(e.to_string()),
+            String::new(),
+            String::new(),
+        )
+    })?;
     let json = index.to_json().map_err(|e| {
         (
             Error::CodegenDump(e.to_string()),
@@ -246,14 +251,19 @@ pub fn diff_cmd(old: &Path, new: &Path, out: Option<PathBuf>) -> CmdResult {
             .map_err(|e| (Error::Io(e), String::new(), p.display().to_string()))?;
         Index::from_json(&text).map_err(|e| {
             (
-                Error::CodegenDump(e),
+                Error::CodegenDump(e.to_string()),
                 String::new(),
                 p.display().to_string(),
             )
         })
     };
-    let report = diff::diff(&read(old)?, &read(new)?)
-        .map_err(|e| (Error::CodegenDump(e), String::new(), String::new()))?;
+    let report = diff::diff(&read(old)?, &read(new)?).map_err(|e| {
+        (
+            Error::CodegenDump(e.to_string()),
+            String::new(),
+            String::new(),
+        )
+    })?;
     let Some(file) = out else {
         println!("{}", report.summary());
         for e in report.entries.iter().filter(|e| e.status.is_authored()) {

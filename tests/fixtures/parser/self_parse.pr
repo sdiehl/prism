@@ -24,13 +24,13 @@ fn report(budget : Int, path : String) : String =
 
 fn reports(budget : Int, paths : List(String)) : List(String) =
   match paths of
-    Nil => Nil
-    Cons(path, rest) => Cons(report(budget, path), reports(budget, rest))
+    [] => Nil
+    path :: rest => Cons(report(budget, path), reports(budget, rest))
 
 fn main() =
   match args() of
-    Cons(first, rest) =>
+    first :: rest =>
       match budget_of(first) of
         Some(budget) => println(lines_of(reports(budget, rest)))
         None => println(lines_of(reports(depth_budget(), args())))
-    Nil => println(lines_of(Nil))
+    [] => println(lines_of(Nil))

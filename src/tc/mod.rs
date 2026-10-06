@@ -260,7 +260,7 @@ fn check_seeded_mode(
     seed: &TypecheckSeed,
     track_tooltips: bool,
 ) -> Result<Checked, TypeError> {
-    let (mut data, mut ctors, mut eff_ops, mut env) = env::build_data(prog)?;
+    let (mut data, mut ctors, mut eff_ops, mut env) = env::build_data(prog, seed.data_types())?;
     // The seed is the ambient foundation: the prelude, the embedded standard
     // library, and every imported interface. A name the program declares itself
     // is the program's, so seeding must not overwrite it. That is what the
@@ -398,6 +398,7 @@ fn check_seeded_mode(
             body_witness: BTreeMap::new(),
             pending: Vec::new(),
             decl_renames: None,
+            decl_rows: None,
             deferred_spans: std::collections::VecDeque::new(),
             hole_sites: Vec::new(),
             holes: Vec::new(),
@@ -416,6 +417,7 @@ fn check_seeded_mode(
             row_ctx: Vec::new(),
             cur_row: None,
             handler_stack: Vec::new(),
+            pending_residuals: Vec::new(),
             operation_uses: OperationUses::default(),
             precise_calls: BTreeMap::new(),
             handler_nodes: BTreeSet::new(),
@@ -430,58 +432,64 @@ fn check_seeded_mode(
         // monomorphic variables. `infos` is rebuilt in declaration order afterward
         // so downstream output is unaffected by the visiting order.
         for component in deps::dep_sccs(prog) {
-            if component.len() == 1 {
-                let d = &prog.fns[component[0]];
-                if d.konst {
-                    let (ty, effs) = tc.infer_const(&env, d).map_err(|e| e.in_fn(&d.name))?;
-                    require_pure_konst(d, &effs)?;
+            // A component never crosses a module (imports are acyclic), so an
+            // error from any member is located in its first member's module.
+            let module = names::module_of(&prog.fns[component[0]].name);
+            (|| -> Result<(), TypeError> {
+                if component.len() == 1 {
+                    let d = &prog.fns[component[0]];
+                    if d.konst {
+                        let (ty, effs) = tc.infer_const(&env, d).map_err(|e| e.in_fn(&d.name))?;
+                        require_pure_konst(d, &effs)?;
+                        env.insert(Sym::from(&d.name), ty.clone());
+                        infos.push(DeclInfo {
+                            name: d.name.clone(),
+                            params: Vec::new(),
+                            ty,
+                            effects: Effects::new(),
+                            pure: true,
+                        });
+                        return Ok(());
+                    }
+                    // Effect-row inference is principal: `infer_decl` discovers the
+                    // row on its own; the purity checks (konst here, instance methods
+                    // in `check_instance`) read the same principal inferred row.
+                    let ty = tc.infer_decl(&env, d).map_err(|e| e.in_fn(&d.name))?;
                     env.insert(Sym::from(&d.name), ty.clone());
-                    infos.push(DeclInfo {
-                        name: d.name.clone(),
-                        params: Vec::new(),
-                        ty,
-                        effects: Effects::new(),
-                        pure: true,
-                    });
-                    continue;
-                }
-                // Effect-row inference is principal: `infer_decl` discovers the
-                // row on its own; the purity checks (konst here, instance methods
-                // in `check_instance`) read the same principal inferred row.
-                let ty = tc.infer_decl(&env, d).map_err(|e| e.in_fn(&d.name))?;
-                env.insert(Sym::from(&d.name), ty.clone());
-                let witness =
-                    tc.body_witness
-                        .get(&d.name)
-                        .ok_or_else(|| TypeError::InternalInvariant {
-                            msg: format!("no body-effect witness recorded for `{}`", d.name),
-                        })?;
-                infos.push(finalize_fn(d, ty, witness, &mut warnings)?);
-                continue;
-            }
-            // A mutually recursive group; the whole group is inferred together,
-            // and `infer_scc` holds any constant member to its inferred purity.
-            let members: Vec<&_> = component.iter().map(|&di| &prog.fns[di]).collect();
-            let tys = tc.infer_scc(&mut env, &members)?;
-            for (&di, ty) in component.iter().zip(tys) {
-                let d = &prog.fns[di];
-                if d.konst {
-                    infos.push(DeclInfo {
-                        name: d.name.clone(),
-                        params: Vec::new(),
-                        ty,
-                        effects: Effects::new(),
-                        pure: true,
-                    });
-                } else {
                     let witness = tc.body_witness.get(&d.name).ok_or_else(|| {
                         TypeError::InternalInvariant {
                             msg: format!("no body-effect witness recorded for `{}`", d.name),
                         }
                     })?;
                     infos.push(finalize_fn(d, ty, witness, &mut warnings)?);
+                    return Ok(());
                 }
-            }
+                // A mutually recursive group; the whole group is inferred together,
+                // and `infer_scc` holds any constant member to its inferred purity.
+                let members: Vec<&_> = component.iter().map(|&di| &prog.fns[di]).collect();
+                let tys = tc.infer_scc(&mut env, &members)?;
+                for (&di, ty) in component.iter().zip(tys) {
+                    let d = &prog.fns[di];
+                    if d.konst {
+                        infos.push(DeclInfo {
+                            name: d.name.clone(),
+                            params: Vec::new(),
+                            ty,
+                            effects: Effects::new(),
+                            pure: true,
+                        });
+                    } else {
+                        let witness = tc.body_witness.get(&d.name).ok_or_else(|| {
+                            TypeError::InternalInvariant {
+                                msg: format!("no body-effect witness recorded for `{}`", d.name),
+                            }
+                        })?;
+                        infos.push(finalize_fn(d, ty, witness, &mut warnings)?);
+                    }
+                }
+                Ok(())
+            })()
+            .map_err(|e| e.in_module(module))?;
         }
         for inst in &prog.instances {
             // `check_instance` checks each method against its class signature and,
@@ -493,7 +501,8 @@ fn check_seeded_mode(
                 inst,
                 &instances[&Sym::from(&inst.name)],
                 &classes[&Sym::from(&inst.class)],
-            )?;
+            )
+            .map_err(|e| e.in_module(&inst.module))?;
         }
         // Every `This(e)` element is now zonked; hold each to the non-null rule.
         tc.check_or_null_sites()?;
@@ -707,6 +716,7 @@ fn infer_expr_full(
         body_witness: BTreeMap::new(),
         pending: Vec::new(),
         decl_renames: None,
+        decl_rows: None,
         deferred_spans: std::collections::VecDeque::new(),
         hole_sites: Vec::new(),
         holes: Vec::new(),
@@ -725,6 +735,7 @@ fn infer_expr_full(
         row_ctx: Vec::new(),
         cur_row: None,
         handler_stack: Vec::new(),
+        pending_residuals: Vec::new(),
         operation_uses: OperationUses::default(),
         precise_calls: BTreeMap::new(),
         handler_nodes: BTreeSet::new(),
@@ -792,6 +803,7 @@ fn query_tc(seed: &TypecheckSeed) -> Tc<'_> {
         body_witness: BTreeMap::new(),
         pending: Vec::new(),
         decl_renames: None,
+        decl_rows: None,
         deferred_spans: std::collections::VecDeque::new(),
         hole_sites: Vec::new(),
         holes: Vec::new(),
@@ -810,6 +822,7 @@ fn query_tc(seed: &TypecheckSeed) -> Tc<'_> {
         row_ctx: Vec::new(),
         cur_row: None,
         handler_stack: Vec::new(),
+        pending_residuals: Vec::new(),
         operation_uses: OperationUses::default(),
         precise_calls: BTreeMap::new(),
         handler_nodes: BTreeSet::new(),

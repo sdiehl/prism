@@ -128,6 +128,7 @@ fn comp(c: &Comp) -> J {
             body,
             return_var,
             return_body,
+            finally_body,
             ops,
         } => {
             let mut m = Map::new();
@@ -139,6 +140,9 @@ fn comp(c: &Comp) -> J {
             }
             if let Some(rb) = return_body {
                 m.insert("retBody".into(), comp(rb));
+            }
+            if let Some(fb) = finally_body {
+                m.insert("finBody".into(), comp(fb));
             }
             J::Object(m)
         }

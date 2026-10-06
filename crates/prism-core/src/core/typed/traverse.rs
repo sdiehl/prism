@@ -358,6 +358,7 @@ fn push_comp_children<'a>(stack: &mut Vec<Frame<'a>>, comp: &'a TypedComp, depth
             body,
             return_binder,
             return_body,
+            finally_body,
             ops,
         } => {
             for forward in ops.forwarded().iter().rev() {
@@ -373,6 +374,9 @@ fn push_comp_children<'a>(stack: &mut Vec<Frame<'a>>, comp: &'a TypedComp, depth
                 for argument in arm.instantiation().iter().rev() {
                     stack.push(Frame::Instantiation(argument));
                 }
+            }
+            if let Some(finally_body) = finally_body {
+                stack.push(Frame::Comp(finally_body, depth));
             }
             if let Some(binder) = return_binder {
                 let binders = scope([binder]);
@@ -876,11 +880,15 @@ pub(crate) trait Rewrite {
                 body,
                 return_binder,
                 return_body,
+                finally_body,
                 ops,
             } => TypedCompKind::Handle {
                 body: Box::new(self.comp(body, cx)),
                 return_binder: return_binder.as_ref().map(|binder| self.binder(binder, cx)),
                 return_body: return_body
+                    .as_ref()
+                    .map(|body| Box::new(self.comp(body, cx))),
+                finally_body: finally_body
                     .as_ref()
                     .map(|body| Box::new(self.comp(body, cx))),
                 ops: TypedHandler {
@@ -1189,6 +1197,7 @@ fn push_rewrite_comp_children<'a>(
             body,
             return_binder,
             return_body,
+            finally_body,
             ops,
         } => {
             for forward in ops.forwarded().iter().rev() {
@@ -1199,6 +1208,9 @@ fn push_rewrite_comp_children<'a>(
                 frames.push(RebuildFrame::Binder(arm.resume()));
                 push_binders(frames, arm.params());
                 push_instantiations(frames, arm.instantiation());
+            }
+            if let Some(finally_body) = finally_body {
+                frames.push(RebuildFrame::Comp(finally_body, depth));
             }
             if let Some(return_body) = return_body {
                 frames.push(RebuildFrame::Comp(return_body, depth));
@@ -1353,12 +1365,14 @@ fn rebuild_comp<R: Rewrite>(
         TypedCompKind::Handle {
             return_binder,
             return_body,
+            finally_body,
             ops,
             ..
         } => {
             let body = next_comp_box(results);
             let return_binder = return_binder.as_ref().map(|_| next_binder(results));
             let return_body = return_body.as_ref().map(|_| next_comp_box(results));
+            let finally_body = finally_body.as_ref().map(|_| next_comp_box(results));
             let arms = ops
                 .arms()
                 .iter()
@@ -1379,6 +1393,7 @@ fn rebuild_comp<R: Rewrite>(
                 body,
                 return_binder,
                 return_body,
+                finally_body,
                 ops: TypedHandler { arms, forwarded },
             }
         }

@@ -833,6 +833,7 @@ impl Rewrite for Simplifier {
                 body,
                 return_binder,
                 return_body,
+                finally_body,
                 ops,
             } => {
                 let body2 = Box::new(self.comp(body, env));
@@ -841,6 +842,7 @@ impl Rewrite for Simplifier {
                     let e = env.narrow(&names);
                     Box::new(self.comp(b, &e))
                 });
+                let finally_body2 = finally_body.as_ref().map(|b| Box::new(self.comp(b, env)));
                 let ops2 = TypedHandler {
                     arms: ops
                         .arms
@@ -866,6 +868,7 @@ impl Rewrite for Simplifier {
                         body: body2,
                         return_binder: return_binder.clone(),
                         return_body: return_body2,
+                        finally_body: finally_body2,
                         ops: ops2,
                     },
                 )
@@ -1726,6 +1729,7 @@ mod tests {
                 body: Box::new(dead_let),
                 return_binder: None,
                 return_body: None,
+                finally_body: None,
                 ops: TypedHandler::new(vec![arm]).unwrap().with_forwarded(vec![
                     super::super::TypedForward::new(sym("put"), Label::bare(effect_name)),
                 ]),

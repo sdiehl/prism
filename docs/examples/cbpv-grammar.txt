@@ -28,7 +28,8 @@ comp   ->  Return value
         |  UnboxedProject value sym
         |  Do sym [ value, ... ]
         |  Handle { body: comp, return_var: maybe-sym,
-                    return_body: maybe-comp, ops: [ handleop, ... ] }
+                    return_body: maybe-comp, finally_body: maybe-comp,
+                    ops: [ handleop, ... ] }
         |  Mask [ sym, ... ] comp
         |  StrBuiltin builtin [ value, ... ]
         |  Dup value

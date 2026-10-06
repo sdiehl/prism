@@ -83,8 +83,8 @@ fn terms_from(arities : List(Int), exp : Int) : List(String) =
 
 fn show_poly(p : Poly) : String =
   match p.arities of
-    Nil => "0"
-    Cons(_, _) =>
+    [] => "0"
+    _ :: _ =>
       str_join(" + ", terms_from(p.arities, unwrap_or(0, maximum(p.arities))))
 
 -- Show "lhs rhs" so the two sides of each homomorphism line up visibly.

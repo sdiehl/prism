@@ -9,14 +9,16 @@
 // spelling, and we side with plain `pub`.
 #![allow(dead_code, unreachable_pub)]
 
-use std::collections::BTreeSet;
+use std::cmp::Reverse;
+use std::collections::{BTreeMap, BTreeSet};
+use std::io::Write;
 use std::mem::size_of;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use std::{env, fs, thread};
 
 use prism::error::Error;
@@ -571,7 +573,7 @@ pub fn heavy_corpus_delegated() -> bool {
 }
 
 /// Partition a sorted corpus for CI sharding: with `PRISM_SHARD_TOTAL=n` (n > 1)
-/// set, keep only the cases whose position mod n equals `PRISM_SHARD_INDEX`, so n
+/// set, keep only the cases [`shard_by`] assigns to `PRISM_SHARD_INDEX`, so n
 /// parallel CI jobs cover the corpus between them. Unset or `n <= 1` returns the
 /// list unchanged, so local runs are unaffected. Inputs are already sorted, so
 /// the partition is identical on every machine.
@@ -580,24 +582,94 @@ pub fn shard(cases: Vec<PathBuf>) -> Vec<PathBuf> {
     if total <= UNSHARDED_TOTAL {
         return cases;
     }
-    let index = env::var(SHARD_INDEX_ENV)
-        .ok()
-        .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(DEFAULT_SHARD_INDEX);
-    shard_by(cases, total, index)
+    shard_by(cases, total, shard_index())
 }
 
-/// The pure index-mod-total split behind [`shard`]: keep the cases at positions
-/// `p` with `p % total == index % total`. Over `index in 0..total` the results are
-/// disjoint and cover every case exactly once.
+fn shard_index() -> usize {
+    env::var(SHARD_INDEX_ENV)
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(DEFAULT_SHARD_INDEX)
+}
+
+/// Whether the item at `position` of a deterministic sequence belongs to this
+/// CI shard, by position mod total. For sweeps over generated items of uniform
+/// cost rather than corpus paths.
+pub fn in_shard(position: usize) -> bool {
+    let total = shard_total();
+    total <= UNSHARDED_TOTAL || position % total == shard_index() % total
+}
+
+/// Measured per-program cost, `<label>\t<weight>` per line, written by
+/// `scripts/shard_weights.py` from [`CASE_TIMINGS_ENV`] logs.
+const SHARD_WEIGHTS: &str = "tests/shard_weights.txt";
+
+fn shard_weights() -> &'static BTreeMap<String, u64> {
+    static WEIGHTS: OnceLock<BTreeMap<String, u64>> = OnceLock::new();
+    WEIGHTS.get_or_init(|| {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(SHARD_WEIGHTS);
+        fs::read_to_string(path)
+            .unwrap_or_default()
+            .lines()
+            .filter(|line| !line.starts_with('#'))
+            .filter_map(|line| {
+                let (label, weight) = line.split_once('\t')?;
+                Some((label.to_string(), weight.trim().parse().ok()?))
+            })
+            .collect()
+    })
+}
+
+/// The split behind [`shard`]: longest-processing-time-first over the measured
+/// weights, each case going to the least-loaded shard (lowest index on a tie),
+/// then this shard's cases in input order. The assignment is a function of the
+/// case list and the weight file alone, so every shard computes the same one
+/// and over `index in 0..total` the results are disjoint and cover every case
+/// exactly once whatever the weights say. A case the file does not name costs
+/// the median weight; with no file every case weighs the same and the split is
+/// round-robin by position.
 pub fn shard_by(cases: Vec<PathBuf>, total: usize, index: usize) -> Vec<PathBuf> {
+    let weights = shard_weights();
+    let mut known: Vec<u64> = weights.values().copied().collect();
+    known.sort_unstable();
+    let fallback = known.get(known.len() / 2).copied().unwrap_or(1);
+    let cost: Vec<u64> = cases
+        .iter()
+        .map(|case| weights.get(&label_of(case)).copied().unwrap_or(fallback))
+        .collect();
+    let mut order: Vec<usize> = (0..cases.len()).collect();
+    order.sort_by_key(|&i| (Reverse(cost[i]), i));
+    let mut load = vec![0u64; total];
+    let mut owner = vec![0usize; cases.len()];
+    for i in order {
+        let least = (0..total).min_by_key(|&k| (load[k], k)).unwrap_or(0);
+        load[least] += cost[i];
+        owner[i] = least;
+    }
     let index = index % total;
     cases
         .into_iter()
-        .enumerate()
-        .filter(move |(i, _)| i % total == index)
-        .map(|(_, p)| p)
+        .zip(owner)
+        .filter(|(_, k)| *k == index)
+        .map(|(case, _)| case)
         .collect()
+}
+
+/// Env var naming a file that [`parallel_collect`] appends `<label>\t<micros>`
+/// to for every case it checks; `scripts/shard_weights.py` folds such logs into
+/// [`SHARD_WEIGHTS`].
+const CASE_TIMINGS_ENV: &str = "PRISM_CASE_TIMINGS";
+
+fn record_case_time(case: &Path, started: Instant) {
+    let Some(path) = env::var_os(CASE_TIMINGS_ENV) else {
+        return;
+    };
+    let line = format!("{}\t{}\n", label_of(case), started.elapsed().as_micros());
+    // One short append per line, so concurrent workers and test processes
+    // never interleave within a record.
+    if let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = file.write_all(line.as_bytes());
+    }
 }
 
 /// The committed programs that drop out of `corpus()`, as their `dir/name.pr`
@@ -898,8 +970,9 @@ pub fn artifact_identity_context() -> String {
 /// the identity total: no combination can be written that drops a bit, which is
 /// how two configurations differing only in `mlir` or `wasm` came to share an
 /// identity.
-pub const COMPILED_FEATURES: [(&str, bool); 4] = [
+pub const COMPILED_FEATURES: [(&str, bool); 5] = [
     ("native", cfg!(feature = "native")),
+    ("project", cfg!(feature = "project")),
     ("mlir", cfg!(feature = "mlir")),
     ("wasm", cfg!(feature = "wasm")),
     ("mimalloc", cfg!(feature = "mimalloc")),
@@ -1232,7 +1305,12 @@ pub fn parallel_collect<T: Send>(
     cases: &[PathBuf],
     check: impl Fn(&Path) -> Result<T, String> + Sync,
 ) -> (Vec<String>, Vec<T>) {
-    parallel_each(cases, |case| check(case))
+    parallel_each(cases, |case| {
+        let started = Instant::now();
+        let result = check(case);
+        record_case_time(case, started);
+        result
+    })
 }
 
 /// The worker pool underneath [`parallel_check`], generic over the item type so

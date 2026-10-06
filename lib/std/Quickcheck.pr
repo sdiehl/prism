@@ -214,8 +214,8 @@ fn nth_nonempty(first : a, rest : List(a), i : Int) : a =
     first
   else
     match rest of
-      Cons(h, t) => nth_nonempty(h, t, i - 1)
-      Nil => first
+      h :: t => nth_nonempty(h, t, i - 1)
+      [] => first
 
 -- | Pick one of `g0`/`rest` uniformly, then draw from it (one arm per
 -- constructor, the shape a derived sum-type instance uses).

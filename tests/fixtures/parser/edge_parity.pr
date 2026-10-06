@@ -38,3 +38,29 @@ fn try_tuple(r) =
 fn try_ctor_record(r) =
   let Some(User { name = name, .. }) = r?
   name
+
+fn cons_sugar(xs, y) =
+  match y :: x + 1 :: xs of
+    [] => 0
+    a :: b :: _ | [a, b] => a
+    [a | 2, c :: _] :: rest => a
+    _ :: _ => 0 :: xs == xs
+
+fn cons_lets(rows, xs) =
+  let (c, e) :: rest = rows else 0
+  let x :: _ = xs else -1
+  let [p, q] = xs else 0
+  let Some(h) :: _ = rest else 0
+  c + x + p + q + h + (let y :: _ = xs in y)
+
+fn path_join_edges(a, b, c, xs) =
+  (a </> b </> c, a </> (b </> c), a </> b == c, x :: xs </> c, (a </> b).f)
+
+fn finally_edges(act) =
+  let a =
+    handle act() with
+      return x => x
+      finally => println("released")
+  handle a with
+    return y => y
+    finally => ()

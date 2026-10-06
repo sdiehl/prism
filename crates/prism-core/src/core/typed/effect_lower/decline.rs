@@ -22,6 +22,7 @@ const THUNK_BOUNDARY: &str = "thunk-boundary";
 const WORD_CAPTURE: &str = "word-capture";
 const HANDLER_ANSWER: &str = "handler-answer";
 const HANDLER_ARMS: &str = "handler-arms";
+const CLEANUP: &str = "cleanup-clause";
 const FORWARDING_RESUME: &str = "forwarding-resume";
 const MEMBER_TAIL: &str = "member-tail";
 const MISSING_ROW: &str = "missing-row";
@@ -61,6 +62,11 @@ pub enum Refusal {
     /// row a clause that never performs leaves empty inside the answered
     /// function type where a performing sibling carries the ambient one.
     HandlerArms,
+    /// A handler carries a `finally` clause. The clause runs when an operation
+    /// leaving the handler is dropped by the one that catches it, which only a
+    /// rewrite where every operation travels as a cell can see; the confined
+    /// region leaves code around it direct, so the clause widens the program.
+    Cleanup,
     /// A handler that forwards has a clause resuming in tail position. Its
     /// driver answers in the effect type, so the clause reaches the reified
     /// resumption through the monadic plumbing and every hop is a closure call
@@ -97,6 +103,7 @@ impl Refusal {
             Self::WordCapture => WORD_CAPTURE,
             Self::HandlerAnswer => HANDLER_ANSWER,
             Self::HandlerArms => HANDLER_ARMS,
+            Self::Cleanup => CLEANUP,
             Self::ForwardingResume => FORWARDING_RESUME,
             Self::MemberTail => MEMBER_TAIL,
             Self::MissingRow => MISSING_ROW,
@@ -116,6 +123,7 @@ impl Refusal {
             Self::WordCapture => "copies a value that reads a binder the rewrite reified",
             Self::HandlerAnswer => "installs a performing handler that answers with a transformer",
             Self::HandlerArms => "installs a handler whose clauses answer at different types",
+            Self::Cleanup => "installs a handler with a `finally` clause",
             Self::ForwardingResume => {
                 "installs a forwarding handler whose clause resumes in tail position"
             }

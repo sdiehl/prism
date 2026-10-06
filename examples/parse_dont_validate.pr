@@ -25,8 +25,8 @@ type NonEmpty(a) = NonEmpty(a, List(a))
 -- List(a) -> Option(NonEmpty(a)).
 fn non_empty(xs) =
   match xs of
-    Nil => None
-    Cons(h, t) => Some(NonEmpty(h, t))
+    [] => None
+    h :: t => Some(NonEmpty(h, t))
 
 -- Total: the type already carries the head, so the inferred row stays pure.
 fn first(ne) =
@@ -41,8 +41,8 @@ fn count_ne(ne) =
 -- on every call, however many `is_nil` checks ran before it.
 fn head_or_fail(xs) =
   match xs of
-    Nil => fail()
-    Cons(h, _) => h
+    [] => fail()
+    h :: _ => h
 
 fn main() =
   -- Parse once, then operate on a value that cannot be empty.

@@ -19,8 +19,8 @@ effect Mix
 
 fn first(xs) =
   match xs of
-    Nil => 0
-    Cons(x, _) => x
+    [] => 0
+    x :: _ => x
 
 -- Every frame keeps `cell` live across the recursive call, so the abandoned
 -- continuation owns the whole 20000-cell spine when abort fires at the bottom.

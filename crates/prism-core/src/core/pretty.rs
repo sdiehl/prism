@@ -86,6 +86,7 @@ fn pp_seq(c: &Comp, depth: usize, binder: Option<&str>) -> String {
             body,
             return_var,
             return_body,
+            finally_body,
             ops,
         } => {
             let mut s = format!(
@@ -114,6 +115,16 @@ fn pp_seq(c: &Comp, depth: usize, binder: Option<&str>) -> String {
                     STEP.repeat(depth + 1),
                     kw::RETURN,
                     pp_block(rb, depth + 2)
+                )
+                .unwrap();
+            }
+            if let Some(fb) = finally_body {
+                write!(
+                    s,
+                    "\n{}{} =>\n{}",
+                    STEP.repeat(depth + 1),
+                    kw::FINALLY,
+                    pp_block(fb, depth + 2)
                 )
                 .unwrap();
             }
@@ -270,6 +281,7 @@ pub fn pp_comp(c: &Comp) -> String {
             body,
             return_var,
             return_body,
+            finally_body,
             ops,
         } => {
             let mut arms: Vec<String> = ops
@@ -282,6 +294,9 @@ pub fn pp_comp(c: &Comp) -> String {
                 .collect();
             if let (Some(rv), Some(rb)) = (return_var, return_body) {
                 arms.push(format!("{} {rv} => {}", kw::RETURN, pp_comp(rb)));
+            }
+            if let Some(fb) = finally_body {
+                arms.push(format!("{} => {}", kw::FINALLY, pp_comp(fb)));
             }
             format!(
                 "{} {{ {} }} {} {{ {} }}",

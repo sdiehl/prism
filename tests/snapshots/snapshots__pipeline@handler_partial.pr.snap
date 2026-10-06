@@ -1,6 +1,5 @@
 ---
 source: tests/snapshots.rs
-assertion_line: 14
 expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/handler_partial.pr
 ---
@@ -20,12 +19,14 @@ Program {
                     params: [],
                     ret: Int,
                     grade: Many,
+                    span: 167..170,
                 },
                 EffOp {
                     name: "two",
                     params: [],
                     ret: Int,
                     grade: Many,
+                    span: 181..184,
                 },
             ],
             span: 156..192,

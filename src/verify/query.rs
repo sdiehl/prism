@@ -7,8 +7,9 @@
 
 use crate::verify::logic::Obligation;
 use crate::verify::{normalize, smtlib};
+use prism_common::format::FormatTag;
 
-pub(crate) const SCHEMA: &str = "prism-smt-query-v1";
+pub(crate) const SCHEMA: FormatTag = FormatTag::new("prism-smt-query-v1");
 
 /// A built query. The `digest` is the semantic identity: the schema, the logic,
 /// and the canonical SMT-LIB bytes, hashed. It is independent of the Core content
@@ -39,7 +40,7 @@ impl SmtQuery {
     /// timestamps. This is what `dump smt` prints.
     pub(crate) fn render(&self) -> String {
         let mut out = String::new();
-        out.push_str(SCHEMA);
+        out.push_str(SCHEMA.as_str());
         out.push('\n');
         out.push_str("logic ");
         out.push_str(self.logic);
@@ -58,7 +59,7 @@ impl SmtQuery {
 /// bytes and therefore this digest.
 fn query_digest(logic: &str, smtlib: &str) -> String {
     let mut buf = Vec::new();
-    buf.extend_from_slice(SCHEMA.as_bytes());
+    buf.extend_from_slice(SCHEMA.as_str().as_bytes());
     buf.push(b'\n');
     buf.extend_from_slice(logic.as_bytes());
     buf.push(b'\n');

@@ -17,8 +17,8 @@ fn mint(s : String) : Binder(TermSpace) ! {Fresh} = fresh_binder(s)
 
 fn alloc_all(spellings : List(String)) : List(String) ! {Fresh} =
   match spellings of
-    Nil => Nil
-    Cons(s, rest) =>
+    [] => Nil
+    s :: rest =>
       let b = mint(s)
       Cons(render_binder(b), alloc_all(rest))
 

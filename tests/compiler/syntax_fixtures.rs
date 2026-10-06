@@ -22,6 +22,7 @@
 // 7. Repository-wide properties. Every example and test case that lexes/parses
 //    also satisfies determinism, schema, and the cover invariant.
 
+use prism::DumpPhase;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -35,10 +36,10 @@ const ACCEPT: &str = "PRISM_ACCEPT_SYNTAX_FIXTURES";
 
 // The two seams and their schema tags, re-typed independently of the compiler
 // so an emitter schema drift cannot re-pin the value it is checked against.
-const PHASES: [(&str, &str); 3] = [
-    ("syntax-tokens", "prism-syntax-tokens-v1"),
-    ("surface-syntax", "prism-surface-syntax-v1"),
-    ("syntax-diagnostics", "prism-syntax-diagnostics-v1"),
+const PHASES: [(DumpPhase, &str); 3] = [
+    (DumpPhase::SyntaxTokens, "prism-syntax-tokens-v1"),
+    (DumpPhase::SurfaceSyntax, "prism-surface-syntax-v2"),
+    (DumpPhase::SyntaxDiagnostics, "prism-syntax-diagnostics-v1"),
 ];
 
 // The corpus-wide walk must actually visit a corpus; a floor guards against a
@@ -122,11 +123,11 @@ fn syntax_seam_goldens_hold() {
                 "{stem}.{phase}: embedded source must be the exact fixture bytes"
             );
             match phase {
-                "syntax-tokens" => assert_tokens_doc(&stem, &doc),
-                "surface-syntax" => assert_surface_doc(&stem, &doc),
+                DumpPhase::SyntaxTokens => assert_tokens_doc(&stem, &doc),
+                DumpPhase::SurfaceSyntax => assert_surface_doc(&stem, &doc),
                 // The positive corpus lexes and parses, so its diagnostics
                 // export is the committed empty list: acceptance as bytes.
-                "syntax-diagnostics" => assert!(
+                DumpPhase::SyntaxDiagnostics => assert!(
                     doc["diagnostics"].as_array().is_some_and(Vec::is_empty),
                     "{stem}.{phase}: a positive fixture must export no diagnostics"
                 ),
@@ -369,7 +370,7 @@ fn syntax_seam_refuses_malformed() {
     for (phase, _) in PHASES {
         // The diagnostics seam never refuses: a refusal IS its payload. The
         // malformed corpus must therefore export a non-empty diagnostic list.
-        if phase == "syntax-diagnostics" {
+        if phase == DumpPhase::SyntaxDiagnostics {
             let out = prism::dump(phase, &lex_bad)
                 .unwrap_or_else(|e| panic!("{phase}: must accept a lex error as payload: {e}"));
             assert!(
@@ -385,11 +386,11 @@ fn syntax_seam_refuses_malformed() {
     }
     let parse_bad = read(&dir.join("malformed_parse.pr"));
     assert!(
-        prism::dump("surface-syntax", &parse_bad).is_err(),
+        prism::dump(DumpPhase::SurfaceSyntax, &parse_bad).is_err(),
         "surface-syntax: must refuse a parse error"
     );
     assert!(
-        prism::dump("syntax-tokens", &parse_bad).is_ok(),
+        prism::dump(DumpPhase::SyntaxTokens, &parse_bad).is_ok(),
         "syntax-tokens: a parse-only error still lexes, so the token seam exports"
     );
 }
@@ -456,7 +457,7 @@ fn syntax_seam_corpus_properties() {
             let doc: Value =
                 serde_json::from_str(&out).unwrap_or_else(|e| panic!("{name} {phase}: JSON: {e}"));
             assert_eq!(doc["schema"], schema, "{name} {phase}: schema tag");
-            if phase == "syntax-tokens" {
+            if phase == DumpPhase::SyntaxTokens {
                 assert_token_cover(&format!("{name}"), &doc);
             }
             covered += 1;

@@ -27,7 +27,8 @@ mod vars;
 mod views;
 
 use defaults::fill_call;
-pub(in crate::syntax::desugar) use escape::{referenced_names, token_escapes};
+pub(crate) use escape::referenced_names;
+pub(in crate::syntax::desugar) use escape::token_escapes;
 use handlers::{rw_arms, rw_named, wrap_vals};
 use vars::rw_var_decl;
 use views::{check_views, pat_vars, rw_view_match};
@@ -671,6 +672,22 @@ fn rw_sugar(
             let access = sp(Expr::FieldAccess(Box::new(forced), field.clone()), span);
             rw(&access, env, cx)
         }
+        // `x :: xs` is the constructor call `Cons(x, xs)`. Zero-width callee: the
+        // call alone carries the operator's span, so it hovers as the list type.
+        Sugar::Cons(h, t) => {
+            let ctor = evar(names::CONS, Span::empty(span.start));
+            rw(
+                &call(ctor, vec![(**h).clone(), (**t).clone()], span),
+                env,
+                cx,
+            )
+        }
+        // `a </> b` is the `PathJoin` method call `path_append(a, b)`, with the
+        // same zero-width callee as `::`.
+        Sugar::PathJoin(a, b) => {
+            let f = evar(names::PATH_APPEND_METHOD, Span::empty(span.start));
+            rw(&call(f, vec![(**a).clone(), (**b).clone()], span), env, cx)
+        }
         // `[a..z]` / `[a, b..z]`: the prefix sets the start, and its first two
         // (when present) the step; the rest of the prefix is redundant.
         Sugar::Range(pre, hi) => {
@@ -857,6 +874,7 @@ impl CtlScan {
         match a {
             HandlerArm::Return(_, b)
             | HandlerArm::Op(_, _, _, b)
+            | HandlerArm::Finally(b)
             | HandlerArm::Sugar(
                 SugarArm::Once(_, _, b) | SugarArm::Never(_, _, b) | SugarArm::Val(_, b),
             ) => self.go(b),
@@ -930,7 +948,11 @@ impl CtlScan {
                     self.go(&a.body);
                 }
             }
-            Sugar::Default(a, b) | Sugar::Transact(a, b) | Sugar::Compose(_, a, b) => {
+            Sugar::Default(a, b)
+            | Sugar::Transact(a, b)
+            | Sugar::Compose(_, a, b)
+            | Sugar::Cons(a, b)
+            | Sugar::PathJoin(a, b) => {
                 self.go(a);
                 self.go(b);
             }

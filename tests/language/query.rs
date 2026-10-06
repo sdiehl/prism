@@ -4,6 +4,7 @@
 // clone detection by behavior) over the real stdlib, not a toy.
 
 use prism::resolve::default_roots;
+use prism::DumpPhase;
 use prism::{dump, query_on, with_prelude, Config};
 use std::path::Path;
 
@@ -69,7 +70,7 @@ fn uses_type_matches_whole_type_tokens() {
 #[test]
 fn dupes_finds_structural_clones() {
     let src = "fn fact(n) = if n <= 0 then 1 else n * fact(n - 1)\nfn main() = ()";
-    let out = dump("dupes", &with_prelude(src)).expect("dupes");
+    let out = dump(DumpPhase::Dupes, &with_prelude(src)).expect("dupes");
     assert!(
         out.lines()
             .any(|l| l.contains("fact") && l.contains("factorial")),

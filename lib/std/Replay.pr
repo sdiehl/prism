@@ -64,12 +64,12 @@ pub fn record(action) =
 -- that does not match the action surfaces as a recoverable failure.
 fn rep_int(k, t) =
   match t of
-    Cons(TInt(x), rest) => k(x)(rest)
+    TInt(x) :: rest => k(x)(rest)
     _ => fail()
 
 fn rep_str(k, t) =
   match t of
-    Cons(TStr(x), rest) => k(x)(rest)
+    TStr(x) :: rest => k(x)(rest)
     _ => fail()
 
 -- Decode a recorded hex frame back to the raw `Buf` the byte read resumes with; a
@@ -81,12 +81,12 @@ fn buf_of_hex(s) =
 
 fn rep_bytes(k, t) =
   match t of
-    Cons(TStr(s), rest) => k(buf_of_hex(s))(rest)
+    TStr(s) :: rest => k(buf_of_hex(s))(rest)
     _ => fail()
 
 fn rep_bool(k, t) =
   match t of
-    Cons(TBool(x), rest) => k(x)(rest)
+    TBool(x) :: rest => k(x)(rest)
     _ => fail()
 
 -- | Re-run `action` against a recorded `trace`, performing no real IO: each
@@ -200,18 +200,18 @@ fn persist_entry(path, e) = append_file(path, enc_entry(e))
 -- head of the wrong variant means the trace does not match the action, a `fail`.
 fn step_int(path, k, t, real) =
   match t of
-    Cons(TInt(x), rest) => k(x)(rest)
-    Cons(_, _) => fail()
-    Nil =>
+    TInt(x) :: rest => k(x)(rest)
+    _ :: _ => fail()
+    [] =>
       let x = real(())
       persist_entry(path, TInt(x))
       k(x)(Nil)
 
 fn step_str(path, k, t, real) =
   match t of
-    Cons(TStr(x), rest) => k(x)(rest)
-    Cons(_, _) => fail()
-    Nil =>
+    TStr(x) :: rest => k(x)(rest)
+    _ :: _ => fail()
+    [] =>
       let x = real(())
       persist_entry(path, TStr(x))
       k(x)(Nil)
@@ -220,18 +220,18 @@ fn step_str(path, k, t, real) =
 -- `Buf`, or perform the real read and append its hex once the trace is spent.
 fn step_bytes(path, k, t, real) =
   match t of
-    Cons(TStr(s), rest) => k(buf_of_hex(s))(rest)
-    Cons(_, _) => fail()
-    Nil =>
+    TStr(s) :: rest => k(buf_of_hex(s))(rest)
+    _ :: _ => fail()
+    [] =>
       let buf = real(())
       persist_entry(path, TStr(hex_encode(bytes_of_buf(buf))))
       k(buf)(Nil)
 
 fn step_bool(path, k, t, real) =
   match t of
-    Cons(TBool(x), rest) => k(x)(rest)
-    Cons(_, _) => fail()
-    Nil =>
+    TBool(x) :: rest => k(x)(rest)
+    _ :: _ => fail()
+    [] =>
       let x = real(())
       persist_entry(path, TBool(x))
       k(x)(Nil)
@@ -245,9 +245,9 @@ fn step_bool(path, k, t, real) =
 -- which the wire codec's atomic frame will later close.
 fn out_step(path, k, t, real) =
   match t of
-    Cons(TOut, rest) => k(())(rest)
-    Cons(_, _) => fail()
-    Nil =>
+    TOut :: rest => k(())(rest)
+    _ :: _ => fail()
+    [] =>
       persist_entry(path, TOut)
       real(())
       k(())(Nil)

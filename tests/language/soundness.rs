@@ -487,7 +487,9 @@ fn usage_row_on_non_function_type_is_rejected() {
 
 // `@ portable` on a closure parameter is a mobility contract: the closure may
 // capture only names that travel to a fresh runtime (a top-level function or
-// constructor, another `@ portable` parameter, or a portable-typed parameter).
+// constructor, another `@ portable` parameter, a portable-typed parameter, or a
+// `let` whose value is a literal, is ascribed a portable type, or is inferred to
+// have one).
 // Capturing a local closure, a `var` cell, or another nonportable value is
 // rejected (E6060). It composes with `@ once` in the teleport contract.
 
@@ -500,6 +502,56 @@ const PORTABLE_TOP_LEVEL_OK: &str = indoc! {r"
 const PORTABLE_SCALAR_PARAM_OK: &str = indoc! {r"
     fn run(f : (() -> Int) @ portable) : Int = f()
     fn mk(x : Int) : Int = run(\() -> x)
+    fn main() = println(mk(7))
+"};
+
+const PORTABLE_SCALAR_LET_OK: &str = indoc! {r"
+    fn run(f : (() -> Int) @ portable) : Int = f()
+    fn mk(x : Int) : Int =
+      let n = 5
+      let m = (x * 2 : Int)
+      run(\() -> n + m)
+    fn main() = println(mk(7))
+"};
+
+// No annotation in sight: the judgment reads the type inference gave the `let`.
+const PORTABLE_INFERRED_LET_OK: &str = indoc! {r"
+    type Point = Point(Int, Int)
+    fn run(f : (() -> Int) @ portable) : Int = f()
+    fn fst(p : Point) : Int =
+      match p of
+        Point(x, _) => x
+    fn first(t : (Int, Int)) : Int =
+      match t of
+        (a, _) => a
+    fn mk(x : Int) : Int =
+      let n = x + 1
+      let p = Point(n, x)
+      let pair = (n, x)
+      run(\() -> n + fst(p) + first(pair))
+    fn main() = println(mk(7))
+"};
+
+// The same inferred judgment refuses a `let` whose type carries a closure.
+const PORTABLE_CAPTURE_INFERRED_CLOSURE_LET: &str = indoc! {r"
+    type Box = Box(() -> Int)
+    fn run(f : (() -> Int) @ portable) : Int = f()
+    fn open(b : Box) : Int =
+      match b of
+        Box(g) => g()
+    fn mk(x : Int) : Int =
+      let b = Box(\() -> x)
+      run(\() -> open(b))
+    fn main() = println(mk(7))
+"};
+
+// A `let` that rebinds a portable parameter's name to a closure hides the
+// parameter, so the capture is the closure.
+const PORTABLE_CAPTURE_SHADOWING_LET: &str = indoc! {r"
+    fn run(f : (() -> Int) @ portable) : Int = f()
+    fn mk(x : Int) : Int =
+      let x = \(n) -> n
+      run(\() -> x(1))
     fn main() = println(mk(7))
 "};
 
@@ -532,6 +584,14 @@ fn portable_admits_code_refs_and_portable_data() {
         prism::check(&prism::with_prelude(PORTABLE_SCALAR_PARAM_OK)).is_ok(),
         "a `@ portable` closure capturing a scalar parameter must check"
     );
+    assert!(
+        prism::check(&prism::with_prelude(PORTABLE_SCALAR_LET_OK)).is_ok(),
+        "a `@ portable` closure capturing a literal or ascribed scalar `let` must check"
+    );
+    assert!(
+        prism::check(&prism::with_prelude(PORTABLE_INFERRED_LET_OK)).is_ok(),
+        "a `@ portable` closure capturing a `let` inferred portable must check"
+    );
 }
 
 #[test]
@@ -542,6 +602,20 @@ fn portable_rejects_nonportable_captures() {
     );
     assert_eq!(
         once_code(PORTABLE_CAPTURE_VAR, "portable captures a var cell"),
+        "E6060"
+    );
+    assert_eq!(
+        once_code(
+            PORTABLE_CAPTURE_SHADOWING_LET,
+            "portable captures a shadowing let"
+        ),
+        "E6060"
+    );
+    assert_eq!(
+        once_code(
+            PORTABLE_CAPTURE_INFERRED_CLOSURE_LET,
+            "portable captures a let inferred to hold a closure"
+        ),
         "E6060"
     );
 }

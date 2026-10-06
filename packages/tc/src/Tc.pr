@@ -204,8 +204,8 @@ pub fn zonk_v(ty : VTy) : VTy ! {Solve(Sol)} =
 
 fn zonk_each(tys : List(VTy)) : List(VTy) ! {Solve(Sol)} =
   match tys of
-    Nil => Nil
-    Cons(t, rest) => Cons(zonk_v(t), zonk_each(rest))
+    [] => Nil
+    t :: rest => Cons(zonk_v(t), zonk_each(rest))
 
 -- | Chase every solved metavariable in a computation type to its solution.
 pub fn zonk_c(c : CTy) : CTy ! {Solve(Sol)} =
@@ -231,8 +231,8 @@ pub fn zonk_row(r : Row) : Row ! {Solve(Sol)} =
 
 fn zonk_labels(ls : List(Label)) : List(Label) ! {Solve(Sol)} =
   match ls of
-    Nil => Nil
-    Cons(l, rest) =>
+    [] => Nil
+    l :: rest =>
       Cons(Label { name = l.name, args = zonk_each(l.args) }, zonk_labels(rest))
 
 -- Rigid substitution: finite maps from rigid identities to types and rows,
@@ -306,8 +306,8 @@ fn ct_mapped(
   acc : Map(Name(TyVarSpace), VTy)
 ) : Map(Name(TyVarSpace), VTy) =
   match entries of
-    Nil => acc
-    Cons((v, t), rest) =>
+    [] => acc
+    (v, t) :: rest =>
       ct_mapped(second, rest, map_insert(v, apply_v(second, t), acc))
 
 fn ct_keep(
@@ -316,8 +316,8 @@ fn ct_keep(
   acc : Map(Name(TyVarSpace), VTy)
 ) : Map(Name(TyVarSpace), VTy) =
   match entries of
-    Nil => acc
-    Cons((v, t), rest) =>
+    [] => acc
+    (v, t) :: rest =>
       match map_lookup(v, first.tys) of
         Some(_shadowed) => ct_keep(first, rest, acc)
         None => ct_keep(first, rest, map_insert(v, t, acc))
@@ -332,8 +332,8 @@ fn cr_mapped(
   acc : Map(Name(RowVarSpace), Row)
 ) : Map(Name(RowVarSpace), Row) =
   match entries of
-    Nil => acc
-    Cons((v, r), rest) =>
+    [] => acc
+    (v, r) :: rest =>
       cr_mapped(second, rest, map_insert(v, apply_row(second, r), acc))
 
 fn cr_keep(
@@ -342,8 +342,8 @@ fn cr_keep(
   acc : Map(Name(RowVarSpace), Row)
 ) : Map(Name(RowVarSpace), Row) =
   match entries of
-    Nil => acc
-    Cons((v, r), rest) =>
+    [] => acc
+    (v, r) :: rest =>
       match map_lookup(v, first.rows) of
         Some(_shadowed) => cr_keep(first, rest, acc)
         None => cr_keep(first, rest, map_insert(v, r, acc))
@@ -375,8 +375,8 @@ fn seen_ids(seen : Seen) : List(Int) = reverse(seen.order)
 
 fn elem_int(xs : List(Int), x : Int) : Bool =
   match xs of
-    Nil => false
-    Cons(y, rest) => y == x || elem_int(rest, x)
+    [] => false
+    y :: rest => y == x || elem_int(rest, x)
 
 -- Type and row classes share one solver id space, but their syntax positions
 -- determine their kinds. Keep separate first-seen indexes for kind-safe
@@ -430,8 +430,8 @@ fn fm_v(ty : VTy, acc : FreeMetas) : FreeMetas =
 
 fn fm_each(tys : List(VTy), acc : FreeMetas) : FreeMetas =
   match tys of
-    Nil => acc
-    Cons(t, rest) => fm_each(rest, fm_v(t, acc))
+    [] => acc
+    t :: rest => fm_each(rest, fm_v(t, acc))
 
 fn fm_c(c : CTy, acc : FreeMetas) : FreeMetas =
   match c of
@@ -446,8 +446,8 @@ fn fm_row(r : Row, acc : FreeMetas) : FreeMetas =
 
 fn fm_labels(ls : List(Label), acc : FreeMetas) : FreeMetas =
   match ls of
-    Nil => acc
-    Cons(l, rest) => fm_labels(rest, fm_each(l.args, acc))
+    [] => acc
+    l :: rest => fm_labels(rest, fm_each(l.args, acc))
 
 -- Row normalization: sort the labels by name, refuse duplicates. Two
 -- normalized rows are equal exactly when the rows are equivalent, which is
@@ -458,8 +458,8 @@ fn label_lt(a : Label, b : Label) : Bool = cmp(a.name, b.name) < 0
 
 fn insert_label(l : Label, ls : List(Label)) : List(Label) =
   match ls of
-    Nil => [l]
-    Cons(h, rest) =>
+    [] => [l]
+    h :: rest =>
       if label_lt(l, h) then
         Cons(l, ls)
       else
@@ -470,9 +470,9 @@ fn sort_labels(ls : List(Label)) : List(Label) =
 
 fn has_dup(ls : List(Label)) : Option(String) =
   match ls of
-    Nil => None
-    Cons(_l, Nil) => None
-    Cons(a, Cons(b, rest)) =>
+    [] => None
+    [_l] => None
+    a :: b :: rest =>
       if a.name == b.name then
         Some(a.name)
       else
@@ -504,8 +504,8 @@ fn occurs_v(a : Int, ty : VTy) : Bool ! {Solve(Sol)} =
 
 fn occurs_each(a : Int, tys : List(VTy)) : Bool ! {Solve(Sol)} =
   match tys of
-    Nil => false
-    Cons(t, rest) => occurs_v(a, t) || occurs_each(a, rest)
+    [] => false
+    t :: rest => occurs_v(a, t) || occurs_each(a, rest)
 
 fn occurs_c(a : Int, c : CTy) : Bool ! {Solve(Sol)} =
   match c of
@@ -514,8 +514,8 @@ fn occurs_c(a : Int, c : CTy) : Bool ! {Solve(Sol)} =
 
 fn occurs_labels(a : Int, ls : List(Label)) : Bool ! {Solve(Sol)} =
   match ls of
-    Nil => false
-    Cons(l, rest) => occurs_each(a, l.args) || occurs_labels(a, rest)
+    [] => false
+    l :: rest => occurs_each(a, l.args) || occurs_labels(a, rest)
 
 fn row_occurs(a : Int, r : Row) : Bool ! {Solve(Sol)} =
   let z = zonk_row(r)
@@ -573,8 +573,8 @@ fn unify_each(
   ys : List(VTy)
 ) : Unit ! {Solve(Sol), TcFail} =
   match (xs, ys) of
-    (Nil, Nil) => ()
-    (Cons(x, xrest), Cons(y, yrest)) =>
+    ([], []) => ()
+    (x :: xrest, y :: yrest) =>
       unify_v(x, y)
       unify_each(ctx_a, ctx_b, xrest, yrest)
     _ => mismatch(ctx_a, ctx_b)
@@ -600,9 +600,9 @@ fn split_common(
   ys : List(Label)
 ) : (List((Label, Label)), List(Label), List(Label)) =
   match (xs, ys) of
-    (Nil, _rest) => ([], [], ys)
-    (_rest, Nil) => ([], xs, [])
-    (Cons(x, xrest), Cons(y, yrest)) =>
+    ([], _rest) => ([], [], ys)
+    (_rest, []) => ([], xs, [])
+    (x :: xrest, y :: yrest) =>
       if x.name == y.name then
         match split_common(xrest, yrest) of
           (both, lx, ly) => (Cons((x, y), both), lx, ly)
@@ -615,8 +615,8 @@ fn split_common(
 
 fn unify_label_args(pairs : List((Label, Label))) : Unit ! {Solve(Sol), TcFail} =
   match pairs of
-    Nil => ()
-    Cons((x, y), rest) =>
+    [] => ()
+    (x, y) :: rest =>
       unify_each(VCon(x.name, x.args), VCon(y.name, y.args), x.args, y.args)
       unify_label_args(rest)
 
@@ -645,7 +645,7 @@ pub fn unify_row(left : Row, right : Row) : Unit ! {Solve(Sol), TcFail} =
       match (a.tail, b.tail) of
         (TailClosed, TailClosed) =>
           match (extra_a, extra_b) of
-            (Nil, Nil) => ()
+            ([], []) => ()
             _ => row_mismatch(a, b)
         (TailMeta(x), TailClosed) =>
           match extra_b2_closed(extra_a) of
@@ -658,7 +658,7 @@ pub fn unify_row(left : Row, right : Row) : Unit ! {Solve(Sol), TcFail} =
         (TailMeta(x), TailMeta(y)) =>
           if sv_equiv(x, y) then
             match (extra_a, extra_b) of
-              (Nil, Nil) => ()
+              ([], []) => ()
               _ => row_mismatch(a, b)
           else
             let middle = fresh_row_meta()
@@ -686,7 +686,7 @@ fn closed_extras(extra_a : List(Label), extra_b : List(Label)) : Bool =
 
 fn closed_only(extra : List(Label)) : Bool =
   match extra of
-    Nil => true
+    [] => true
     _ => false
 
 fn extra_b2_closed(extra : List(Label)) : Bool = closed_only(extra)
@@ -715,8 +715,8 @@ pub fn row_discharge(r : Row, handled : List(String)) : Row =
 
 fn handled_name(handled : List(String), name : String) : Bool =
   match handled of
-    Nil => false
-    Cons(h, rest) => h == name || handled_name(rest, name)
+    [] => false
+    h :: rest => h == name || handled_name(rest, name)
 
 -- Row defaulting. A row metavariable that survives checking unconstrained
 -- stands for "nothing more is performed here", so its principal reading is the
@@ -822,8 +822,8 @@ pub fn generalize(
 
 fn root_ids(ids : List(Int)) : List(Int) ! {Solve(Sol)} =
   match ids of
-    Nil => []
-    Cons(id, rest) => Cons(sv_root(id), root_ids(rest))
+    [] => []
+    id :: rest => Cons(sv_root(id), root_ids(rest))
 
 -- The binders are minted in candidate order and the accumulator is reversed
 -- once at the end, which keeps the scheme's quantifier order stable.
@@ -835,8 +835,8 @@ fn gen_rows(
   body : VTy
 ) : Scheme ! {Solve(Sol), Fresh} =
   match metas of
-    Nil => gen_tys(ty_metas, [], reverse(binders), body)
-    Cons(m, rest) =>
+    [] => gen_tys(ty_metas, [], reverse(binders), body)
+    m :: rest =>
       let binder = fresh_binder("r")
       let solution = Row { labels = [], tail = TailVar(bound_name(binder)) }
       sv_assign(m, RowSolved(solution))
@@ -850,9 +850,9 @@ fn gen_tys(
   body : VTy
 ) : Scheme ! {Solve(Sol), Fresh} =
   match metas of
-    Nil =>
+    [] =>
       Scheme { tyvars = reverse(binders), rowvars = row_binders, body = body }
-    Cons(m, rest) =>
+    m :: rest =>
       let binder = fresh_binder("t")
       sv_assign(m, TySolved(VVar(bound_name(binder))))
       gen_tys(rest, Cons(binder, binders), row_binders, zonk_v(body))
@@ -868,8 +868,8 @@ fn inst_rows(
   body : VTy
 ) : VTy ! {Solve(Sol)} =
   match binders of
-    Nil => inst_tys(ty_binders, s, body)
-    Cons(b, rest) =>
+    [] => inst_tys(ty_binders, s, body)
+    b :: rest =>
       let r = row_open([], fresh_row_meta())
       inst_rows(rest, subst_row(s, bound_name(b), r), ty_binders, body)
 
@@ -879,8 +879,8 @@ fn inst_tys(
   body : VTy
 ) : VTy ! {Solve(Sol)} =
   match binders of
-    Nil => apply_v(s, body)
-    Cons(b, rest) =>
+    [] => apply_v(s, body)
+    b :: rest =>
       let m = fresh_ty_meta()
       inst_tys(rest, subst_ty(s, bound_name(b), m), body)
 
@@ -895,7 +895,7 @@ pub fn show_vty(ty : VTy) : String =
     VBool => "Bool"
     VUnit => "Unit"
     VString => "String"
-    VCon(name, Nil) => name
+    VCon(name, []) => name
     VCon(name, args) => "{name}({join_tys(args)})"
     VTuple(items) => "({join_tys(items)})"
     VThunk(c) => show_cty(c)
@@ -904,9 +904,9 @@ pub fn show_vty(ty : VTy) : String =
 
 fn join_tys(tys : List(VTy)) : String =
   match tys of
-    Nil => ""
-    Cons(t, Nil) => show_vty(t)
-    Cons(t, rest) => "{show_vty(t)}, {join_tys(rest)}"
+    [] => ""
+    [t] => show_vty(t)
+    t :: rest => "{show_vty(t)}, {join_tys(rest)}"
 
 -- | Render a computation type as its result against its row.
 pub fn show_cty(c : CTy) : String =
@@ -924,26 +924,26 @@ pub fn show_row(r : Row) : String =
 
 fn join_labels(ls : List(Label)) : String =
   match ls of
-    Nil => ""
-    Cons(l, Nil) => show_label(l)
-    Cons(l, rest) => "{show_label(l)}, {join_labels(rest)}"
+    [] => ""
+    [l] => show_label(l)
+    l :: rest => "{show_label(l)}, {join_labels(rest)}"
 
 fn show_label(l : Label) : String =
   match l.args of
-    Nil => l.name
+    [] => l.name
     args => "{l.name}({join_tys(args)})"
 
 -- | Render a scheme, quantifiers first.
 pub fn show_scheme(s : Scheme) : String =
   match s.tyvars of
-    Nil => show_vty(s.body)
+    [] => show_vty(s.body)
     vs => "forall {join_binders(vs)}. {show_vty(s.body)}"
 
 fn join_binders(bs : List(Binder(TyVarSpace))) : String =
   match bs of
-    Nil => ""
-    Cons(b, Nil) => "a{name_id(bound_name(b))}"
-    Cons(b, rest) => "a{name_id(bound_name(b))} {join_binders(rest)}"
+    [] => ""
+    [b] => "a{name_id(bound_name(b))}"
+    b :: rest => "a{name_id(bound_name(b))} {join_binders(rest)}"
 
 fn main() =
   match run_tc(\() -> demo_main()) of

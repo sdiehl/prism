@@ -8,8 +8,8 @@ type Tag = Tag(String) deriving (Show, Identifiable)
 
 fn print_all(xs : List(UserId)) =
   match xs of
-    Nil => ()
-    Cons(x, rest) =>
+    [] => ()
+    x :: rest =>
       println(show(x))
       print_all(rest)
 

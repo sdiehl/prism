@@ -6,8 +6,9 @@ tranche 2 closes the declared structural inventory and three direct-entry
 receipts while keeping exact depth and mutation work visibly pending.  It
 never upgrades incomplete evidence to a parity gate.
 
-`accept` is noisy and guarded.  It builds the Rust oracle from a clean detached
-worktree at the literal frozen commit, writes complete versioned dump bytes,
+`accept` is noisy and guarded.  It builds the Rust oracle from the frozen tree,
+exported by its content hash rather than resolved through a commit that a
+history squash can orphan, writes complete versioned dump bytes,
 then replays those bytes through one natively compiled handwritten-Prism
 harness.  The current worktree's parser is a differential subject only.
 """
@@ -30,7 +31,6 @@ from pathlib import Path
 from typing import Any
 
 
-ORACLE_COMMIT = "46886c1fa7064e4809020c1b788b3ee3531d6a63"
 ORACLE_TREE = "cd110efef00d124b955cb6648724887e8e5517f4"
 ACCEPT_ENV = "PRISM_ACCEPT_PARSER_COMPACTION"
 ROOT = Path(__file__).resolve().parents[1]
@@ -278,11 +278,13 @@ def run(
     cwd: Path = ROOT,
     check: bool = True,
     env: dict[str, str] | None = None,
+    input: bytes | None = None,
 ) -> subprocess.CompletedProcess[bytes]:
     result = subprocess.run(
         argv,
         cwd=cwd,
         check=False,
+        input=input,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         env=env,
@@ -482,7 +484,7 @@ def build_coverage(manifest: dict[str, Any], vertical: dict[str, Any]) -> dict[s
     uncovered = [row["id"] for row in entries if not row["curated_cases"]]
     return {
         "schema": SCHEMAS["coverage"],
-        "oracle_commit": ORACLE_COMMIT,
+        "oracle_tree": ORACLE_TREE,
         "corpus_version": manifest["corpus_version"],
         "scope": "declared Type/Pattern/narrow-vertical structural inventory only",
         "semantic_matrix_complete": False,
@@ -516,7 +518,7 @@ def mutation_document(manifest: dict[str, Any]) -> dict[str, Any]:
     }
     return {
         "schema": SCHEMAS["mutations"],
-        "oracle_commit": ORACLE_COMMIT,
+        "oracle_tree": ORACLE_TREE,
         "corpus_version": manifest["corpus_version"],
         "status": "reviewed-local-micro-sample-full-oracle-execution-pending",
         "prng": "SplitMix64-v1",
@@ -876,7 +878,7 @@ def mutation_schedule_preview(manifest: dict[str, Any]) -> dict[str, Any]:
         )
     return {
         "schema": "prism-parser-compaction-mutation-plan-preview-v1",
-        "oracle_commit": ORACLE_COMMIT,
+        "oracle_tree": ORACLE_TREE,
         "corpus_version": manifest["corpus_version"],
         "status": "preview-only-not-oracled",
         "lanes": lane_rows,
@@ -941,7 +943,7 @@ def validate_mutation_sample(manifest: dict[str, Any]) -> None:
     sample = load_json(MUTATION_SAMPLE)
     if sample.get("schema") != SCHEMAS["mutation_sample"]:
         fail("mutation sample schema drift")
-    if sample.get("oracle_commit") != ORACLE_COMMIT:
+    if sample.get("oracle_tree") != ORACLE_TREE:
         fail("mutation sample oracle drift")
     if (
         sample.get("status")
@@ -1402,7 +1404,7 @@ def bounded_mutation_run(
             )
     return {
         "schema": "prism-parser-compaction-bounded-mutation-run-v1",
-        "oracle_commit": ORACLE_COMMIT,
+        "oracle_tree": ORACLE_TREE,
         "oracle_executable_path": str(oracle),
         "handwritten_harness_path": str(harness),
         "draw_cap_per_mutator": draw_cap,
@@ -1518,7 +1520,7 @@ def depth_schedule_preview(
         )
     return {
         "schema": "prism-parser-compaction-depth-plan-preview-v1",
-        "oracle_commit": ORACLE_COMMIT,
+        "oracle_tree": ORACLE_TREE,
         "corpus_version": manifest["corpus_version"],
         "declared_axis_count": len(DEPTH_AXES),
         "status": "generators-implemented-boundaries-unmeasured",
@@ -1651,7 +1653,7 @@ def calibrate_depth_axis(
         above_result = probe(above)
         return {
             "schema": "prism-parser-compaction-depth-calibration-v1",
-            "oracle_commit": ORACLE_COMMIT,
+            "oracle_tree": ORACLE_TREE,
             "axis": axis,
             "budget": 2048,
             "entry": "parse_program",
@@ -1850,7 +1852,7 @@ def run_depth_axis_receipts(
             rows.append(
                 {
                     "schema": "prism-parser-compaction-depth-receipt-v1",
-                    "oracle_commit": ORACLE_COMMIT,
+                    "oracle_tree": ORACLE_TREE,
                     "axis": axis,
                     "side": side,
                     "entry": "parse_program",
@@ -1886,7 +1888,7 @@ def materialize_depth_receipts(compiler: Path, harness: Path) -> dict[str, Any]:
             )
     index = {
         "schema": "prism-parser-compaction-depth-index-v1",
-        "oracle_commit": ORACLE_COMMIT,
+        "oracle_tree": ORACLE_TREE,
         "depth_budget": 2048,
         "stack_kib": FIXED_STACK_KIB,
         "axis_count": len(DEPTH_AXES),
@@ -1903,16 +1905,16 @@ def materialize_depth_receipts(compiler: Path, harness: Path) -> dict[str, Any]:
     return index
 
 
-def validate_manifest(manifest: dict[str, Any], oracle: str) -> None:
+def validate_manifest(manifest: dict[str, Any]) -> None:
     if manifest.get("schema") != SCHEMAS["manifest"]:
         fail("manifest schema drift")
     oracle_row = manifest.get("oracle")
     if not isinstance(oracle_row, dict):
         fail("manifest oracle is missing")
-    if oracle != ORACLE_COMMIT or oracle_row.get("commit") != ORACLE_COMMIT:
-        fail(f"oracle must be the literal frozen commit {ORACLE_COMMIT}")
-    if oracle_row.get("tree") != ORACLE_TREE:
-        fail("oracle tree drift")
+    if oracle_row.get("tree") != ORACLE_TREE or "commit" in oracle_row:
+        fail(f"oracle must be the frozen tree {ORACLE_TREE}, named by content")
+    if not is_blake3(oracle_row.get("executable_blake3")):
+        fail("oracle executable digest missing")
     cases = manifest.get("cases")
     if not isinstance(cases, list) or not cases:
         fail("manifest has no cases")
@@ -1945,7 +1947,7 @@ def validate_status(
 ) -> None:
     if status.get("schema") != SCHEMAS["status"]:
         fail("handwritten status schema drift")
-    if status.get("oracle_commit") != ORACLE_COMMIT:
+    if status.get("oracle_tree") != ORACLE_TREE:
         fail("handwritten status oracle drift")
     provenance = status.get("subject_provenance")
     if not isinstance(provenance, dict):
@@ -2040,7 +2042,7 @@ def validate_entries(manifest: dict[str, Any]) -> None:
         receipt = load_json(ENTRIES / name)
         if receipt.get("schema") != "prism-parser-compaction-entry-receipt-v1":
             fail(f"{name}: schema drift")
-        if receipt.get("oracle_commit") != ORACLE_COMMIT:
+        if receipt.get("oracle_tree") != ORACLE_TREE:
             fail(f"{name}: oracle drift")
         if receipt.get("entry_id") != entry_id:
             fail(f"{name}: entry identity drift")
@@ -2078,13 +2080,13 @@ def validate_entries(manifest: dict[str, Any]) -> None:
             fail(f"{name}: value projection digest drift")
 
 
-def check_corpus(oracle: str, section: str) -> None:
+def check_corpus(section: str) -> None:
     manifest = load_json(MANIFEST)
     vertical = load_json(VERTICAL)
-    validate_manifest(manifest, oracle)
+    validate_manifest(manifest)
     if vertical.get("schema") != SCHEMAS["vertical"]:
         fail("vertical inventory schema drift")
-    if vertical.get("oracle_commit") != ORACLE_COMMIT:
+    if vertical.get("oracle_tree") != ORACLE_TREE:
         fail("vertical inventory oracle drift")
     for case in manifest["cases"]:
         source = validate_source(case)
@@ -2180,9 +2182,13 @@ def compile_handwritten_harness(compiler: Path, output: Path) -> Path:
 
 def compile_rust_entry_adapter(worktree: Path, output: Path) -> Path:
     project = worktree.parent / "entry-adapter"
+    shutil.rmtree(project, ignore_errors=True)
     source_dir = project / "src"
     source_dir.mkdir(parents=True)
+    # The project sits under this checkout's `target/`, so it must declare a
+    # workspace of its own or cargo claims it for the enclosing one.
     (project / "Cargo.toml").write_text(
+        "[workspace]\n\n"
         "[package]\n"
         'name = "parser-compaction-entry-adapter"\n'
         'version = "0.0.0"\n'
@@ -2245,7 +2251,7 @@ def entry_receipt(
     tokens = token_slice(case)
     return {
         "schema": "prism-parser-compaction-entry-receipt-v1",
-        "oracle_commit": ORACLE_COMMIT,
+        "oracle_tree": ORACLE_TREE,
         "corpus_version": corpus_version,
         "entry_id": entry_id,
         "visibility": visibility,
@@ -2505,7 +2511,7 @@ def replay_handwritten(
     mismatches = [row["case_id"] for row in rows if row["status"] != "exact"]
     return {
         "schema": SCHEMAS["status"],
-        "oracle_commit": ORACLE_COMMIT,
+        "oracle_tree": ORACLE_TREE,
         "corpus_version": manifest["corpus_version"],
         "subject": "recorded handwritten Prism parser executable",
         "subject_provenance": subject_provenance(compiler, harness_binary),
@@ -2520,105 +2526,107 @@ def replay_handwritten(
     }
 
 
-def accept_corpus(oracle: str, compiler_arg: str | None) -> None:
+def accept_corpus(compiler_arg: str | None) -> None:
     if os.environ.get(ACCEPT_ENV) != "1":
         fail(f"accept requires {ACCEPT_ENV}=1")
     manifest = load_json(MANIFEST)
     vertical = load_json(VERTICAL)
-    validate_manifest(manifest, oracle)
-    commit = run(["git", "rev-parse", f"{oracle}^{{commit}}"]).stdout.decode().strip()
-    tree = run(["git", "rev-parse", f"{oracle}^{{tree}}"]).stdout.decode().strip()
-    if commit != ORACLE_COMMIT or tree != ORACLE_TREE:
-        fail("resolved oracle identity differs from the frozen commit/tree")
+    validate_manifest(manifest)
+    if run(["git", "cat-file", "-t", ORACLE_TREE], check=False).stdout.strip() != b"tree":
+        fail(
+            f"frozen oracle tree {ORACLE_TREE} is not in this repository; "
+            "fetch an object store that holds it"
+        )
 
     rust_adapter = ROOT / "target/parser-compaction-entry-adapter"
-    with tempfile.TemporaryDirectory(prefix="prism-parser-oracle-") as temp_name:
-        worktree = Path(temp_name) / "worktree"
-        run(["git", "worktree", "add", "--detach", str(worktree), oracle])
-        try:
-            if run(["git", "status", "--porcelain"], cwd=worktree).stdout:
-                fail("detached oracle worktree is dirty before build")
-            run(["cargo", "build", "--locked", "--bin", "prism"], cwd=worktree)
-            if run(["git", "status", "--porcelain"], cwd=worktree).stdout:
-                fail("detached oracle worktree became dirty during build")
-            binary = worktree / "target/debug/prism"
-            if not binary.is_file():
-                fail("frozen oracle binary was not produced")
-            compile_rust_entry_adapter(worktree, rust_adapter)
-            rustc = run(["rustc", "-Vv"]).stdout.decode().strip()
-            cargo = run(["cargo", "-V"]).stdout.decode().strip()
-            manifest["oracle"].update(
-                {
-                    "tree": tree,
-                    "executable_blake3": blake3_bytes(binary.read_bytes()),
-                    "build_command": "cargo build --locked --bin prism",
-                    "toolchain": {"rustc": rustc, "cargo": cargo},
-                }
+    # A fixed export path, not a temporary one: the build embeds its own
+    # location, and a path that moved per run would move the executable digest
+    # the manifest records as the oracle's identity.
+    worktree = ROOT / "target/parser-compaction-oracle/tree"
+    shutil.rmtree(worktree, ignore_errors=True)
+    worktree.mkdir(parents=True)
+    archive = run(["git", "archive", "--format=tar", ORACLE_TREE]).stdout
+    run(["tar", "-x", "-C", str(worktree)], input=archive)
+    build_target = worktree.parent / "target"
+    run(
+        ["cargo", "build", "--locked", "--bin", "prism"],
+        cwd=worktree,
+        env={**os.environ, "CARGO_TARGET_DIR": str(build_target)},
+    )
+    binary = build_target / "debug/prism"
+    if not binary.is_file():
+        fail("frozen oracle binary was not produced")
+    compile_rust_entry_adapter(worktree, rust_adapter)
+    rustc = run(["rustc", "-Vv"]).stdout.decode().strip()
+    cargo = run(["cargo", "-V"]).stdout.decode().strip()
+    manifest["oracle"].update(
+        {
+            "tree": ORACLE_TREE,
+            "executable_blake3": blake3_bytes(binary.read_bytes()),
+            "build_command": "cargo build --locked --bin prism",
+            "toolchain": {"rustc": rustc, "cargo": cargo},
+        }
+    )
+    for case in manifest["cases"]:
+        source_path = CORPUS / case["source"]
+        if isinstance(case.get("artifacts"), dict):
+            # Existing oracle rows are immutable history. Revalidate
+            # their complete bytes against the current manifest and
+            # leave both files untouched.
+            source = validate_source(case)
+            result_path, tokens_path = artifact_paths(case)
+            validate_artifact(
+                case, tokens_path, SCHEMAS["tokens"], source
             )
-            for case in manifest["cases"]:
-                source_path = CORPUS / case["source"]
-                if isinstance(case.get("artifacts"), dict):
-                    # Existing oracle rows are immutable history. Revalidate
-                    # their complete bytes against the current manifest and
-                    # leave both files untouched.
-                    source = validate_source(case)
-                    result_path, tokens_path = artifact_paths(case)
-                    validate_artifact(
-                        case, tokens_path, SCHEMAS["tokens"], source
-                    )
-                    result_kind = case["artifacts"]["result_kind"]
-                    schema = (
-                        SCHEMAS["surface"]
-                        if result_kind == "surface"
-                        else SCHEMAS["diagnostics"]
-                    )
-                    validate_artifact(case, result_path, schema, source)
-                    continue
-                source = source_path.read_bytes()
-                fragment = case["fragment"]
-                text = source.decode("utf-8")
-                if text.count(fragment) != 1:
-                    fail(f"{case['id']}: fragment must occur exactly once")
-                character_start = text.index(fragment)
-                lo = len(text[:character_start].encode())
-                case["fragment_span"] = [lo, lo + len(fragment.encode())]
-                tokens_bytes = dump_phase(binary, "syntax-tokens", source_path)
-                tokens_doc = json.loads(tokens_bytes)
-                case["source_blake3"] = tokens_doc["source"]["digest"]
-                token_rel = f"oracle/{case['id']}.syntax-tokens.json"
-                token_path = CORPUS / token_rel
-                token_path.parent.mkdir(parents=True, exist_ok=True)
-                token_path.write_bytes(tokens_bytes)
+            result_kind = case["artifacts"]["result_kind"]
+            schema = (
+                SCHEMAS["surface"]
+                if result_kind == "surface"
+                else SCHEMAS["diagnostics"]
+            )
+            validate_artifact(case, result_path, schema, source)
+            continue
+        source = source_path.read_bytes()
+        fragment = case["fragment"]
+        text = source.decode("utf-8")
+        if text.count(fragment) != 1:
+            fail(f"{case['id']}: fragment must occur exactly once")
+        character_start = text.index(fragment)
+        lo = len(text[:character_start].encode())
+        case["fragment_span"] = [lo, lo + len(fragment.encode())]
+        tokens_bytes = dump_phase(binary, "syntax-tokens", source_path)
+        tokens_doc = json.loads(tokens_bytes)
+        case["source_blake3"] = tokens_doc["source"]["digest"]
+        token_rel = f"oracle/{case['id']}.syntax-tokens.json"
+        token_path = CORPUS / token_rel
+        token_path.parent.mkdir(parents=True, exist_ok=True)
+        token_path.write_bytes(tokens_bytes)
 
-                surface = run(
-                    [str(binary), "dump", "surface-syntax", str(source_path)],
-                    cwd=worktree,
-                    check=False,
-                )
-                if surface.returncode == 0:
-                    result_kind = "surface"
-                    suffix = "surface-syntax"
-                    result_bytes = surface.stdout.rstrip(b"\n") + b"\n"
-                else:
-                    result_kind = "diagnostics"
-                    suffix = "syntax-diagnostics"
-                    result_bytes = dump_phase(
-                        binary, "syntax-diagnostics", source_path
-                    )
-                    doc = json.loads(result_bytes)
-                    if len(doc.get("diagnostics", [])) != 1:
-                        fail(f"{case['id']}: malformed case needs one diagnostic")
-                result_rel = f"oracle/{case['id']}.{suffix}.json"
-                (CORPUS / result_rel).write_bytes(result_bytes)
-                case["artifacts"] = {
-                    "result_kind": result_kind,
-                    "result": result_rel,
-                    "tokens": token_rel,
-                }
-        finally:
-            # `git worktree remove` is scoped to the exact temporary worktree
-            # created above and leaves Git's administrative records clean.
-            run(["git", "worktree", "remove", "--force", str(worktree)], check=False)
+        surface = run(
+            [str(binary), "dump", "surface-syntax", str(source_path)],
+            cwd=worktree,
+            check=False,
+        )
+        if surface.returncode == 0:
+            result_kind = "surface"
+            suffix = "surface-syntax"
+            result_bytes = surface.stdout.rstrip(b"\n") + b"\n"
+        else:
+            result_kind = "diagnostics"
+            suffix = "syntax-diagnostics"
+            result_bytes = dump_phase(
+                binary, "syntax-diagnostics", source_path
+            )
+            doc = json.loads(result_bytes)
+            if len(doc.get("diagnostics", [])) != 1:
+                fail(f"{case['id']}: malformed case needs one diagnostic")
+        result_rel = f"oracle/{case['id']}.{suffix}.json"
+        (CORPUS / result_rel).write_bytes(result_bytes)
+        case["artifacts"] = {
+            "result_kind": result_kind,
+            "result": result_rel,
+            "tokens": token_rel,
+        }
 
     compiler = (
         Path(compiler_arg).resolve()
@@ -2643,21 +2651,20 @@ def accept_corpus(oracle: str, compiler_arg: str | None) -> None:
     write_json(COVERAGE, build_coverage(manifest, vertical))
     write_json(MUTATIONS, mutation_document(manifest))
     write_json(STATUS, replay_handwritten(manifest, compiler, harness_binary))
-    check_corpus(oracle, "all")
+    check_corpus("all")
     print(
         "parser-compaction accept: frozen Rust artifacts written from "
-        f"{ORACLE_COMMIT}; tranche remains gate_ready=false"
+        f"tree {ORACLE_TREE}; tranche remains gate_ready=false"
     )
 
 
 def replay_corpus(
-    oracle: str,
     compiler_arg: str | None,
     harness_arg: str | None,
     recompile_handwritten: bool,
 ) -> None:
     manifest = load_json(MANIFEST)
-    validate_manifest(manifest, oracle)
+    validate_manifest(manifest)
     compiler = (
         Path(compiler_arg).resolve()
         if compiler_arg
@@ -2688,7 +2695,7 @@ def replay_corpus(
         STATUS,
         replay_handwritten(manifest, compiler, harness_binary),
     )
-    check_corpus(oracle, "all")
+    check_corpus("all")
     print("parser-compaction replay: handwritten status and provenance refreshed")
 
 
@@ -2706,7 +2713,6 @@ def main() -> int:
             "tranche3-mutate-bounded",
         ),
     )
-    parser.add_argument("--oracle", required=True)
     parser.add_argument(
         "--section",
         choices=("all", "corpus", "coverage", "mutations", "entries", "vertical", "depth"),
@@ -2737,17 +2743,16 @@ def main() -> int:
     args = parser.parse_args()
     try:
         if args.command == "accept":
-            accept_corpus(args.oracle, args.handwritten_compiler)
+            accept_corpus(args.handwritten_compiler)
         elif args.command == "replay":
             replay_corpus(
-                args.oracle,
                 args.handwritten_compiler,
                 args.handwritten_harness,
                 args.recompile_handwritten,
             )
         elif args.command == "tranche3-plan":
             manifest = load_json(MANIFEST)
-            validate_manifest(manifest, args.oracle)
+            validate_manifest(manifest)
             state, first = splitmix64_next(0)
             _, second = splitmix64_next(state)
             if (first, second) != (
@@ -2767,7 +2772,7 @@ def main() -> int:
                 fail(f"depth probe compiler {probe_compiler} is missing")
             preview = {
                 "schema": "prism-parser-compaction-tranche3-plan-preview-v1",
-                "oracle_commit": ORACLE_COMMIT,
+                "oracle_tree": ORACLE_TREE,
                 "corpus_version": manifest["corpus_version"],
                 "depth": depth_schedule_preview(manifest, probe_compiler),
                 "mutations": mutation_preview,
@@ -2781,7 +2786,7 @@ def main() -> int:
             print(json.dumps(preview, indent=2, ensure_ascii=False))
         elif args.command == "tranche3-depth-calibrate":
             manifest = load_json(MANIFEST)
-            validate_manifest(manifest, args.oracle)
+            validate_manifest(manifest)
             if args.depth_axis is None:
                 fail("tranche3-depth-calibrate requires --depth-axis")
             compiler = (
@@ -2828,7 +2833,7 @@ def main() -> int:
             print(json.dumps(materialize_depth_receipts(compiler, harness), indent=2))
         elif args.command == "tranche3-mutate-bounded":
             manifest = load_json(MANIFEST)
-            validate_manifest(manifest, args.oracle)
+            validate_manifest(manifest)
             oracle = (
                 Path(args.mutation_oracle_compiler).resolve()
                 if args.mutation_oracle_compiler
@@ -2857,7 +2862,7 @@ def main() -> int:
                 write_json(Path(args.mutation_receipt), mutation_receipt)
             print(json.dumps(mutation_receipt, indent=2, ensure_ascii=False))
         else:
-            check_corpus(args.oracle, args.section)
+            check_corpus(args.section)
     except (OSError, RuntimeError, KeyError, TypeError, ValueError) as error:
         print(f"parser-compaction corpus: {error}", file=sys.stderr)
         return 1

@@ -290,6 +290,7 @@ fn rung_data(sd: &StableDecl, idx: usize, r: &RungInfo, derives: &[String]) -> D
         name: name.clone(),
         args: r.fields.iter().map(|(_, t)| t.clone()).collect(),
         fields: Some(r.fields.clone()),
+        span: Span::default(),
     };
     DataDecl {
         name,

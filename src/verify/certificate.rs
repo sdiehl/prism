@@ -17,10 +17,11 @@
 
 use crate::store::codec::{put_str, put_uvarint, Reader};
 use crate::store::CodecError;
+use prism_common::format::FormatTag;
 
 /// The schema tag; the single home for this string, written first into every
 /// frame so the digest is domain-separated by construction.
-pub(crate) const SCHEMA: &str = "prism-smt-certificate-v1";
+pub(crate) const SCHEMA: FormatTag = FormatTag::new("prism-smt-certificate-v1");
 
 // The completeness vocabulary, pinned as frozen varint discriminants.
 const COMPLETE: u64 = 0;
@@ -156,7 +157,7 @@ impl SmtCertificate {
     /// The canonical frame. The bytes are the identity.
     pub(crate) fn encode(&self) -> Vec<u8> {
         let mut out = Vec::new();
-        put_str(&mut out, SCHEMA);
+        put_str(&mut out, SCHEMA.as_str());
         put_str(&mut out, &self.subject);
         put_uvarint(&mut out, len64(self.obligations.len()));
         for ob in &self.obligations {
@@ -181,7 +182,7 @@ impl SmtCertificate {
     /// oversized field, an over-count, or trailing bytes.
     pub(crate) fn decode(bytes: &[u8]) -> Result<Self, CodecError> {
         let mut r = Reader::new(bytes);
-        if r.string()? != SCHEMA {
+        if SCHEMA.expect(&r.string()?).is_err() {
             return Err(CodecError::Scheme);
         }
         let subject = r.string()?;

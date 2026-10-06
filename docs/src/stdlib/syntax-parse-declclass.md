@@ -6,6 +6,20 @@ Effects, classes, instances, canonical designations, and the shared `alias` decl
 
 These declarations share two pieces of grammar that do not belong in the top-level dispatcher: `given` constraints and member lists.  Effect, class, and instance members are layout-delimited; a real brace is recognized as the retired form and receives the same directed rewrite as the bootstrap parser. Instance methods are parsed here as complete function declarations so this module does not depend on private helpers in `Syntax.Parse.Decl`.
 
+## Types
+
+### `DeclClaims`
+
+```prism,def,h-7bcb863ee188ecb5d359e625e828af91ebf32805e2d248c59bf45c16fe0a4cc7
+type DeclClaims = DeclClaims {
+  no_alloc: Bool,
+  bounded_stack: Bool,
+  linear: Bool
+} deriving (Eq, Show)
+```
+
+The declaration claims a `fn` return annotation may carry at its root, lifted off the type at parse. Each flag is one claim, and they compose.
+
 ## Functions and Values
 
 ### `parse_given_clause`
@@ -18,7 +32,7 @@ Parse an optional `given Class(Type), ...` clause.  This is public because ordin
 
 ### `parse_effect_item`
 
-```prism,sig,h-749860c4af295e0fb1033c40ed8ed2ab1c12d4bfef95d49a017c6f76cd3e41ac
+```prism,sig,h-e712c7cfb3ea27beb5eedffbb68fb93deb73aedd5aaa453e822eb819e3e24eb2
 parse_effect_item : (Syntax.Cursor.Cursor, Int, Option(String)) -> Syntax.Parse.Support.Parsed(Syntax.Ast.Item)
 ```
 
@@ -34,7 +48,7 @@ Parse the shared `alias` family. A brace RHS constructs an effect alias; every o
 
 ### `parse_class_item`
 
-```prism,sig,h-0827a313490b46131a5083077cdb60d6a7051c8c09797e35934d302826faaa79
+```prism,sig,h-41ea66acecf46bc63cce79acf4dc0b59299f20afb5355ff3c10590f97d8dcd40
 parse_class_item : (Syntax.Cursor.Cursor, Int, Option(String)) -> Syntax.Parse.Support.Parsed(Syntax.Ast.Item)
 ```
 
@@ -42,11 +56,27 @@ Parse a class declaration, including marker classes without a body and layout bo
 
 ### `parse_instance_item`
 
-```prism,sig,h-a794a9971ccd98cf0e23648dbcaac9691899822cfb5bb614210bc5b6ffd9369c
+```prism,sig,h-79ea79eec483c88b17d029d95bbe8a2e658ccfa5efd50253e0355a2f6adc4b9e
 parse_instance_item : (Syntax.Cursor.Cursor, Int, Option(String)) -> Syntax.Parse.Support.Parsed(Syntax.Ast.Item)
 ```
 
 Parse an instance declaration, including marker instances and layout bodies of complete function declarations. Visibility is accepted for the uniform dispatcher API; the phase-independent instance AST has no visibility field, matching the bootstrap export.
+
+### `no_claims`
+
+```prism,sig,h-e70d35a043671cc66b96ee01690ec7475537a1d53921adb353db19e365fa4e94
+no_claims : () -> Syntax.Parse.DeclClass.DeclClaims
+```
+
+A declaration that claims nothing.
+
+### `lift_decl_claims`
+
+```prism,sig,h-7abec3b8652351a3d53c63f4fe05d49522285edbfd9e9ff8239fa11c5f9b28c2
+lift_decl_claims : (Syntax.Ast.Ty) -> (Syntax.Ast.Ty, Syntax.Parse.DeclClass.DeclClaims)
+```
+
+Lift a root usage row made only of declaration claims (`@ noalloc`, `@ bounded_stack`, `@ linear`, or their composition) off a return type onto the claim flags. Any other row stays on the type, so the checker rejects it at its own span.
 
 ### `parse_canonical_item`
 

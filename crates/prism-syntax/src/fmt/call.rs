@@ -187,18 +187,23 @@ pub(super) fn call_shape<'a>(f: &'a S<Expr>, args: &'a [S<Expr>]) -> CallShape<'
     CallShape::Plain(f, args)
 }
 
-// A dot receiver must stay postfix-tight. Anything looser is parenthesized.
+// A postfix receiver (of `.f`, `.f(..)`, `[i]`, or a call) must stay
+// postfix-tight. Anything looser is parenthesized: unary minus included, since
+// `-a.f` is `-(a.f)`.
 pub(super) const fn dot_recv_parens(e: &Expr) -> bool {
     low_prec_operand(e)
         || matches!(
             e,
-            Expr::Bin(..) | Expr::Handle(..) | Expr::Sugar(Sugar::Assign(..))
+            Expr::Bin(..)
+                | Expr::Neg(..)
+                | Expr::Handle(..)
+                | Expr::Sugar(Sugar::Assign(..) | Sugar::Cons(..) | Sugar::PathJoin(..))
         )
 }
 
 // `(b.f)(1)` calls the field closure. Bare `b.f(1)` reparses as UFCS f(b, 1).
 pub(super) const fn callee_parens(e: &Expr) -> bool {
-    low_prec_operand(e) || matches!(e, Expr::Handle(..) | Expr::FieldAccess(..))
+    dot_recv_parens(e) || matches!(e, Expr::FieldAccess(..))
 }
 
 // Wrap an already-rendered operand in parens when the surrounding precedence

@@ -8,7 +8,10 @@ use std::time::{Duration, Instant};
 
 use crate::error::Error;
 use crate::lineage::FactOutcome;
-use prism_native::rt::{cc, cc_flags, write_libm_archive, write_runtime_for, RuntimeProfile};
+use prism_native::keep_failed;
+use prism_native::rt::{
+    cc, cc_flags, llvm_major, write_libm_archive, write_runtime_for, RuntimeProfile,
+};
 
 use super::cache::NativeArtifactCache;
 use super::scheduler::QueryScheduler;
@@ -217,7 +220,7 @@ fn compile_object(
         })?;
     let elapsed = started.elapsed();
     if !output.status.success() {
-        return Err(ir_failure(cc, source, &output.stderr));
+        return Err(cc_failure(cc, source, &output.stderr));
     }
     if !output.stderr.is_empty() {
         eprint!("{}", String::from_utf8_lossy(&output.stderr));
@@ -505,19 +508,38 @@ pub(super) fn cc_link_many(
         }
         Ok(stats)
     } else {
-        Err(ir_failure(cc, first_ir, &cc_out.stderr))
+        Err(cc_failure(cc, first_ir, &cc_out.stderr))
+    }
+}
+
+// The C compiler rejected IR the backend emitted. The usual cause is a clang
+// from an older LLVM than the one linked in, whose bitcode reader does not know
+// an attribute the newer one writes, so the error names both versions when the
+// compiler's own banner does not match.
+fn cc_failure(cc: &str, ir: &Path, stderr: &[u8]) -> Error {
+    let llvm = llvm_major();
+    let banner = probe_line(cc, &[VERSION_FLAG]).0.unwrap_or_default();
+    match ir_failure(cc, ir, stderr) {
+        Error::CodegenBackend(message) if !banner.contains(&format!("version {llvm}.")) => {
+            Error::CodegenBackend(format!(
+                "{message}\nnote: `{cc}` is `{banner}` but prism emits LLVM {llvm} IR, which an \
+                 older LLVM cannot always read; set PRISM_CC to an LLVM {llvm} clang"
+            ))
+        }
+        other => other,
     }
 }
 
 pub(super) fn ir_failure(tool: &str, ir: &Path, stderr: &[u8]) -> Error {
     let ext = ir.extension().and_then(|e| e.to_str()).unwrap_or("ll");
-    let kept = env::temp_dir().join(format!("prism_failed.{ext}"));
-    let _ = fs::copy(ir, &kept);
+    let kept = match fs::read(ir) {
+        Ok(bytes) => keep_failed(ext, &bytes),
+        Err(error) => format!("not kept ({}: {error})", ir.display()),
+    };
     let text = String::from_utf8_lossy(stderr);
     let head: Vec<&str> = text.lines().take(8).collect();
     Error::CodegenBackend(format!(
-        "{tool} rejected generated IR, kept at {}:\n{}",
-        kept.display(),
+        "{tool} rejected generated IR, {kept}:\n{}",
         head.join("\n")
     ))
 }

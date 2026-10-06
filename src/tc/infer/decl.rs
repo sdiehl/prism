@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::mem;
 
+use super::super::context::collect_row_names;
 use super::defaulting::default_open_rows;
 use super::diagnostics::{forall_ty_binders, poly_recursion_hint};
 use crate::error::{ErrKind, TypeError};
@@ -32,6 +33,7 @@ struct DeclSeed {
     mu: u32,
     expected_row: EffRow,
     self_ty: Type,
+    signature_rows: BTreeSet<u32>,
 }
 
 // The scheme a sibling or self reference sees during SCC body inference: the
@@ -61,12 +63,14 @@ impl Tc<'_> {
         name: String,
         ty: Type,
         cs: Vec<(String, Type)>,
+        signature_rows: BTreeSet<u32>,
         f: impl FnOnce(&mut Self) -> R,
     ) -> R {
         let prev = self.cur_self.replace(SelfRef {
             name,
             self_ty: ty,
             constraints: cs,
+            signature_rows,
         });
         let r = f(self);
         self.cur_self = prev;
@@ -200,9 +204,8 @@ impl Tc<'_> {
     }
 
     // Generalize the node type and evaluation row together so metavariables use
-    // the same canonical naming pass, then render the row even when it is empty.
-    // This is the docs generator's canonical type printer plus the tooltip-only
-    // rule that `! {}` is never omitted.
+    // the same canonical naming pass. This is the docs generator's canonical
+    // type printer, with a row that says nothing about the expression omitted.
     fn report_tooltip(&self, ty: &Type, row: &EffRow) -> String {
         let pair = Type::Tuple(vec![self.apply(ty), Type::Row(self.apply_row(row))]);
         // Under the enclosing declaration's own naming where there is one, so a
@@ -218,10 +221,22 @@ impl Tc<'_> {
         match body {
             Type::Tuple(parts) if parts.len() == 2 => match &parts[1] {
                 // A pure expression reads as its type alone: the empty row is
-                // the default, so `! {}` would be noise on most spans.
+                // the default, so `! {}` would be noise on most spans. So is a
+                // label-free row whose tail no caller can see (`Int ! {| e0}`
+                // in a function whose type never mentions `e0`): it only says
+                // the expression fits any context. A tail tied to a parameter
+                // still prints, since it names the caller's effects.
                 Type::Row(row) => {
                     let shown_row = Self::show_report_row(row);
-                    if shown_row == "{}" {
+                    let silent_tail = match (row.labels().is_empty(), row.tail(), &self.decl_rows) {
+                        (true, EffRow::Var(v), Some(visible)) => {
+                            let mut in_value = BTreeSet::new();
+                            collect_row_names(&parts[0], &mut in_value);
+                            !visible.contains(v.as_str()) && !in_value.contains(v.as_str())
+                        }
+                        _ => false,
+                    };
+                    if shown_row == "{}" || silent_tail {
                         parts[0].show()
                     } else {
                         format!("{} ! {}", parts[0].show(), shown_row)
@@ -447,6 +462,7 @@ impl Tc<'_> {
             mu,
             expected_row,
             self_ty,
+            signature_rows: row_ex.into_values().collect(),
         })
     }
 
@@ -473,6 +489,7 @@ impl Tc<'_> {
             mu,
             expected_row: EffRow::Empty,
             self_ty: val,
+            signature_rows: BTreeSet::new(),
         })
     }
 
@@ -500,6 +517,7 @@ impl Tc<'_> {
                 msg: "handler scope escaped its declaration boundary".into(),
             });
         }
+        self.settle_residuals()?;
         self.wanted.clear();
         self.num_default.clear();
         self.neg_default.clear();
@@ -526,14 +544,17 @@ impl Tc<'_> {
             tail: seed.mu,
             prefix: Vec::new(),
             expected: seed.expected_row.clone(),
+            outer: self.enclosing_tails(),
         });
         let checked = self.in_row_scope(&seed.scope, |tc| {
             tc.with_self(
                 d.name.clone(),
                 seed.self_ty.clone(),
                 seed.cur.clone(),
+                seed.signature_rows.clone(),
                 |tc| {
                     tc.check(&env2, &d.body, &seed.ret)?;
+                    tc.settle_residuals()?;
                     tc.resolve_all()
                 },
             )
@@ -600,7 +621,9 @@ impl Tc<'_> {
         // context by solving that variable under row unification.
         let self_ty = default_open_rows(&self.apply(&seed.self_ty));
         let (g, renames) = self.generalize_decl_map(env, &self_ty);
+        self.decl_rows = Some(visible_rows(&g));
         self.flush_deferred(&renames);
+        self.decl_rows = None;
         if !d.constraints.is_empty() {
             // The scheme's quantified type variables; a constraint may mention only
             // these. A rigid signature variable that no parameter or result uses is
@@ -678,6 +701,7 @@ impl Tc<'_> {
                 tail: mu,
                 prefix: Vec::new(),
                 expected,
+                outer: self.enclosing_tails(),
             },
             |tc| {
                 let r = f(tc);
@@ -726,9 +750,11 @@ impl Tc<'_> {
         let t = default_open_rows(&self.apply(&ty));
         let (scheme, renames) = self.generalize_decl_map(env, &t);
         self.decl_renames = Some(renames);
+        self.decl_rows = Some(visible_rows(&scheme));
         self.flush_spans();
         self.flush_holes();
         self.decl_renames = None;
+        self.decl_rows = None;
         Ok((scheme, effs))
     }
 
@@ -777,7 +803,9 @@ impl Tc<'_> {
                     .iter()
                     .map(|(c, t)| (c.to_string(), t.clone()))
                     .collect();
-                tc.with_self(qual.clone(), expected.clone(), ctx, |tc| {
+                let mut signature_rows = BTreeSet::new();
+                expected.free_exist_row(&mut signature_rows);
+                tc.with_self(qual.clone(), expected.clone(), ctx, signature_rows, |tc| {
                     tc.check(&env2, &m.body, ret)
                         .and_then(|()| tc.resolve_all())
                 })
@@ -813,4 +841,25 @@ impl Tc<'_> {
         }
         Ok(())
     }
+}
+
+// The row variables a declaration's callers see: everything its parameters and
+// result mention. A function's own latent row is left out, since a tail that
+// appears only there says nothing beyond "fits any context".
+fn visible_rows(scheme: &Type) -> BTreeSet<String> {
+    let mut body = scheme;
+    while let Type::Forall(_, next) | Type::RowForall(_, next) = body {
+        body = next;
+    }
+    let mut rows = BTreeSet::new();
+    match body {
+        Type::Fun(params, _, result) => {
+            for p in params {
+                collect_row_names(p, &mut rows);
+            }
+            collect_row_names(result, &mut rows);
+        }
+        other => collect_row_names(other, &mut rows),
+    }
+    rows
 }

@@ -30,8 +30,8 @@ fn lookup_user(users : List(User), want : String) : Result(User, String) =
 
 fn top_score(u : User) : Result(Int, String) =
   match u.scores of
-    Nil => Err("{u.name} has no scores")
-    Cons(s, _) => Ok(s)
+    [] => Err("{u.name} has no scores")
+    s :: _ => Ok(s)
 
 -- Two failable steps, one `?` each: the first Err returns from `headline`
 -- immediately, so the happy path reads straight down.

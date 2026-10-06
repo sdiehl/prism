@@ -32,8 +32,8 @@ fn label(o : OrNull(Shade)) : String =
 -- never be spent on the cell-free nullable.
 fn heads(xs : List(Int)) : OrNull(Int) =
   match xs of
-    Cons(x, _) => This(x)
-    Nil => Null
+    x :: _ => This(x)
+    [] => Null
 
 fn main() =
   println(show(zero_or(pick(0), 99)))

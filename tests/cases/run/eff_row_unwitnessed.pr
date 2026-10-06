@@ -12,8 +12,8 @@ fn pure_b(x : Int) : Int ! {Log} = x * 2
 
 fn apply_all(fs : List((Int) -> Int ! {Log}), x : Int) : Int ! {Log} =
   match fs of
-    Nil => x
-    Cons(f, rest) => apply_all(rest, f(x))
+    [] => x
+    f :: rest => apply_all(rest, f(x))
 
 fn table() : List((Int) -> Int ! {Log}) = [pure_a, pure_b]
 

@@ -229,6 +229,7 @@ def matchPat : Pat → Value → Option (List (String × Value))
   | .var x, v => some [(x, v)]
   | .int n, .int m => if n = m then some [] else none
   | .bool b, .bool c => if b = c then some [] else none
+  | .float f, .float g => if f == g then some [] else none
   | .ctor name args, .ctor name' _ vs => if name = name' then matchPatL args vs else none
   | .tuple args, .tuple vs => matchPatL args vs
   | _, _ => none
@@ -241,13 +242,28 @@ where
         | _, _ => none
     | _, _ => none
 
+/-- Whether the model decides `p` against every value. No value form meets a
+    record pattern, so an arm carrying one is undecided: matching gets stuck
+    there instead of reading the gap as a non-match and trying the next arm. -/
+def Pat.decided : Pat → Bool
+  | .record .. => false
+  | .ctor _ args => decidedL args
+  | .tuple args => decidedL args
+  | _ => true
+where
+  decidedL : List Pat → Bool
+    | [] => true
+    | p :: ps => p.decided && decidedL ps
+
 @[prism_model]
 def matchArms (scrut : Value) : List (Pat × Comp) → Option Comp
   | [] => none
   | (p, c) :: rest =>
-    match matchPat p scrut with
-      | some binds => some (substMany binds c)
-      | none => matchArms scrut rest
+    if p.decided then
+      match matchPat p scrut with
+        | some binds => some (substMany binds c)
+        | none => matchArms scrut rest
+    else none
 
 inductive Step (Γ : Core) : Comp → Comp → Prop where
   | forceThunk {c : Comp} : Step Γ (.force (.thunk c)) c

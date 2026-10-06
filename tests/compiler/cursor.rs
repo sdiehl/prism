@@ -2,7 +2,7 @@
 // its expectation set is the one held at the furthest position a parse reached.
 //
 // Both are differential rather than declarative. The precedence gate never reads
-// a table: it dumps the live `prism-surface-syntax-v1` parse of a corpus of
+// a table: it dumps the live `prism-surface-syntax-v2` parse of a corpus of
 // expressions, hands the same source to the Prism-side Pratt driver, and renders
 // both trees fully parenthesized. Grouping is the only thing the two parsers can
 // disagree about on that corpus, and the parentheses record exactly that, so
@@ -18,6 +18,7 @@
 // every reported record, and a second test re-states the furthest-position
 // property directly, so a golden blessed with a wrong record still fails.
 
+use prism::DumpPhase;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -29,7 +30,7 @@ const PRATT_HARNESS: &str = "pratt_check.pr";
 const EXPECT_CORPUS: &str = "expectations.txt";
 const EXPECT_HARNESS: &str = "expect_check.pr";
 const EXPECT_GOLDEN: &str = "expectations.golden";
-const SURFACE_PHASE: &str = "surface-syntax";
+const SURFACE_PHASE: DumpPhase = DumpPhase::SurfaceSyntax;
 const ACCEPT: &str = "PRISM_ACCEPT_CURSOR_FIXTURES";
 
 // The precedence corpus is a corpus: a gate that agreed about four expressions

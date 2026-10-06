@@ -1,0 +1,19 @@
+effect Abort
+  never abort(Int) : Int
+
+fn guarded(n : Int) : Int ! {Abort, IO} =
+  handle if n > 0 then n else abort(n) with
+    return r => r * 2
+    finally => println("released")
+
+-- The catching clause prints, so the abandoned cleanup must wait for it.
+fn attempt(n : Int) : Int ! {IO} =
+  handle guarded(n) with
+    never abort(x) =>
+      println("caught")
+      x
+    return r => r
+
+fn main() : Unit ! {IO} =
+  println(attempt(3))
+  println(attempt(-1))

@@ -7,5 +7,5 @@ type Lst = Nil | Cons(Int, Lst)
 
 fip fn use_twice(xs) =
   match xs of
-    Nil => xs
-    Cons(h, t) => xs
+    [] => xs
+    h :: t => xs

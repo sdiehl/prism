@@ -93,8 +93,8 @@ fn prod(xs : List(Int)) : Int = foldl(\(acc, x) -> acc * x, 1, xs)
 -- of every extent to its right, so the last axis has stride 1.
 fn rm_strides_go(shape : List(Int)) : (Int, List(Int)) =
   match shape of
-    Nil => (1, Nil)
-    Cons(n, rest) =>
+    [] => (1, Nil)
+    n :: rest =>
       match rm_strides_go(rest) of
         (stride, steps) => (n * stride, Cons(stride, steps))
 
@@ -107,11 +107,11 @@ fn default_axes(n : Int) : List(String) = map(\(i) -> show_int(i), range(0, n))
 -- index and the strides.
 fn offset(idx : List(Int), st : List(Int)) : Int =
   match idx of
-    Nil => 0
-    Cons(i, ir) =>
+    [] => 0
+    i :: ir =>
       match st of
-        Nil => 0
-        Cons(s, sr) => i * s + offset(ir, sr)
+        [] => 0
+        s :: sr => i * s + offset(ir, sr)
 
 -- Validate a public multi-index while computing its offset. Rank must match
 -- exactly and every coordinate must lie within its own axis; checking only the
@@ -124,13 +124,13 @@ fn checked_offset(
   acc : Int
 ) : Option(Int) =
   match idx of
-    Nil =>
+    [] =>
       match (dims, steps) of
-        (Nil, Nil) => Some(acc)
+        ([], []) => Some(acc)
         _ => None
-    Cons(i, ir) =>
+    i :: ir =>
       match (dims, steps) of
-        (Cons(n, nr), Cons(s, sr)) =>
+        (n :: nr, s :: sr) =>
           if i >= 0 && i < n then
             checked_offset(ir, nr, sr, acc + i * s)
           else
@@ -139,8 +139,8 @@ fn checked_offset(
 
 fn valid_shape(shape : List(Int)) : Bool =
   match shape of
-    Nil => true
-    Cons(n, rest) => n >= 0 && valid_shape(rest)
+    [] => true
+    n :: rest => n >= 0 && valid_shape(rest)
 
 -- | A tensor of the given shape with every element set to `fill`, row-major.
 --
@@ -165,8 +165,8 @@ pub fn new(shape : List(Int), fill : Float) : Tensor =
 -- Write a list of values into a buffer starting at index `i`.
 fn fill_from(b : FloatBuf, i : Int, xs : List(Float)) : FloatBuf =
   match xs of
-    Nil => b
-    Cons(x, rest) => fill_from(tbuf_set(b, i, x), i + 1, rest)
+    [] => b
+    x :: rest => fill_from(tbuf_set(b, i, x), i + 1, rest)
 
 -- | A row-major tensor of the given shape filled from a flat list of values.
 -- Extra list elements past the shape's size are ignored; missing ones stay 0.
@@ -238,8 +238,8 @@ pub fn tensor_set(t : Tensor, idx : List(Int), v : Float) : Tensor =
 -- The position of a name in a list, or `fail()` if absent.
 fn index_of_go(k : Int, x : String, xs : List(String)) : Int =
   match xs of
-    Nil => fail()
-    Cons(y, rest) =>
+    [] => fail()
+    y :: rest =>
       if y == x then
         k
       else
@@ -666,9 +666,9 @@ fn mm_fill(
 -- ```
 pub fn matmul(a : Tensor, b : Tensor) : Tensor ! {Fail} =
   match shape(a) of
-    Cons(m, Cons(k, Nil)) =>
+    [m, k] =>
       match shape(b) of
-        Cons(k2, Cons(n, Nil)) =>
+        [k2, n] =>
           if k == k2 && is_contig(a) && is_contig(b) then
             contig_tensor(
                 Cons(m, Cons(n, Nil)),

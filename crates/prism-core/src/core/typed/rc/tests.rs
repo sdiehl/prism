@@ -101,6 +101,7 @@ fn surviving_handle_cannot_mint_rc_input_authority() {
             body: Box::new(body),
             return_binder: None,
             return_body: None,
+            finally_body: None,
             ops: TypedHandler::new(Vec::new()).unwrap(),
         },
     );

@@ -23,6 +23,8 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
+use prism_common::format::FormatTag;
+use prism_common::record::RecordError;
 use serde::{Deserialize, Serialize};
 
 use crate::names::{
@@ -148,7 +150,7 @@ pub struct FamilyLock {
 /// absent here is not checked, exactly as an unfrozen rung is not checked.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LockManifest {
-    pub format: String,
+    pub format: FormatTag,
     pub families: BTreeMap<String, FamilyLock>,
 }
 
@@ -174,9 +176,9 @@ pub struct Drift {
 impl LockManifest {
     /// An empty manifest: no family is locked.
     #[must_use]
-    pub fn empty() -> Self {
+    pub const fn empty() -> Self {
         Self {
-            format: STABLE_LOCK_MANIFEST_FORMAT.to_string(),
+            format: STABLE_LOCK_MANIFEST_FORMAT,
             families: BTreeMap::new(),
         }
     }
@@ -206,14 +208,13 @@ impl LockManifest {
     ///
     /// # Errors
     /// Fails on malformed JSON or an unrecognized `format` tag.
-    pub fn from_text(text: &str) -> Result<Self, String> {
-        let manifest: Self = serde_json::from_str(text).map_err(|e| e.to_string())?;
-        if manifest.format != STABLE_LOCK_MANIFEST_FORMAT {
-            return Err(format!(
-                "unsupported stable lock manifest format {:?}",
-                manifest.format
-            ));
-        }
+    pub fn from_text(text: &str) -> Result<Self, RecordError> {
+        let manifest: Self = RecordError::decode(text)?;
+        RecordError::expect_format(
+            "stable lock manifest",
+            &STABLE_LOCK_MANIFEST_FORMAT,
+            &manifest.format,
+        )?;
         Ok(manifest)
     }
 
@@ -403,11 +404,11 @@ mod tests {
     #[test]
     fn mode_is_not_part_of_the_compared_identity() {
         let committed = LockManifest {
-            format: STABLE_LOCK_MANIFEST_FORMAT.to_string(),
+            format: STABLE_LOCK_MANIFEST_FORMAT,
             families: BTreeMap::from([("Save".to_string(), family(edge(MODE_AUTO)))]),
         };
         let derived = LockManifest {
-            format: STABLE_LOCK_MANIFEST_FORMAT.to_string(),
+            format: STABLE_LOCK_MANIFEST_FORMAT,
             families: BTreeMap::from([("Save".to_string(), family(edge(MODE_MANUAL)))]),
         };
         assert_eq!(first_drift(&committed, &derived), None);

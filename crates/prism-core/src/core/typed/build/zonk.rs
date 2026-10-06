@@ -282,11 +282,13 @@ impl Solver {
                 body,
                 return_binder,
                 return_body,
+                finally_body,
                 ops,
             } => TypedCompKind::Handle {
                 body: Box::new(self.zonk_comp(*body)),
                 return_binder: return_binder.map(|binder| self.zonk_binder(&binder)),
                 return_body: return_body.map(|body| Box::new(self.zonk_comp(*body))),
+                finally_body: finally_body.map(|body| Box::new(self.zonk_comp(*body))),
                 ops: TypedHandler {
                     arms: ops
                         .arms

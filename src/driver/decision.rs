@@ -46,7 +46,8 @@ fn identity_row_label_of(input: &str) -> Option<&str> {
 }
 const DEPENDENCY_INPUT_PREFIX: &str = "dependency:";
 // The configuration context the module checker keys its artifact identity on.
-const MODULE_CHECK_CONTEXT: &str = "module-check";
+const MODULE_CHECK_CONTEXT: crate::driver::ArtifactBackend =
+    crate::driver::ArtifactBackend::ModuleCheck;
 
 fn dependency_input(name: &str) -> String {
     format!("{DEPENDENCY_INPUT_PREFIX}{name}")

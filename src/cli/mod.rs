@@ -19,7 +19,6 @@ use std::time::{Duration, Instant};
 use crate::driver::{stable_lock, CheckVerdictCache};
 use crate::error::Error;
 use crate::lineage::{BuildLineage, BuildLineageInput, BuildRequest};
-use crate::pkg::lock::Lock;
 use crate::project::{LOCKFILE as PRISM_LOCK, MANIFEST as PRISM_MANIFEST};
 use crate::store::disk::{resolve_store_path, Store};
 use crate::syntax::reflect::parse_unit;
@@ -185,24 +184,8 @@ pub fn resolve_input(arg: &Path, cfg: &crate::Config) -> Result<Resolved, CmdErr
         // A project build lands in `target/` at the package root (rustc-style),
         // keeping artifacts out of the source tree.
         let out = project.root.join("target").join(&project.name);
-        let lock =
-            read_lock(&project.root).map_err(|e| (e, full.clone(), file_name(&project.entry)))?;
-        let store_root = resolve_store_path(cfg.flags().store_path.as_deref());
-        let package_roots = crate::pkg::package_source_roots(
-            &lock,
-            &project.dependencies,
-            &store_root,
-            cfg.flags(),
-        )
-        .map_err(|e| (e, full.clone(), file_name(&project.entry)))?;
-        let std_root = crate::pkg::stdlib_source_root(&lock, &store_root)
+        let roots = crate::project::project_search_roots(&project, cfg.flags())
             .map_err(|e| (e, full.clone(), file_name(&project.entry)))?;
-        let roots = crate::project_roots_with_packages_and_std(
-            &project.src_dir,
-            &project.dep_src_dirs,
-            package_roots,
-            std_root,
-        );
         Ok((full, roots, file_name(&project.entry), out))
     } else {
         let src = read(arg).map_err(|e| (e, String::new(), file_name(arg)))?;
@@ -217,18 +200,6 @@ pub fn resolve_input(arg: &Path, cfg: &crate::Config) -> Result<Resolved, CmdErr
             file_name(arg),
             out,
         ))
-    }
-}
-
-fn read_lock(project_root: &Path) -> Result<Lock, Error> {
-    match fs::read_to_string(project_root.join(PRISM_LOCK)) {
-        Ok(text) => {
-            let lock = Lock::parse(&text)?;
-            lock.validate_current_scheme()?;
-            Ok(lock)
-        }
-        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Lock::default()),
-        Err(e) => Err(Error::Io(e)),
     }
 }
 
@@ -558,7 +529,9 @@ fn watch_snapshot(arg: &Path, cfg: &crate::Config) -> Result<String, CmdError> {
     watch_field(&mut hasher, WATCH_SNAPSHOT_SCHEMA);
     watch_field(
         &mut hasher,
-        cfg.artifact_identity_for("watch").fingerprint().as_bytes(),
+        cfg.artifact_identity_for(crate::driver::ArtifactBackend::Watch)
+            .fingerprint()
+            .as_bytes(),
     );
     for path in paths {
         watch_field(&mut hasher, path.as_os_str().as_encoded_bytes());
@@ -685,7 +658,7 @@ fn built_input_observed(
             source: &full,
             roots: &roots,
             cfg,
-            backend: crate::lineage::backend_name(mlir),
+            backend: crate::driver::ArtifactBackend::native(mlir),
             artifacts,
             cache: report.store,
             diagnostics: Vec::new(),
@@ -917,6 +890,10 @@ pub fn verify_cmd(
 // `prism dump PHASE FILE`: print one pipeline-phase artifact.
 pub fn dump_cmd(phase: &str, file: &Path, cfg: &crate::Config) -> CmdResult {
     let (full, roots, name, _) = resolve_input(file, cfg)?;
+    let phase = match phase.parse::<crate::DumpPhase>() {
+        Ok(phase) => phase,
+        Err(e) => return Err((Error::CodegenDump(e.to_string()), full, name)),
+    };
     let out = crate::dump_on(phase, &full, &roots, cfg).map_err(|e| (e, full, name))?;
     println!("{out}");
     Ok(())
@@ -1114,14 +1091,32 @@ entry = "src/main.pr"
     #[test]
     fn definition_hash_changes_reports_merkle_cone_by_name() {
         let previous = crate::core::Hashes::from([
-            ("callee".into(), "aaaaaaaaaaaaaaaa".into()),
-            ("caller".into(), "bbbbbbbbbbbbbbbb".into()),
-            ("removed".into(), "cccccccccccccccc".into()),
+            (
+                "callee".into(),
+                crate::core::Digest::parse("a".repeat(64)).unwrap(),
+            ),
+            (
+                "caller".into(),
+                crate::core::Digest::parse("b".repeat(64)).unwrap(),
+            ),
+            (
+                "removed".into(),
+                crate::core::Digest::parse("c".repeat(64)).unwrap(),
+            ),
         ]);
         let current = crate::core::Hashes::from([
-            ("callee".into(), "dddddddddddddddd".into()),
-            ("caller".into(), "eeeeeeeeeeeeeeee".into()),
-            ("added".into(), "ffffffffffffffff".into()),
+            (
+                "callee".into(),
+                crate::core::Digest::parse("d".repeat(64)).unwrap(),
+            ),
+            (
+                "caller".into(),
+                crate::core::Digest::parse("e".repeat(64)).unwrap(),
+            ),
+            (
+                "added".into(),
+                crate::core::Digest::parse("f".repeat(64)).unwrap(),
+            ),
         ]);
 
         assert_eq!(

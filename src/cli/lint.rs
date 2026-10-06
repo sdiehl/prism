@@ -6,23 +6,25 @@
 //! tab-separated line protocol. This module walks the targets, hosts the
 //! session, and renders the report.
 
+use crate::DumpPhase;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use prism_common::format::FormatTag;
 use serde::{Deserialize, Serialize};
 
 use super::{glob_pr, resolve_input, tool_package_source, CmdError, CmdResult};
 use crate::error::Error;
 use crate::{dump_on, interpret_io_on_with_args, with_prelude, Config, OptLevel, Root};
 
-const REPORT_SCHEMA: &str = "prism-lint-v1";
+const REPORT_SCHEMA: FormatTag = FormatTag::new("prism-lint-v1");
 const PROTOCOL_VERSION: &str = "1";
 const RECORD_HEADER: &str = "LINT";
 const RECORD_SUPPRESSED: &str = "SUPPRESSED";
 const RECORD_FINDING: &str = "FINDING";
 const RECORD_ERROR: &str = "ERROR";
-const SURFACE_PHASE: &str = "surface-syntax";
-const NAMESPACE_PHASE: &str = "namespace";
+const SURFACE_PHASE: DumpPhase = DumpPhase::SurfaceSyntax;
+const NAMESPACE_PHASE: DumpPhase = DumpPhase::Namespace;
 // The ambient namespace is dumped against a stub program whose own entry
 // point is not a known name.
 const NAMESPACE_PROBE: &str = "let main = 0\n";
@@ -71,7 +73,7 @@ struct Finding {
 
 #[derive(Serialize)]
 struct LintReport {
-    schema: &'static str,
+    schema: FormatTag,
     files: usize,
     suppressed: usize,
     findings: Vec<Finding>,
@@ -96,7 +98,7 @@ pub fn lint_cmd(paths: &[PathBuf], json: bool, advisory: bool, cfg: &Config) -> 
         &std_roots,
         cfg,
     )
-    .map_err(|e| (e, String::new(), NAMESPACE_PHASE.to_owned()))?;
+    .map_err(|e| (e, String::new(), NAMESPACE_PHASE.to_string()))?;
     let known = known_names(&namespace_text).map_err(|m| lint_error(m, ""))?;
 
     // Rust parses every target up front; the package only ever sees decoded

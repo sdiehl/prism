@@ -11,9 +11,7 @@ pub use prism_syntax::kind::Kind;
 // Wired-in nominal names. The prelude defines them and the compiler special-
 // cases them (list literals, `deriving`, built-in equality), so they go through
 // these constants rather than scattered string literals.
-pub const LIST: &str = "List";
-pub const CONS: &str = "Cons";
-pub const NIL: &str = "Nil";
+pub use prism_syntax::names::{CONS, LIST, NIL};
 // The optional type and its constructors. `deriving` walks through an optional
 // field the same way it walks through a list one, so the derivation needs the
 // three names; they live here with `List`/`Cons`/`Nil` rather than as literals at

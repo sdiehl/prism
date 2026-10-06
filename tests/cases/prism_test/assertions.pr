@@ -1,0 +1,22 @@
+import Test (..)
+
+test fn equal_passes() = expect_equal(4, 2 + 2)
+
+test fn equal_fails() = expect_equal([1, 2], [1, 3])
+
+test fn text_fails() =
+  println("before the assertion")
+  expect_text("a\nb", "a\nc")
+
+test fn expect_fails() = expect(1 > 2, "one is not above two")
+
+test fn fail_with_fails() = fail_with("custom reason")
+
+test fn bare_fail() = guard(false)
+
+-- test: skip(waiting on the network lane)
+test fn skipped() = fail_with("never runs")
+
+-- Selected by tag.
+-- test: tags(slow, net)
+test fn tagged() = expect(true, "fine")

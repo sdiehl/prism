@@ -24,12 +24,15 @@
 #include "prism_int.h"
 #include "prism_mem.h"
 
-/* One classification code per `MoveError` constructor in Teleport.pr. */
+/* One classification code per `MoveError` constructor in Teleport.pr.
+ * `BRACKETED` is never raised natively: a native binary seals nothing, so it
+ * owes no cleanup at a seal; the code is reserved so the tables stay one. */
 #define PRISM_MOVE_UNPORTABLE 1
 #define PRISM_MOVE_MALFORMED 2
 #define PRISM_MOVE_FOREIGN 3
 #define PRISM_MOVE_UNSUPPORTED 4
 #define PRISM_MOVE_UNCERTIFIED 5
+#define PRISM_MOVE_BRACKETED 6
 
 static long prism_move_err(long code) {
     long c = prism_int_of_long(code);

@@ -49,7 +49,7 @@ fn encode_member(core: &Core, name: &str) -> (Vec<u8>, String) {
     let bytes = encode_def(&AnonEntry {
         group: &members,
         target,
-        hash: hash.as_str(),
+        hash: &hash,
         deps: &hashes,
         meta: &BTreeMap::new(),
     });
@@ -61,7 +61,7 @@ fn encode_member(core: &Core, name: &str) -> (Vec<u8>, String) {
 // stored object carries.
 fn assert_roundtrip_bytes(bytes: &[u8], hash: &str) {
     let decoded = decode_def(bytes).expect("decode");
-    assert_eq!(decoded.contract, hash, "contract");
+    assert_eq!(decoded.contract.as_str(), hash, "contract");
     assert_eq!(
         decoded.rehash().as_deref(),
         Some(hash),
@@ -169,10 +169,7 @@ fn dependency_substitution_roundtrips() {
     let hashes = hash_program(&core, &BTreeMap::new());
     let (bytes, _) = encode_member(&core, "g");
     let decoded = decode_def(&bytes).unwrap();
-    assert_eq!(
-        decoded.dep_hashes,
-        vec![hashes[&sym("f")].clone().into_string()]
-    );
+    assert_eq!(decoded.dep_hashes, vec![hashes[&sym("f")].clone()]);
 }
 
 // Case arms, constructor patterns, and their binders round-trip (the de Bruijn
@@ -208,10 +205,34 @@ fn handler_roundtrips() {
         body: Box::new(Comp::Do(sym("ask"), vec![])),
         return_var: Some(sym("r")),
         return_body: Some(Box::new(Comp::Return(Value::Var(sym("r"))))),
+        finally_body: None,
         ops: CheckedHandler::new(vec![op]).unwrap(),
     };
     let core = Core {
         fns: vec![func("run_ask", &[], body)],
+    };
+    assert_roundtrip(&core, "run_ask");
+}
+
+// A cleanup clause round-trips beside a return clause and an operation, and its
+// body reads a variable bound outside the handler, never the return binder.
+#[test]
+fn handler_cleanup_clause_roundtrips() {
+    let op = HandleOp {
+        name: sym("ask"),
+        params: vec![],
+        resume: sym("k"),
+        body: Comp::Return(Value::Int(0)),
+    };
+    let body = Comp::Handle {
+        body: Box::new(Comp::Do(sym("ask"), vec![])),
+        return_var: Some(sym("r")),
+        return_body: Some(Box::new(Comp::Return(Value::Var(sym("r"))))),
+        finally_body: Some(Box::new(Comp::Return(Value::Var(sym("x"))))),
+        ops: CheckedHandler::new(vec![op]).unwrap(),
+    };
+    let core = Core {
+        fns: vec![func("run_ask", &["x"], body)],
     };
     assert_roundtrip(&core, "run_ask");
 }

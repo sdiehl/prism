@@ -513,7 +513,7 @@ pub fn is_lineage_sidecar(path: &Path) -> bool {
                 .and_then(serde_json::Value::as_str)
                 .map(str::to_owned)
         })
-        .is_some_and(|format| format == LINEAGE_GRAPH_FORMAT)
+        .is_some_and(|format| LINEAGE_GRAPH_FORMAT.expect(&format).is_ok())
 }
 
 // `lineage verify SIDECAR [--certify OUT]`: rehash the recorded artifacts. A world

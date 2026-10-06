@@ -1,6 +1,6 @@
 {
   "schema": "prism-parser-compaction-entry-receipt-v1",
-  "oracle_commit": "46886c1fa7064e4809020c1b788b3ee3531d6a63",
+  "oracle_tree": "cd110efef00d124b955cb6648724887e8e5517f4",
   "corpus_version": 2,
   "entry_id": "prism.parse_let_pattern",
   "visibility": "dead-public-edge",
@@ -110,6 +110,6 @@
   "subject": {
     "backend": "handwritten Prism",
     "harness_source_blake3": "5011fafe2da58c198d45b5168be436f88a7a8d831f5cf75830044890fc64ed51",
-    "harness_executable_blake3": "098628ebf5b68efc58e4e9d5a57ba5171e7b16d0efa1df571b40347bd4e1fd5a"
+    "harness_executable_blake3": "cd5d32bac4393e502f3d203c51a252856b3b1f14d494e27c8c302eec8d7724bb"
   }
 }

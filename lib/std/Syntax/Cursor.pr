@@ -63,13 +63,13 @@ pub fn span_at(pos : Int) : Span = Span { lo = pos, hi = pos }
 -- invented.
 pub fn span_cover(ss : List(Span)) : Option(Span) =
   match ss of
-    Nil => None
-    Cons(s, rest) => Some(cover_go(s, rest))
+    [] => None
+    s :: rest => Some(cover_go(s, rest))
 
 fn cover_go(acc : Span, ss : List(Span)) : Span =
   match ss of
-    Nil => acc
-    Cons(s, rest) => cover_go(span_join(acc, s), rest)
+    [] => acc
+    s :: rest => cover_go(span_join(acc, s), rest)
 
 -- -------------------------------------------------------------------------
 -- The cursor
@@ -172,8 +172,8 @@ pub fn end_of_input() : String = "end of input"
 
 fn has_name(xs : List(String), name : String) : Bool =
   match xs of
-    Nil => false
-    Cons(x, rest) =>
+    [] => false
+    x :: rest =>
       if x == name then
         true
       else
@@ -266,8 +266,8 @@ pub fn cursor_expected(c : Cursor) : List(String) = c.wanted
 -- Insert one name into a sorted, deduplicated list.
 fn ins_name(n : String, acc : List(String)) : List(String) =
   match acc of
-    Nil => [n]
-    Cons(h, t) =>
+    [] => [n]
+    h :: t =>
       if n < h then
         Cons(n, acc)
       elif n == h then
@@ -305,11 +305,11 @@ fn found_name(c : Cursor) : String =
 pub fn cursor_message(c : Cursor) : String =
   let found = found_name(c)
   match c.wanted of
-    Nil => "unexpected {found}"
-    Cons(x, rest) =>
+    [] => "unexpected {found}"
+    x :: rest =>
       match rest of
-        Nil => "expected {x}, found {found}"
-        Cons(_, _) =>
+        [] => "expected {x}, found {found}"
+        _ :: _ =>
           let all = str_join(", ", c.wanted)
           "expected one of {all}, found {found}"
 
@@ -390,8 +390,8 @@ pub fn prefix_bp(p : Prefix) : Int = p.level * 2
 -- spelling is not an infix operator.
 pub fn infix_lookup(tbl : List(Infix), op : String) : Option(Infix) =
   match tbl of
-    Nil => None
-    Cons(i, rest) =>
+    [] => None
+    i :: rest =>
       if i.op == op then
         Some(i)
       else
@@ -401,8 +401,8 @@ pub fn infix_lookup(tbl : List(Infix), op : String) : Option(Infix) =
 -- spelling is not a prefix operator.
 pub fn prefix_lookup(tbl : List(Prefix), op : String) : Option(Prefix) =
   match tbl of
-    Nil => None
-    Cons(p, rest) =>
+    [] => None
+    p :: rest =>
       if p.op == op then
         Some(p)
       else
@@ -520,15 +520,17 @@ pub fn expr_infix_table() : List(Infix) =
       Infix { op = "<=", level = 6, assoc = ANone },
       Infix { op = ">", level = 6, assoc = ANone },
       Infix { op = ">=", level = 6, assoc = ANone },
-      Infix { op = "+", level = 7, assoc = ALeft },
-      Infix { op = "-", level = 7, assoc = ALeft },
-      Infix { op = "*", level = 8, assoc = ALeft },
-      Infix { op = "/", level = 8, assoc = ALeft },
-      Infix { op = "%", level = 8, assoc = ALeft },
-      Infix { op = "^", level = 10, assoc = ARight },
+      Infix { op = "</>", level = 7, assoc = ALeft },
+      Infix { op = "::", level = 8, assoc = ARight },
+      Infix { op = "+", level = 9, assoc = ALeft },
+      Infix { op = "-", level = 9, assoc = ALeft },
+      Infix { op = "*", level = 10, assoc = ALeft },
+      Infix { op = "/", level = 10, assoc = ALeft },
+      Infix { op = "%", level = 10, assoc = ALeft },
+      Infix { op = "^", level = 12, assoc = ARight },
     ]
 
 -- | The prefix table of Prism's own expression grammar: unary minus, sitting
 -- between multiplication and exponentiation. `-x * y` is `(-x) * y` and, by the
 -- mathematical convention, `-x ^ y` is `-(x ^ y)`.
-pub fn expr_prefix_table() : List(Prefix) = [Prefix { op = "-", level = 9 }]
+pub fn expr_prefix_table() : List(Prefix) = [Prefix { op = "-", level = 11 }]

@@ -1,4 +1,4 @@
--- The identity view of one `prism-surface-syntax-v1` artifact. arg(0) is the
+-- The identity view of one `prism-surface-syntax-v2` artifact. arg(0) is the
 -- artifact path; arg(1) selects the identity: "source" prints the digest of the
 -- exact source bytes, anything else prints the canonical span-erased surface
 -- subject. Both are pure functions of the artifact bytes. A refusal prints one

@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
-use prism::core::{instance_digest, Digest, HASH_SCHEME};
+use prism::core::{instance_digest, HASH_SCHEME};
 use prism::syntax::ast::Ty;
 
 fn with_stdlib_hash_env_lock(test: impl FnOnce()) {
@@ -103,12 +103,12 @@ fn instance_digest_folds_method_behavior() {
     let a = instance_digest(
         "Eq",
         &Ty::Con("Bool".into(), vec![]),
-        &BTreeMap::from([("eq".to_string(), Digest::from("hash-one"))]),
+        &BTreeMap::from([("eq".to_string(), prism::core::hash_str("hash-one"))]),
     );
     let b = instance_digest(
         "Eq",
         &Ty::Con("Bool".into(), vec![]),
-        &BTreeMap::from([("eq".to_string(), Digest::from("hash-two"))]),
+        &BTreeMap::from([("eq".to_string(), prism::core::hash_str("hash-two"))]),
     );
     assert_ne!(a, b);
 }

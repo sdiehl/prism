@@ -18,6 +18,8 @@
 
 use std::fmt::Write as _;
 
+use prism_common::format::FormatTag;
+use prism_common::record::RecordError;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -30,7 +32,7 @@ pub const EVENT_HASH_SCHEME: &str = "sha256";
 // a bare event hash or another sha256 fold that happens over the same bytes.
 const TRACE_FOLD_DOMAIN: &str = "prism-provenance-trace-v1";
 /// Version tag for the complete observable execution artifact.
-pub const OBSERVATION_TRACE_FORMAT: &str = "prism-observation-trace-v1";
+pub const OBSERVATION_TRACE_FORMAT: FormatTag = FormatTag::new("prism-observation-trace-v1");
 
 // Per-value field tags in the canonical encoding. Scalars are inlined (they carry
 // no delimiter); variable-length values are digested so an embedded newline can
@@ -89,6 +91,17 @@ pub enum CapOp {
     NetClose,
     NetLocalAddr,
     NetPeerAddr,
+    // One child process, spawned, drained, and reaped in a single step. It is a
+    // tape frame, unlike a socket operation, because the frame holds the whole
+    // structured response at once and a replay can serve it without the child.
+    // The frame commits to the request's digest, so a replay that reaches the
+    // operation with a different request is a mismatch rather than a stale
+    // answer. It stays outside the replayable and durable grades all the same:
+    // a recorded response does not reproduce what the child did to the world.
+    ProcCollect,
+    // A pipeline of child processes, wired, drained, and reaped in one step;
+    // its frame holds every stage's status, on the same terms as `ProcCollect`.
+    ProcCollectPipeline,
 }
 
 impl CapOp {
@@ -124,6 +137,8 @@ impl CapOp {
             Self::NetClose => "Net.close",
             Self::NetLocalAddr => "Net.local_addr",
             Self::NetPeerAddr => "Net.peer_addr",
+            Self::ProcCollect => "Proc.collect",
+            Self::ProcCollectPipeline => "Proc.collect_pipeline",
         }
     }
 }
@@ -156,6 +171,8 @@ pub const OP_NET_SEND: CapOp = CapOp::NetSend;
 pub const OP_NET_CLOSE: CapOp = CapOp::NetClose;
 pub const OP_NET_LOCAL_ADDR: CapOp = CapOp::NetLocalAddr;
 pub const OP_NET_PEER_ADDR: CapOp = CapOp::NetPeerAddr;
+pub const OP_PROC_COLLECT: CapOp = CapOp::ProcCollect;
+pub const OP_PROC_COLLECT_PIPELINE: CapOp = CapOp::ProcCollectPipeline;
 
 /// Every capability op, in canonical order: the one home the op families are
 /// enumerated from (the `--at-op` selector set and the reserved-prefix check).
@@ -188,6 +205,8 @@ pub const ALL_CAP_OPS: &[CapOp] = &[
     OP_NET_CLOSE,
     OP_NET_LOCAL_ADDR,
     OP_NET_PEER_ADDR,
+    OP_PROC_COLLECT,
+    OP_PROC_COLLECT_PIPELINE,
 ];
 
 /// The canonical `&'static` label of `s` when it names a capability op, else
@@ -325,7 +344,7 @@ impl CapEvent {
 /// Versioned, self-validating complete behavior of one execution.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ObservationTrace {
-    pub format: String,
+    pub format: FormatTag,
     pub observations: Vec<Observation>,
     pub digest: String,
 }
@@ -335,7 +354,7 @@ impl ObservationTrace {
     pub fn new(observations: Vec<Observation>) -> Self {
         let digest = observation_digest(&observations);
         Self {
-            format: OBSERVATION_TRACE_FORMAT.to_string(),
+            format: OBSERVATION_TRACE_FORMAT,
             observations,
             digest,
         }
@@ -353,20 +372,19 @@ impl ObservationTrace {
     ///
     /// # Errors
     /// Refuses malformed JSON, foreign formats, and altered event sequences.
-    pub fn from_json(text: &str) -> Result<Self, String> {
-        let trace: Self = serde_json::from_str(text).map_err(|error| error.to_string())?;
-        if trace.format != OBSERVATION_TRACE_FORMAT {
-            return Err(format!(
-                "unsupported observation trace format {:?}",
-                trace.format
-            ));
-        }
+    pub fn from_json(text: &str) -> Result<Self, RecordError> {
+        let trace: Self = RecordError::decode(text)?;
+        RecordError::expect_format(
+            "observation trace",
+            &OBSERVATION_TRACE_FORMAT,
+            &trace.format,
+        )?;
         let derived = observation_digest(&trace.observations);
         if trace.digest != derived {
-            return Err(format!(
+            return Err(RecordError::Invalid(format!(
                 "observation trace digest is {}, derived {derived}",
                 trace.digest
-            ));
+            )));
         }
         Ok(trace)
     }
@@ -419,7 +437,7 @@ impl ObservationTrace {
 fn observation_digest(observations: &[Observation]) -> String {
     let bytes =
         serde_json::to_vec(observations).expect("closed observation protocol always serializes");
-    let mut canonical = OBSERVATION_TRACE_FORMAT.as_bytes().to_vec();
+    let mut canonical = OBSERVATION_TRACE_FORMAT.as_str().as_bytes().to_vec();
     canonical.push(0);
     canonical.extend(bytes);
     sha256_hex(&canonical)
@@ -450,6 +468,12 @@ pub fn trace_digest(events: &[CapEvent]) -> TraceDigest {
         hash: sha256_hex(folded.as_bytes()),
         events: events.len(),
     }
+}
+
+/// The `sha256` of `bytes` as a validated [`Digest`].
+#[must_use]
+pub fn sha256_digest(bytes: &[u8]) -> prism_common::digest::Digest {
+    prism_common::digest::Digest::of_bytes(&Sha256::digest(bytes).into())
 }
 
 /// Lowercase-hex `sha256` of `bytes`. The one digest primitive the protocol and its

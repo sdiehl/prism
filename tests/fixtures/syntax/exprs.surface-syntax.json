@@ -1,5 +1,5 @@
 {
-  "schema": "prism-surface-syntax-v1",
+  "schema": "prism-surface-syntax-v2",
   "compiler": "<version>",
   "source": {
     "digest": "315cd0cf1b228c9cac33697d29700821a508568b5d66084badb33ef0c4e1714c",
@@ -17,7 +17,11 @@
               }
             }
           ],
-          "name": "Wheel"
+          "name": "Wheel",
+          "span": [
+            85,
+            90
+          ]
         }
       ],
       "kind": "data",
@@ -51,7 +55,11 @@
               }
             }
           ],
-          "name": "Car"
+          "name": "Car",
+          "span": [
+            118,
+            121
+          ]
         }
       ],
       "kind": "data",
@@ -1493,10 +1501,18 @@
               "kind": "int"
             }
           ],
-          "name": "Parked"
+          "name": "Parked",
+          "span": [
+            1176,
+            1182
+          ]
         },
         {
-          "name": "Vacant"
+          "name": "Vacant",
+          "span": [
+            1190,
+            1196
+          ]
         }
       ],
       "kind": "data",

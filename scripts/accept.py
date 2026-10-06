@@ -4,9 +4,10 @@
 The family-specific reseat commands (snapshot regeneration, the seam fixtures,
 the tier and cost manifests, the HIR fixtures, the optimizer baseline, the
 stdlib and package references, the book figures, the Lean fixture manifest)
-each rerun most of the same cold compile work. This task stacks every accept
-knob onto one cold pass over the golden-bearing test targets, follows it with
-the generated-artifact stages, and ends with one diff grouped by family so the
+each rerun most of the same cold compile work. This task regenerates the
+references, stacks every accept knob onto one cold pass over the
+golden-bearing test targets, follows it with the remaining generated-artifact
+stages, and ends with one diff grouped by family so the
 review reads as "which gates moved" rather than a flat file list.
 
 The run is deliberately canonical: the compiler cache is off, sharding and the
@@ -153,17 +154,6 @@ def package_references(env: dict[str, str]) -> int:
     return 0
 
 
-def stdlib_digests(env: dict[str, str]) -> int:
-    """Re-run after the docs stages so blessed sources feed the digests."""
-    digest_env = dict(env)
-    digest_env["PRISM_COMPILER_CACHE"] = "0"
-    digest_env["INSTA_UPDATE"] = "always"
-    return run_filtered(
-        ["cargo", "test", "--release", "--test", "snapshots", "shape_digests"],
-        env=digest_env,
-    )
-
-
 def book_figures(env: dict[str, str]) -> int:
     figure_env = dict(env)
     figure_env["PRISM_BIN"] = str(ROOT / "target" / "release" / "prism")
@@ -261,10 +251,11 @@ def main() -> int:
     stages: tuple[tuple[str, Callable[[], int]], ...] = (
         ("clear pending snapshots", clear_pending_snapshots),
         ("release build", lambda: rebuild_release(env)),
-        ("golden test pass (cold)", lambda: golden_test_pass(env)),
+        # The references go first: the golden pass cross-checks their address
+        # badges and digests the blessed sources, so it must read the new ones.
         ("stdlib doctests and reference", lambda: stdlib_reference(env)),
         ("package doctests and references", lambda: package_references(env)),
-        ("stdlib digests", lambda: stdlib_digests(env)),
+        ("golden test pass (cold)", lambda: golden_test_pass(env)),
         ("book figures", lambda: book_figures(env)),
         ("Lean fixture manifest", lambda: lean_fixture_manifest(env)),
         ("frozen parser corpus (check only)", lambda: frozen_parser_corpus(env)),

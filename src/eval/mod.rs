@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::io::Write as _;
@@ -9,9 +9,11 @@ use num_bigint::BigInt;
 
 use crate::core::builtins::Builtin;
 use crate::core::{Comp, Core, CoreFn, CorePat};
+use crate::lineage::provenance::sha256_hex;
 use crate::lineage::provenance::{
     CapEvent, CapOp, EventValue, Observation, OP_CONSOLE_EPRINT, OP_CONSOLE_NEWLINE,
-    OP_CONSOLE_PRINT, OP_CONSOLE_READ_INT, OP_CONSOLE_READ_LINE, OP_RANDOM_RAND,
+    OP_CONSOLE_PRINT, OP_CONSOLE_READ_INT, OP_CONSOLE_READ_LINE, OP_FS_WRITE_BYTES,
+    OP_FS_WRITE_FILE, OP_PROC_COLLECT, OP_PROC_COLLECT_PIPELINE, OP_RANDOM_RAND,
 };
 use crate::names::ENTRY_POINT;
 use crate::sym::Sym;
@@ -30,6 +32,7 @@ mod builtin;
 mod mobility;
 mod net;
 mod node;
+mod proc;
 mod tape;
 
 pub use builtin::fmt_g;
@@ -86,7 +89,10 @@ pub enum Rv {
     // `Rv` enum (which every evaluator frame carries), keeping the recursive
     // render/drop stack depth of ordinary programs unchanged.
     Vec128(Rc<[u64; 2]>),
-    Resume(Rc<[Frame]>),
+    // A captured continuation and, when the segment crossed a handler owing a
+    // cleanup, the bit shared with the trigger frame that runs those cleanups
+    // should the clause body finish without taking the continuation.
+    Resume(Rc<[Frame]>, Option<Rc<Cell<bool>>>),
     // Verification-only runtime form for an effect-lowered local `var`. Ordinary
     // source interpretation never constructs it; only the explicit lowered-Core
     // evaluator does.
@@ -150,11 +156,13 @@ fn drain(work: &mut Vec<Rv>) {
                     work.push(mem::replace(cell.get_mut(), Rv::Unit));
                 }
             }
-            Rv::Resume(mut frames) => {
+            Rv::Resume(mut frames, _) => {
                 if let Some(frames) = Rc::get_mut(&mut frames) {
                     for f in frames {
-                        let (Frame::Bind(_, _, env) | Frame::Args(_, env) | Frame::Handle(_, env)) =
-                            f
+                        let (Frame::Bind(_, _, env)
+                        | Frame::Args(_, env)
+                        | Frame::Handle(_, env)
+                        | Frame::Unwind(_, env)) = f
                         else {
                             continue;
                         };
@@ -221,6 +229,32 @@ pub enum Frame {
     Restore(Sym),
     Handle(Rc<HandleInfo>, Env),
     Mask(Rc<[Sym]>),
+    // The cleanup clause of the handler frame pushed right above it, run once
+    // when that handler is left: after its `return` clause on the normal path,
+    // or from a trigger when a clause body drops the continuation.
+    Unwind(Cmp, Env),
+    // The cleanups a clause body owes for the continuation it holds, innermost
+    // first. The bit is shared with that continuation: taking it clears the
+    // bit, and a body that finishes with the bit still set runs the list before
+    // its answer flows on.
+    Trigger(Rc<Cell<bool>>, Vec<Cleanup>),
+    // An answer held back while the cleanups still ahead of it run.
+    Held(Rv, Vec<Cleanup>),
+}
+
+// A cleanup clause closed by its handler's environment.
+type Cleanup = (Cmp, Env);
+
+// Run `pending` ahead of `v`, in order, then return `v` unchanged. Each cleanup
+// answers unit, which the `Frame::Held` left behind discards on the way back.
+fn cleanup_then(stack: &mut Vec<Frame>, v: Rv, pending: &[Cleanup]) -> State {
+    match pending.split_first() {
+        None => State::Ret(v),
+        Some(((fin, env), rest)) => {
+            stack.push(Frame::Held(v, rest.to_vec()));
+            State::Eval(Rc::clone(fin), env.clone())
+        }
+    }
 }
 
 enum State {
@@ -260,7 +294,7 @@ impl Rv {
             Self::Buf(_) => "Buf",
             Self::TBuf(_) => FLOAT_BUF,
             Self::Vec128(_) => "Vec128",
-            Self::Resume(_) => "Resume",
+            Self::Resume(..) => "Resume",
             Self::Ref(_) => "Ref",
         }
     }
@@ -275,7 +309,7 @@ impl Rv {
                 | Self::Data(..)
                 | Self::Tuple(_)
                 | Self::Array(_)
-                | Self::Resume(_)
+                | Self::Resume(..)
                 | Self::Ref(_)
         )
     }
@@ -523,6 +557,29 @@ pub struct Run {
     // the same count on every machine, which is what lets a harness compare it
     // against a recorded baseline.
     pub steps: usize,
+}
+
+/// What a run of an example shows its reader.
+///
+/// The `print` transcript if it printed anything, otherwise the value it
+/// returned. The doctest expectation
+/// blocks and the browser Run button both read this, so a committed `output`
+/// block holds exactly what clicking Run on the same example displays.
+#[derive(Debug)]
+pub enum Observed {
+    Printed(String),
+    Value(String),
+}
+
+impl Run {
+    #[must_use]
+    pub fn observed(&self) -> Observed {
+        if self.term.is_empty() {
+            Observed::Value(self.value.show())
+        } else {
+            Observed::Printed(self.term.clone())
+        }
+    }
 }
 
 // SplitMix64 default seed, shared with the C runtime (`PRISM_RNG_SEED` in
@@ -825,8 +882,11 @@ impl<'a> Machine<'a> {
     // Append one file-write output event to the provenance stream, when armed. The
     // path is the first argument; the committed content (a string or byte buffer, or
     // nothing for a removal) is the result. Recorded in both record and replay, so a
-    // run that writes files reproduces the identical events on replay.
-    fn record_write_event(&mut self, op: CapOp, vals: &[Rv]) -> Result<(), String> {
+    // run that writes files reproduces the identical events on replay. A whole-file
+    // write that succeeded committed exactly the bytes it was given, so those are
+    // digested; an append (whose committed file is more than its argument) or a
+    // failed write is digested from what is on disk.
+    fn record_write_event(&mut self, op: CapOp, vals: &[Rv], written: &Rv) -> Result<(), String> {
         let args = vals.first().map(event_value_of_rv).into_iter().collect();
         let result = vals.get(1).map_or(EventValue::Unit, event_value_of_rv);
         let event = CapEvent { op, args, result };
@@ -843,11 +903,22 @@ impl<'a> Machine<'a> {
             if op == crate::lineage::provenance::OP_FS_REMOVE_FILE {
                 observations.push(Observation::Capability(event));
             } else {
-                let committed = std::fs::read(path)
-                    .map_err(|error| format!("observe committed file {path:?}: {error}"))?;
+                let succeeded = matches!(written, Rv::Data(ctor, _) if ctor.as_str() == "Ok");
+                let digest = match vals.get(1) {
+                    Some(Rv::Str(text)) if succeeded && op == OP_FS_WRITE_FILE => {
+                        sha256_hex(text.as_bytes())
+                    }
+                    Some(Rv::Buf(bytes)) if succeeded && op == OP_FS_WRITE_BYTES => {
+                        sha256_hex(bytes)
+                    }
+                    _ => sha256_hex(
+                        &std::fs::read(path)
+                            .map_err(|error| format!("observe committed file {path:?}: {error}"))?,
+                    ),
+                };
                 observations.push(Observation::FileCommit {
                     path: path.to_string(),
-                    digest: crate::lineage::provenance::sha256_hex(&committed),
+                    digest,
                 });
             }
         }
@@ -1003,6 +1074,52 @@ impl<'a> Machine<'a> {
         self.observed += 1;
         self.mark(op.label(), || v.show());
         Ok(v)
+    }
+
+    // Run one child process through the tape. The frame is the request's digest
+    // followed by the response, so a replay serves a recorded outcome only to the
+    // command that produced it and fails loudly on any other. A durable run
+    // refuses: resuming one would re-serve an outcome without re-running a child
+    // whose effects on the world were never part of the trace.
+    // A pipeline is the same exchange with every stage in one frame.
+    fn observe_proc(&mut self, req: &[u8], pipeline: bool) -> Result<Rv, String> {
+        let op = if pipeline {
+            OP_PROC_COLLECT_PIPELINE
+        } else {
+            OP_PROC_COLLECT
+        };
+        if matches!(self.tape, Tape::Durable { .. }) {
+            return Err(format!(
+                "{}: a durable run cannot spawn a child process",
+                op.label()
+            ));
+        }
+        let digest = *blake3::hash(req).as_bytes();
+        let args = vec![
+            EventValue::Str(proc::program_of(req, pipeline)),
+            EventValue::Bytes(digest.to_vec()),
+        ];
+        let request = req.to_vec();
+        let framed = self.observe(op, args, ObsKind::Bytes, move |_| {
+            let mut frame = digest.to_vec();
+            frame.extend(if pipeline {
+                proc::collect_pipeline(&request)
+            } else {
+                proc::collect(&request)
+            });
+            Ok(Rv::Buf(Rc::new(frame)))
+        })?;
+        match framed {
+            Rv::Buf(b) if b.get(..digest.len()) == Some(&digest[..]) => {
+                Ok(Rv::Buf(Rc::new(b[digest.len()..].to_vec())))
+            }
+            Rv::Buf(_) => Err(format!(
+                "replay: trace does not match program at event {}: the recorded \
+                 child process ran a different command",
+                self.observed.saturating_sub(1)
+            )),
+            halted => Ok(halted),
+        }
     }
 
     // Perform one output observation. Under `Replay` the recorded `Out` boundary
@@ -1326,7 +1443,7 @@ impl<'a> Machine<'a> {
                     // advance the observation count; the write re-runs on replay, so
                     // the event recurs and the trace digest is unchanged.
                     let v = str_builtin(*name, &vals, &self.args)?;
-                    self.record_write_event(op, &vals)?;
+                    self.record_write_event(op, &vals, &v)?;
                     State::Ret(v)
                 } else if let Some(op) = net_obs(*name) {
                     // The stream-socket boundary: perform the operation, then log
@@ -1336,6 +1453,10 @@ impl<'a> Machine<'a> {
                     let v = str_builtin(*name, &vals, &self.args)?;
                     self.record_net_event(op, &vals, &v);
                     State::Ret(v)
+                } else if let (Builtin::ProcCollect, [Rv::Buf(req)]) = (*name, vals.as_slice()) {
+                    State::Ret(self.observe_proc(req, false)?)
+                } else if let (Builtin::ProcPipeline, [Rv::Buf(req)]) = (*name, vals.as_slice()) {
+                    State::Ret(self.observe_proc(req, true)?)
                 } else if let (Builtin::KontEncode, [work]) = (*name, vals.as_slice()) {
                     // The mobility envelope. Both halves need the machine
                     // itself (one to stamp the run's identity onto the bytes,
@@ -1371,6 +1492,9 @@ impl<'a> Machine<'a> {
                 self.perform(stack, *op, avs)?
             }
             Node::Handle(hi) => {
+                if let Some(fin) = &hi.finally_body {
+                    stack.push(Frame::Unwind(Rc::clone(fin), env.clone()));
+                }
                 stack.push(Frame::Handle(Rc::clone(hi), env.clone()));
                 State::Eval(Rc::clone(&hi.body), env)
             }
@@ -1515,7 +1639,7 @@ impl<'a> Machine<'a> {
                             State::Eval(body, cenv)
                         }
                     }
-                    Rv::Resume(frames) => {
+                    Rv::Resume(frames, armed) => {
                         // resume takes exactly one argument; more is a lowering bug.
                         if avs.len() > 1 {
                             return Err(format!(
@@ -1527,6 +1651,11 @@ impl<'a> Machine<'a> {
                             .into_iter()
                             .next()
                             .ok_or_else(|| "resume requires an argument".to_string())?;
+                        // The continuation is taken: the cleanups its clause
+                        // body owed run inside the reinstated segment instead.
+                        if let Some(armed) = armed {
+                            armed.set(false);
+                        }
                         stack.extend(frames.iter().cloned());
                         State::Ret(arg)
                     }
@@ -1542,11 +1671,27 @@ impl<'a> Machine<'a> {
                 }
                 _ => State::Ret(v),
             },
+            Frame::Unwind(fin, env) => {
+                stack.push(Frame::Held(v, Vec::new()));
+                State::Eval(fin, env)
+            }
+            Frame::Trigger(armed, owed) => {
+                if armed.get() {
+                    cleanup_then(stack, v, &owed)
+                } else {
+                    State::Ret(v)
+                }
+            }
+            Frame::Held(held, rest) => cleanup_then(stack, held, &rest),
         })
     }
 
     fn perform(&mut self, stack: &mut Vec<Frame>, op: Sym, args: Vec<Rv>) -> Result<State, String> {
         let mut captured = Vec::new();
+        // The cleanups owed by the handlers crossed on the way out, innermost
+        // first. They stay in the captured segment for the resumed path and go
+        // onto one trigger frame for the abandoned one.
+        let mut pending: Vec<Cleanup> = Vec::new();
         // Each mask frame for this op's effect crossed on the way out makes
         // the walk skip one more matching handler.
         let mut skip = 0usize;
@@ -1573,6 +1718,23 @@ impl<'a> Machine<'a> {
                     }
                     captured.push(Frame::Mask(ops));
                 }
+                Frame::Unwind(fin, env) => {
+                    pending.push((Rc::clone(&fin), env.clone()));
+                    captured.push(Frame::Unwind(fin, env));
+                }
+                // A clause body still owing cleanups, or a cleanup run already
+                // under way, owes them here as well: once this segment is
+                // dropped, nothing inside it runs again.
+                Frame::Trigger(armed, owed) => {
+                    if armed.get() {
+                        pending.extend(owed.iter().cloned());
+                    }
+                    captured.push(Frame::Trigger(armed, owed));
+                }
+                Frame::Held(held, rest) => {
+                    pending.extend(rest.iter().cloned());
+                    captured.push(Frame::Held(held, rest));
+                }
                 Frame::Handle(hi, henv) if hi.ops.contains_key(&op) => {
                     // A masked op skips one matching handler; otherwise this
                     // handler catches it, binding the op args and the captured
@@ -1596,11 +1758,17 @@ impl<'a> Machine<'a> {
                         let mut env2 = henv.clone();
                         captured.push(Frame::Handle(Rc::clone(&hi), henv));
                         captured.reverse();
+                        // The clause body runs above a trigger holding the
+                        // cleanups it owes; taking the continuation disarms it.
+                        let armed = (!pending.is_empty()).then(|| Rc::new(Cell::new(true)));
+                        if let Some(armed) = &armed {
+                            stack.push(Frame::Trigger(Rc::clone(armed), pending));
+                        }
                         let e = Rc::make_mut(&mut env2);
                         for (p, a) in params.iter().zip(args) {
                             e.insert(*p, a);
                         }
-                        e.insert(*resume_var, Rv::Resume(Rc::from(captured)));
+                        e.insert(*resume_var, Rv::Resume(Rc::from(captured), armed));
                         return Ok(State::Eval(body, env2));
                     }
                 }

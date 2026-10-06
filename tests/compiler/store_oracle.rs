@@ -12,6 +12,7 @@
 //! Hashes and closures come from pre-optimizer Core, matching the store's keys.
 //! The native cached-parity check is gated on `feature = "native"`.
 
+use prism::DumpPhase;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -109,7 +110,7 @@ impl Drop for TempDir {
 // The per-definition content hashes of a full (prelude-included) program, keyed
 // by canonical name: exactly the surface `commit_to_store` keys the store on.
 fn core_hashes(full: &str) -> BTreeMap<String, String> {
-    dump("core-hash", full)
+    dump(DumpPhase::CoreHash, full)
         .expect("core-hash dump")
         .lines()
         .filter_map(|l| {
@@ -375,7 +376,8 @@ mod cached_parity {
     // passes are recorded, so a failure always re-runs.
     fn checked(store: &Store, prog: &str, builds: &Cell<u64>) -> Result<(), String> {
         let hash = main_hash(prog);
-        let artifact = Config::default().artifact_identity_for("llvm");
+        let artifact =
+            Config::default().artifact_identity_for(prism::driver::ArtifactBackend::Llvm);
         let identity = VerificationIdentity::from_artifact(&artifact);
         if is_verified(store, &hash, CheckKind::Parity, &identity).unwrap() {
             return Ok(());
@@ -383,11 +385,17 @@ mod cached_parity {
         native_parity(prog, builds)?;
         record_pass(store, &hash, CheckKind::Parity, &identity).unwrap();
         // Alongside the verification record, emit the parity certificate the gate
-        // stands behind: a `parity-passed` attestation keyed by the program's hash,
-        // naming the two backends (interpreter and native LLVM) that agreed.
+        // stands behind: a `parity-passed` attestation keyed by main's full hash,
+        // naming the two backends (interpreter and native LLVM) that agreed. The
+        // dump carries only a display prefix, so the full hash comes from the
+        // store's name index after a commit.
+        commit(prog, &store_cfg(store.root().to_path_buf()));
+        let names = store.names().unwrap();
+        let root = prism::core::Digest::parse(names["main"].as_str()).unwrap();
+        assert!(root.starts_with(hash.as_str()), "{root} vs {hash}");
         cert::emit(
             store,
-            &cert::parity_cert(&hash, (BACKEND_INTERP, BACKEND_LLVM)),
+            &cert::parity_cert(&root, (BACKEND_INTERP, BACKEND_LLVM)),
         )
         .unwrap();
         Ok(())
@@ -435,7 +443,8 @@ mod cached_parity {
         // No record is written without a pass, so a hash that never verified is
         // not treated as verified.
         let hash = main_hash(P_BASE);
-        let artifact = Config::default().artifact_identity_for("llvm");
+        let artifact =
+            Config::default().artifact_identity_for(prism::driver::ArtifactBackend::Llvm);
         let identity = VerificationIdentity::from_artifact(&artifact);
         assert!(!is_verified(&store, &hash, CheckKind::Parity, &identity).unwrap());
     }
@@ -445,8 +454,10 @@ mod cached_parity {
         let tmp = TempDir::new("verifyid");
         let store = Store::open_or_create(tmp.root()).unwrap();
         let hash = main_hash(P_BASE);
-        let llvm_artifact = Config::default().artifact_identity_for("llvm");
-        let mlir_artifact = Config::default().artifact_identity_for("mlir");
+        let llvm_artifact =
+            Config::default().artifact_identity_for(prism::driver::ArtifactBackend::Llvm);
+        let mlir_artifact =
+            Config::default().artifact_identity_for(prism::driver::ArtifactBackend::Mlir);
         let llvm_identity = VerificationIdentity::from_artifact(&llvm_artifact);
         let mlir_identity = VerificationIdentity::from_artifact(&mlir_artifact);
 
@@ -461,10 +472,10 @@ mod cached_parity {
         let store = Store::open_or_create(tmp.root()).unwrap();
         let hash = main_hash(P_BASE);
         let first_artifact = Config::default()
-            .artifact_identity_for("llvm")
+            .artifact_identity_for(prism::driver::ArtifactBackend::Llvm)
             .with_source_root("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         let second_artifact = Config::default()
-            .artifact_identity_for("llvm")
+            .artifact_identity_for(prism::driver::ArtifactBackend::Llvm)
             .with_source_root("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
         let first_identity = VerificationIdentity::from_artifact(&first_artifact);
         let second_identity = VerificationIdentity::from_artifact(&second_artifact);

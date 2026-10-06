@@ -10,6 +10,7 @@
 //! `tc-facts` spelling, canonicalized through the versioned scheme contract,
 //! must match the model byte for byte.
 
+use prism::DumpPhase;
 use std::collections::{BTreeSet, HashMap};
 use std::fmt::Write as _;
 
@@ -186,7 +187,7 @@ fn inferred_rows_match_the_set_algebra_model() {
     }
     source.push_str("fn main() : Int = 0\n");
 
-    let dump = prism::dump("tc-facts", &source).expect("tc-facts dump succeeds");
+    let dump = prism::dump(DumpPhase::TcFacts, &source).expect("tc-facts dump succeeds");
     let report: Value = serde_json::from_str(&dump).expect("tc-facts is JSON");
     let schemes: HashMap<&str, &str> = report["decls"]
         .as_array()

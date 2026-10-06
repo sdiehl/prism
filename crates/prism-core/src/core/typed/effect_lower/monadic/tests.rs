@@ -615,6 +615,7 @@ fn a_captured_open_nary_handler_erases_exactly_to_the_executable_driver() {
                     Monadic::var(captured_z.name(), captured_z.ty().clone()),
                 ),
             ))),
+            finally_body: None,
             ops: clauses,
         },
     );
@@ -749,6 +750,7 @@ fn a_routed_resume_application_erases_exactly_and_verifies() {
             body: Box::new(performed),
             return_binder: None,
             return_body: None,
+            finally_body: None,
             ops: clauses,
         },
     );
@@ -859,6 +861,7 @@ fn a_selective_closed_handler_keeps_the_direct_convention_exactly() {
             body: Box::new(performed),
             return_binder: None,
             return_body: None,
+            finally_body: None,
             ops: clauses,
         },
     );
@@ -965,6 +968,7 @@ fn a_closed_tail_resume_and_return_clause_use_the_native_region_exactly() {
             body: Box::new(performed),
             return_binder: Some(return_binder),
             return_body: Some(Box::new(return_body)),
+            finally_body: None,
             ops: clauses,
         },
     );
@@ -1067,6 +1071,7 @@ fn a_generic_capture_is_scoped_by_the_generated_driver_scheme() {
             body: Box::new(performed),
             return_binder: None,
             return_body: None,
+            finally_body: None,
             ops: clauses,
         },
     );

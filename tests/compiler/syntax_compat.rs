@@ -16,10 +16,10 @@
 // which is still the statement worth gating, since a shape change without a
 // schema bump shows up there either way.
 //
-// The refusal side matters as much. A document naming a different schema
-// version is refused whether that version is older or newer than the current
-// one. An old artifact is never read under the current tag, and a
-// newer one is never guessed at. The compiler version inside the envelope is
+// The refusal side matters as much. A document naming a schema version the
+// reader does not know is refused whether that version is older or newer than
+// the current one: an old tag is read only through the explicit upgrade its row
+// declares, and a newer one is never guessed at. The compiler version inside the envelope is
 // data, not a gate: it records who wrote the document, and a reader that
 // demanded its own version would make every artifact expire on release day.
 
@@ -28,7 +28,9 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
-use prism::{default_roots, dump_on, interpret_io_on_with_args, with_prelude, Config, Error};
+use prism::{
+    default_roots, dump_on, interpret_io_on_with_args, with_prelude, Config, DumpPhase, Error,
+};
 
 // A cross-release comparison punches the same holes the live goldens are
 // committed under, so the two mechanisms share one spelling of them.
@@ -65,7 +67,7 @@ enum Export {
 
 struct SchemaRow {
     // The `dump` phase that emits the artifact.
-    phase: &'static str,
+    phase: DumpPhase,
     // The schema tag, re-typed here independently of the compiler so an
     // emitter drift cannot re-pin the value it is checked against.
     tag: &'static str,
@@ -78,49 +80,157 @@ struct SchemaRow {
     // evidence. A schema first written by the release under development has no
     // earlier document to read and no row here until its release is cut.
     //
-    // The policy allows two states no schema is in yet. A shape change that
-    // leaves old documents interpretable bumps the tag and gains an explicit
-    // upgrade from the old one; a change that cannot be upgraded rejects the old
-    // tag outright. Neither has been needed, because no shipped syntax schema
-    // has changed shape.
+    // A shape change that leaves old documents interpretable bumps the tag and
+    // gains an explicit upgrade from the old one; a change that cannot be
+    // upgraded rejects the old tag outright. No schema is in the second state.
     since: &'static str,
     export: Export,
+    // The older tag this family still reads by upgrading, and how. Retained
+    // documents under it decode to their upgrade, and today's export matches
+    // them once the upgrade is undone.
+    upgrade: Option<Upgrade>,
+}
+
+struct Upgrade {
+    from: &'static str,
+    // The old document as the current reader re-encodes it.
+    up: fn(&mut Value),
+    // Today's document as the old release would have written it.
+    down: fn(&mut Value),
+}
+
+// The members that gained a name span in surface-syntax v2, by item kind:
+// constructors, effect operations, and class methods. An instance's `methods`
+// are declarations, which always carried a span.
+fn surface_members(item: &mut Value) -> Option<&mut Vec<Value>> {
+    let key = match item["kind"].as_str()? {
+        "data" | "newtype" => "ctors",
+        "effect" => "ops",
+        "class" => "methods",
+        _ => return None,
+    };
+    item.get_mut(key)?.as_array_mut()
+}
+
+fn surface_v1_up(doc: &mut Value) {
+    doc["schema"] = "prism-surface-syntax-v2".into();
+    for item in doc["items"].as_array_mut().into_iter().flatten() {
+        for member in surface_members(item).into_iter().flatten() {
+            member["span"] = serde_json::json!([0, 0]);
+        }
+    }
+}
+
+fn surface_v1_down(doc: &mut Value) {
+    doc["schema"] = "prism-surface-syntax-v1".into();
+    for item in doc["items"].as_array_mut().into_iter().flatten() {
+        for member in surface_members(item).into_iter().flatten() {
+            member.as_object_mut().map(|m| m.remove("span"));
+        }
+    }
+}
+
+// The surface envelope in the field order its exporter writes, which is a
+// struct's order and not a sorted map's.
+#[derive(serde::Serialize)]
+struct SurfaceEnvelope {
+    schema: Value,
+    compiler: Value,
+    source: Value,
+    items: Value,
+}
+
+// Apply an upgrade or a downgrade to a surface document's bytes, re-encoded the
+// way the exporter writes them.
+fn rewrite(doc: &str, f: fn(&mut Value)) -> String {
+    let mut value: Value = serde_json::from_str(doc).expect("retained JSON");
+    f(&mut value);
+    let mut take = |key: &str| {
+        value
+            .as_object_mut()
+            .and_then(|m| m.remove(key))
+            .expect(key)
+    };
+    let envelope = SurfaceEnvelope {
+        schema: take("schema"),
+        compiler: take("compiler"),
+        source: take("source"),
+        items: take("items"),
+    };
+    assert_eq!(
+        value,
+        serde_json::json!({}),
+        "an envelope field the rewrite does not know"
+    );
+    format!(
+        "{}\n",
+        serde_json::to_string_pretty(&envelope).expect("re-encode")
+    )
+}
+
+// The schema tag a document carries.
+fn tag_of(doc: &str) -> String {
+    let value: Value = serde_json::from_str(doc).expect("retained JSON");
+    value["schema"].as_str().expect("schema tag").to_string()
+}
+
+// The upgrade a retained document is read through: `None` when it carries the
+// row's current tag.
+fn upgrade_for<'a>(row: &'a SchemaRow, doc: &str) -> Option<&'a Upgrade> {
+    let tag = tag_of(doc);
+    if tag == row.tag {
+        return None;
+    }
+    let upgrade = row
+        .upgrade
+        .as_ref()
+        .filter(|u| u.from == tag)
+        .unwrap_or_else(|| panic!("{}: retained tag {tag} has no upgrade", row.phase));
+    Some(upgrade)
 }
 
 // A `static` rather than a `const`: the corpus walk below hands out borrows of
 // these rows, which a const's per-use temporary could not outlive.
 static MATRIX: [SchemaRow; 4] = [
     SchemaRow {
-        phase: "syntax-tokens",
+        phase: DumpPhase::SyntaxTokens,
         tag: "prism-syntax-tokens-v1",
         mode: "tokens",
         stems: STEMS,
         since: "0.14.0",
         export: Export::Bytes,
+        upgrade: None,
     },
     SchemaRow {
-        phase: "surface-syntax",
-        tag: "prism-surface-syntax-v1",
+        phase: DumpPhase::SurfaceSyntax,
+        tag: "prism-surface-syntax-v2",
         mode: "surface",
         stems: STEMS,
         since: "0.14.0",
         export: Export::Bytes,
+        upgrade: Some(Upgrade {
+            from: "prism-surface-syntax-v1",
+            up: surface_v1_up,
+            down: surface_v1_down,
+        }),
     },
     SchemaRow {
-        phase: "syntax-diagnostics",
+        phase: DumpPhase::SyntaxDiagnostics,
         tag: "prism-syntax-diagnostics-v1",
         mode: "diagnostics",
         stems: STEMS,
         since: "0.15.0",
         export: Export::Bytes,
+        upgrade: None,
     },
     SchemaRow {
-        phase: "resolved-syntax",
+        phase: DumpPhase::ResolvedSyntax,
         tag: "prism-resolved-syntax-v1",
         mode: "resolved",
         stems: RESOLVED_STEMS,
         since: "0.15.0",
         export: Export::Shape,
+        upgrade: None,
     },
 ];
 
@@ -182,14 +292,14 @@ fn comparable(doc: &str, version: &str, export: Export) -> String {
 // # Errors
 // Propagates a front-end failure so the caller can name the artifact it came
 // from.
-fn today(phase: &str, source: &str) -> Result<String, Error> {
+fn today(phase: DumpPhase, source: &str) -> Result<String, Error> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let full = with_prelude(source);
     dump_on(phase, &full, &default_roots(root), &Config::from_env())
 }
 
 // The schema tag a phase actually emits.
-fn emitted_tag(phase: &str, src: &str) -> String {
+fn emitted_tag(phase: DumpPhase, src: &str) -> String {
     let out = today(phase, src).unwrap_or_else(|e| panic!("{phase}: dump: {e}"));
     let doc: Value = serde_json::from_str(&out).expect("emitted JSON");
     doc["schema"]
@@ -220,15 +330,20 @@ fn roundtrip(artifact: &Path, mode: &str) -> String {
 
 // A retained artifact decodes into the current typed vocabulary and re-encodes
 // to the exact bytes the older release wrote: the reader neither rejects the
-// older stamp nor silently rewrites the document into a newer shape.
+// older stamp nor silently rewrites the document into a newer shape. A document
+// under an older tag re-encodes to exactly its declared upgrade.
 fn assert_stem_reads(stem: &str) {
     let mut checked = 0;
     for (release, _, row) in retained_artifacts().filter(|(_, s, _)| *s == stem) {
         let path = artifact(release, stem, row);
         let released = read(&path);
+        let expected = match upgrade_for(row, &released) {
+            Some(upgrade) => rewrite(&released, upgrade.up),
+            None => released,
+        };
         assert_eq!(
             roundtrip(&path, row.mode),
-            released,
+            expected,
             "{release}/{stem}.{}: a retained release artifact must re-encode byte-identically",
             row.phase
         );
@@ -286,6 +401,10 @@ fn retained_artifacts_match_todays_export_modulo_stamp() {
         let exported = today(row.phase, source)
             .unwrap_or_else(|e| panic!("{release}/{stem}.{}: dump: {e}", row.phase));
         let exported = format!("{exported}\n");
+        let exported = match upgrade_for(row, &released) {
+            Some(upgrade) => rewrite(&exported, upgrade.down),
+            None => exported,
+        };
 
         assert_eq!(
             comparable(&exported, env!("CARGO_PKG_VERSION"), row.export),
@@ -296,10 +415,11 @@ fn retained_artifacts_match_todays_export_modulo_stamp() {
     }
 }
 
-// A schema tag is matched exactly, never ordered. An older tag is not read
-// under the current one and a newer tag is not guessed at; both are refused
-// with the structured schema error, and the untouched document still decodes so
-// the refusal is attributable to the tag alone.
+// A schema tag is matched exactly, never ordered. A version the reader does not
+// know, older or newer, is refused with the structured schema error, and the
+// untouched document still decodes so the refusal is attributable to the tag
+// alone. An old document relabelled with the current tag is not upgraded
+// behind its back: it is refused on the shape the current tag demands.
 #[test]
 fn other_schema_versions_are_refused() {
     let stem = STEMS[0];
@@ -309,19 +429,33 @@ fn other_schema_versions_are_refused() {
             .expect("a retained family carries at least one release");
         let path = artifact(release, stem, row);
         let released = read(&path);
+        let tag = tag_of(&released);
         assert!(
-            released.contains(row.tag),
-            "{release}/{stem}.{}: retained artifact does not carry {}",
+            tag == row.tag || row.upgrade.as_ref().is_some_and(|u| u.from == tag),
+            "{release}/{stem}.{}: retained artifact carries {tag}, which {} does not read",
             row.phase,
             row.tag
         );
+        let (base, current) = row
+            .tag
+            .rsplit_once("-v")
+            .unwrap_or_else(|| panic!("{}: schema tag is not version-suffixed", row.tag));
+        let current: u32 = current.parse().expect("schema version");
 
-        for other in ["v0", "v2"] {
-            let stripped = row
-                .tag
-                .strip_suffix("v1")
-                .unwrap_or_else(|| panic!("{}: schema tag is not version-suffixed", row.tag));
-            let retagged = released.replace(row.tag, &format!("{stripped}{other}"));
+        if tag != row.tag {
+            let tmp = std::env::temp_dir().join(format!("prism_compat_{}_relabel.json", row.phase));
+            fs::write(&tmp, released.replace(&tag, row.tag)).expect("write relabelled artifact");
+            let out = roundtrip(&tmp, row.mode);
+            assert!(
+                out.starts_with("decode error: $.items"),
+                "{}: an old document under the current tag was read, got: {out}",
+                row.phase
+            );
+        }
+
+        for other in [0, current + 1] {
+            let other = format!("v{other}");
+            let retagged = released.replace(&tag, &format!("{base}-{other}"));
             let tmp = std::env::temp_dir().join(format!("prism_compat_{}_{other}.json", row.phase));
             fs::write(&tmp, &retagged).expect("write retagged artifact");
             let out = roundtrip(&tmp, row.mode);

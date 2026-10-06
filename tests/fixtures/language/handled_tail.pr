@@ -1,0 +1,51 @@
+-- Unannotated handlers over a thunk parameter. Each discharges the labels it
+-- handles from the action's row, so the handled effect does not leak into the
+-- caller; `twice` also runs the action outside its handler and keeps it.
+
+effect Ask
+  ask() : Int
+
+effect Log
+  log(String) : Unit
+
+effect Put(a)
+  put(a) : Unit
+
+fn run_ask(action) =
+  handle action() with
+    ask() resume k => k(42)
+
+fn collect(action) =
+  handle action() with
+    put(x) resume k => Cons(x, k(()))
+    return _ => Nil
+
+fn both_ops(action) =
+  handle action() with
+    ask() resume k => k(1)
+    log(s) resume k => k(())
+
+fn twice(action) =
+  let a = action()
+  let b =
+    handle action() with
+      ask() resume k => k(7)
+  a + b
+
+fn puts() : Unit ! {Put(Int)} =
+  put(1)
+  put(2)
+
+fn logs() : Int ! {Log, Ask} =
+  log("x")
+  ask()
+
+fn main() : Unit ! {IO} =
+  println(show(run_ask(\() -> ask() + 1)))
+  println(show(collect(puts)))
+  println(show(both_ops(logs)))
+  println(show(run_ask(\() -> twice(\() -> ask()))))
+  let local = \(action) ->
+    handle action() with
+      ask() resume k => k(5)
+  println(show(local(\() -> ask() + 1)))

@@ -2,8 +2,8 @@
   "schema": "prism-syntax-tokens-v1",
   "compiler": "<version>",
   "source": {
-    "digest": "b2df556543bc484a6e7f6af2ba9ec0c0c2d72a7beb3d80df74821530dd3bc819",
-    "text": "-- The round-trip gate for the versioned syntax artifacts: read one artifact\n-- file, decode it into the typed Syntax vocabulary, re-encode, and print the\n-- exact bytes. arg(0) is the artifact path; arg(1) selects the family\n-- (\"tokens\", \"surface\", \"diagnostics\", or \"resolved\"). The \"resolved-nodes\"\n-- mode instead decodes the resolved document and prints the id of every node\n-- reached by traversing each function body with `rnode_universe`, one per\n-- line: the Prism-side traversal the checker join is diffed against, reading\n-- only the artifact bytes. A refusal prints one structured error line.\nimport Data.Foldable (length)\nimport Data.List (concat_map)\nimport Syntax.Codec (..)\nimport Syntax.Resolved (..)\n\nfn main() =\n  let text = read_file(arg(0))\n  if arg(1) == \"tokens\" then\n    match decode_tokens(text) of\n      Err(e) => println(\"decode error: {codec_error_message(e)}\")\n      Ok(d) => println(encode_tokens(d))\n  elif arg(1) == \"diagnostics\" then\n    match decode_diagnostics(text) of\n      Err(e) => println(\"decode error: {codec_error_message(e)}\")\n      Ok(d) => println(encode_diagnostics(d))\n  elif arg(1) == \"resolved\" then\n    match decode_resolved(text) of\n      Err(e) => println(\"decode error: {codec_error_message(e)}\")\n      Ok(d) => println(encode_resolved(d))\n  elif arg(1) == \"resolved-nodes\" then\n    match decode_resolved(text) of\n      Err(e) => println(\"decode error: {codec_error_message(e)}\")\n      Ok(d) => print_resolved_ids(d)\n  else\n    match decode_surface(text) of\n      Err(e) => println(\"decode error: {codec_error_message(e)}\")\n      Ok(d) => println(encode_surface(d))\n\n-- Every node id reached by walking each function body with the Prism-side\n-- `rnode_universe`, sorted ascending, one per line under a `count` header. A\n-- pure function of the decoded document: no source file or compiler state is\n-- consulted.\nfn print_resolved_ids(d : ResolvedDoc) =\n  let ids = sort(\n      concat_map(\n          \\(f) -> map(\\(n) -> n.id, rnode_universe(f.body)),\n          d.functions,\n        ),\n    )\n  println(\"count {length(ids)}\")\n  print_ids(ids)\n\nfn print_ids(ids : List(Int)) : Unit ! {IO} =\n  match ids of\n    Nil => ()\n    Cons(i, rest) =>\n      println(\"{i}\")\n      print_ids(rest)\n"
+    "digest": "954830989243df05201168e6f8e4267aa02f6c8ede3787b9cab96866cb8747d4",
+    "text": "-- The round-trip gate for the versioned syntax artifacts: read one artifact\n-- file, decode it into the typed Syntax vocabulary, re-encode, and print the\n-- exact bytes. arg(0) is the artifact path; arg(1) selects the family\n-- (\"tokens\", \"surface\", \"diagnostics\", or \"resolved\"). The \"resolved-nodes\"\n-- mode instead decodes the resolved document and prints the id of every node\n-- reached by traversing each function body with `rnode_universe`, one per\n-- line: the Prism-side traversal the checker join is diffed against, reading\n-- only the artifact bytes. A refusal prints one structured error line.\nimport Data.Foldable (length)\nimport Data.List (concat_map)\nimport Syntax.Codec (..)\nimport Syntax.Resolved (..)\n\nfn main() =\n  let text = read_file(arg(0))\n  if arg(1) == \"tokens\" then\n    match decode_tokens(text) of\n      Err(e) => println(\"decode error: {codec_error_message(e)}\")\n      Ok(d) => println(encode_tokens(d))\n  elif arg(1) == \"diagnostics\" then\n    match decode_diagnostics(text) of\n      Err(e) => println(\"decode error: {codec_error_message(e)}\")\n      Ok(d) => println(encode_diagnostics(d))\n  elif arg(1) == \"resolved\" then\n    match decode_resolved(text) of\n      Err(e) => println(\"decode error: {codec_error_message(e)}\")\n      Ok(d) => println(encode_resolved(d))\n  elif arg(1) == \"resolved-nodes\" then\n    match decode_resolved(text) of\n      Err(e) => println(\"decode error: {codec_error_message(e)}\")\n      Ok(d) => print_resolved_ids(d)\n  else\n    match decode_surface(text) of\n      Err(e) => println(\"decode error: {codec_error_message(e)}\")\n      Ok(d) => println(encode_surface(d))\n\n-- Every node id reached by walking each function body with the Prism-side\n-- `rnode_universe`, sorted ascending, one per line under a `count` header. A\n-- pure function of the decoded document: no source file or compiler state is\n-- consulted.\nfn print_resolved_ids(d : ResolvedDoc) =\n  let ids = sort(\n      concat_map(\n          \\(f) -> map(\\(n) -> n.id, rnode_universe(f.body)),\n          d.functions,\n        ),\n    )\n  println(\"count {length(ids)}\")\n  print_ids(ids)\n\nfn print_ids(ids : List(Int)) : Unit ! {IO} =\n  match ids of\n    [] => ()\n    i :: rest =>\n      println(\"{i}\")\n      print_ids(rest)\n"
   },
   "raw": [
     {
@@ -2255,160 +2255,144 @@
       ]
     },
     {
-      "kind": "uid",
+      "kind": "[",
       "span": [
         2161,
-        2164
-      ],
-      "value": "Nil"
+        2162
+      ]
+    },
+    {
+      "kind": "]",
+      "span": [
+        2162,
+        2163
+      ]
     },
     {
       "kind": "=>",
       "span": [
-        2165,
-        2167
+        2164,
+        2166
       ]
     },
     {
       "kind": "(",
+      "span": [
+        2167,
+        2168
+      ]
+    },
+    {
+      "kind": ")",
       "span": [
         2168,
         2169
       ]
     },
     {
-      "kind": ")",
-      "span": [
-        2169,
-        2170
-      ]
-    },
-    {
-      "kind": "uid",
-      "span": [
-        2175,
-        2179
-      ],
-      "value": "Cons"
-    },
-    {
-      "kind": "(",
-      "span": [
-        2179,
-        2180
-      ]
-    },
-    {
       "kind": "ident",
       "span": [
-        2180,
-        2181
+        2174,
+        2175
       ],
       "value": "i"
     },
     {
-      "kind": ",",
+      "kind": "::",
       "span": [
-        2181,
-        2182
+        2176,
+        2178
       ]
     },
     {
       "kind": "ident",
       "span": [
-        2183,
-        2187
+        2179,
+        2183
       ],
       "value": "rest"
     },
     {
-      "kind": ")",
-      "span": [
-        2187,
-        2188
-      ]
-    },
-    {
       "kind": "=>",
       "span": [
-        2189,
-        2191
+        2184,
+        2186
       ]
     },
     {
       "kind": "ident",
       "span": [
-        2198,
-        2205
+        2193,
+        2200
       ],
       "value": "println"
     },
     {
       "kind": "(",
       "span": [
-        2205,
-        2206
+        2200,
+        2201
       ]
     },
     {
       "kind": "istart",
       "span": [
-        2206,
-        2208
+        2201,
+        2203
       ],
       "value": ""
     },
     {
       "kind": "ident",
       "span": [
-        2208,
-        2209
+        2203,
+        2204
       ],
       "value": "i"
     },
     {
       "kind": "iend",
       "span": [
-        2209,
-        2211
+        2204,
+        2206
       ],
       "value": ""
     },
     {
       "kind": ")",
       "span": [
-        2211,
-        2212
+        2206,
+        2207
       ]
     },
     {
       "kind": "ident",
       "span": [
-        2219,
-        2228
+        2214,
+        2223
       ],
       "value": "print_ids"
     },
     {
       "kind": "(",
       "span": [
-        2228,
-        2229
+        2223,
+        2224
       ]
     },
     {
       "kind": "ident",
       "span": [
-        2229,
-        2233
+        2224,
+        2228
       ],
       "value": "rest"
     },
     {
       "kind": ")",
       "span": [
-        2233,
-        2234
+        2228,
+        2229
       ]
     }
   ],
@@ -4977,209 +4961,193 @@
       ]
     },
     {
-      "kind": "uid",
+      "kind": "[",
       "span": [
         2161,
-        2164
-      ],
-      "value": "Nil"
+        2162
+      ]
+    },
+    {
+      "kind": "]",
+      "span": [
+        2162,
+        2163
+      ]
     },
     {
       "kind": "=>",
       "span": [
-        2165,
-        2167
+        2164,
+        2166
       ]
     },
     {
       "kind": "(",
+      "span": [
+        2167,
+        2168
+      ]
+    },
+    {
+      "kind": ")",
       "span": [
         2168,
         2169
       ]
     },
     {
-      "kind": ")",
-      "span": [
-        2169,
-        2170
-      ]
-    },
-    {
       "kind": "v;",
       "span": [
-        2170,
-        2170
-      ]
-    },
-    {
-      "kind": "uid",
-      "span": [
-        2175,
-        2179
-      ],
-      "value": "Cons"
-    },
-    {
-      "kind": "(",
-      "span": [
-        2179,
-        2180
+        2169,
+        2169
       ]
     },
     {
       "kind": "ident",
       "span": [
-        2180,
-        2181
+        2174,
+        2175
       ],
       "value": "i"
     },
     {
-      "kind": ",",
+      "kind": "::",
       "span": [
-        2181,
-        2182
+        2176,
+        2178
       ]
     },
     {
       "kind": "ident",
       "span": [
-        2183,
-        2187
+        2179,
+        2183
       ],
       "value": "rest"
     },
     {
-      "kind": ")",
-      "span": [
-        2187,
-        2188
-      ]
-    },
-    {
       "kind": "=>",
       "span": [
-        2189,
-        2191
+        2184,
+        2186
       ]
     },
     {
       "kind": "v{",
       "span": [
-        2198,
-        2198
+        2193,
+        2193
       ]
     },
     {
       "kind": "ident",
       "span": [
-        2198,
-        2205
+        2193,
+        2200
       ],
       "value": "println"
     },
     {
       "kind": "(",
       "span": [
-        2205,
-        2206
+        2200,
+        2201
       ]
     },
     {
       "kind": "istart",
       "span": [
-        2206,
-        2208
+        2201,
+        2203
       ],
       "value": ""
     },
     {
       "kind": "ident",
       "span": [
-        2208,
-        2209
+        2203,
+        2204
       ],
       "value": "i"
     },
     {
       "kind": "iend",
       "span": [
-        2209,
-        2211
+        2204,
+        2206
       ],
       "value": ""
     },
     {
       "kind": ")",
       "span": [
-        2211,
-        2212
+        2206,
+        2207
       ]
     },
     {
       "kind": "v;",
       "span": [
-        2212,
-        2212
+        2207,
+        2207
       ]
     },
     {
       "kind": "ident",
       "span": [
-        2219,
-        2228
+        2214,
+        2223
       ],
       "value": "print_ids"
     },
     {
       "kind": "(",
       "span": [
-        2228,
-        2229
+        2223,
+        2224
       ]
     },
     {
       "kind": "ident",
       "span": [
-        2229,
-        2233
+        2224,
+        2228
       ],
       "value": "rest"
     },
     {
       "kind": ")",
       "span": [
-        2233,
-        2234
+        2228,
+        2229
       ]
     },
     {
       "kind": "v}",
       "span": [
-        2234,
-        2234
+        2229,
+        2229
       ]
     },
     {
       "kind": "v}",
       "span": [
-        2234,
-        2234
+        2229,
+        2229
       ]
     },
     {
       "kind": "v}",
       "span": [
-        2234,
-        2234
+        2229,
+        2229
       ]
     },
     {
       "kind": "v}",
       "span": [
-        2234,
-        2234
+        2229,
+        2229
       ]
     }
   ],

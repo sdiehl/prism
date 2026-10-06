@@ -73,7 +73,10 @@ fn check(fixture: &str) -> Value {
 /// the same way for every fixture.
 fn assert_parity(report: &Value, supported: u64, total: u64, uncovered: &[(&str, &str)]) {
     assert_eq!(report["schema"], "prism-bootstrap-check-v2");
-    assert_eq!(report["scheme_contract"], prism::SCHEME_CANON_CONTRACT);
+    assert_eq!(
+        report["scheme_contract"],
+        prism::SCHEME_CANON_CONTRACT.as_str()
+    );
     assert_eq!(report["authority"], "rust");
     assert_eq!(report["shadow"], "prism-t1");
     assert_eq!(report["status"], "parity");

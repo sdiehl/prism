@@ -679,6 +679,7 @@ fn comp_alloc(
                 Comp::Handle {
                     body,
                     return_body,
+                    finally_body,
                     ops,
                     ..
                 } => {
@@ -686,10 +687,16 @@ fn comp_alloc(
                     // cells, independently of the source clause bodies.
                     out.push(AllocWitness::Runtime("effect handler"));
                     work.push(AllocFrame::Reduce(AllocReduce::Add {
-                        children: 1 + usize::from(return_body.is_some()) + ops.len(),
+                        children: 1
+                            + usize::from(return_body.is_some())
+                            + usize::from(finally_body.is_some())
+                            + ops.len(),
                         base: Alloc::Unlimited,
                     }));
                     work.extend(ops.iter().rev().map(|op| AllocFrame::Comp(&op.body)));
+                    if let Some(finally_body) = finally_body {
+                        work.push(AllocFrame::Comp(finally_body));
+                    }
                     if let Some(return_body) = return_body {
                         work.push(AllocFrame::Comp(return_body));
                     }
@@ -1116,6 +1123,7 @@ enum UseReduce<'a> {
     Handle {
         return_var: Option<Sym>,
         has_return: bool,
+        has_finally: bool,
         ops: &'a [HandleOp],
     },
 }
@@ -1331,14 +1339,19 @@ impl LinearAnalysis<'_> {
                             body,
                             return_var,
                             return_body,
+                            finally_body,
                             ops,
                         } => {
                             work.push(UseFrame::Reduce(UseReduce::Handle {
                                 return_var: *return_var,
                                 has_return: return_body.is_some(),
+                                has_finally: finally_body.is_some(),
                                 ops: ops.arms(),
                             }));
                             work.extend(ops.iter().rev().map(|op| UseFrame::Comp(&op.body)));
+                            if let Some(finally_body) = finally_body {
+                                work.push(UseFrame::Comp(finally_body));
+                            }
                             if let Some(return_body) = return_body {
                                 work.push(UseFrame::Comp(return_body));
                             }
@@ -1431,6 +1444,7 @@ impl LinearAnalysis<'_> {
                         UseReduce::Handle {
                             return_var,
                             has_return,
+                            has_finally,
                             ops,
                         } => {
                             // Handler regions conservatively compose as one path.
@@ -1444,6 +1458,12 @@ impl LinearAnalysis<'_> {
                                     clause.remove(param);
                                 }
                                 uses = add_uses(uses, clause);
+                            }
+                            if has_finally {
+                                let cleanup = results.pop().expect(
+                                    "linearity worklist has a result for the handler cleanup body",
+                                );
+                                uses = add_uses(uses, cleanup);
                             }
                             if has_return {
                                 let mut returned = results.pop().expect(
@@ -2358,6 +2378,7 @@ mod tests {
             body: Box::new(Comp::Return(Value::Var("s".into()))),
             return_var: None,
             return_body: None,
+            finally_body: None,
             ops,
         };
         let function = linfn("f", &["s"], body);
@@ -2701,6 +2722,7 @@ mod tests {
                 body: Box::new(Comp::Do("emit".into(), Vec::new())),
                 return_var: None,
                 return_body: None,
+                finally_body: None,
                 ops,
             },
         );

@@ -4,12 +4,13 @@
 // decides nothing of its own, so these check that each sentence tracks the fact
 // it claims, across rungs and across causes, plus determinism.
 
+use prism::DumpPhase;
 use std::path::Path;
 
 use prism::{default_roots, dump, dump_on, with_prelude, Config, EffectStrategy};
 
 fn explain(src: &str) -> String {
-    dump("tier-explain", &with_prelude(src)).expect("tier-explain")
+    dump(DumpPhase::TierExplain, &with_prelude(src)).expect("tier-explain")
 }
 
 // The sentence for one definition, by name.
@@ -87,7 +88,7 @@ fn confined_region_names_the_escape_and_the_definitions_outside_it() {
         flags.reify = false;
     });
     let out = dump_on(
-        "tier-explain",
+        DumpPhase::TierExplain,
         &with_prelude(LOCAL_SRC),
         &default_roots(Path::new(".")),
         &config,
@@ -125,18 +126,61 @@ fn escaping_computations_use_the_consolidated_route_by_default() {
     }
 }
 
-// Every sentence is one of the two forms, and every definition the plan covers
-// gets exactly one.
+// Every line is a cause sentence, or the witness chain under the sentence of a
+// definition carrying a costing fact.
 #[test]
-fn every_line_is_one_sentence() {
+fn every_line_is_one_sentence_or_its_chain() {
     for src in [PURE_SRC, STATE_SRC, LOCAL_SRC] {
         for l in explain(src).lines().filter(|l| !l.is_empty()) {
             assert!(
-                l.contains(" because ") && l.ends_with('.'),
-                "not a cause sentence: {l}"
+                (l.contains(" because ") && l.ends_with('.')) || l.starts_with("  via main"),
+                "not a cause sentence or a chain: {l}"
             );
         }
     }
+}
+
+// The chains are a golden: shortest paths from `main`, ties broken by name, the
+// edge into the first costing definition drawn `=>`. A definition reached only
+// through a costing one keeps `->` after it.
+#[test]
+fn chains_name_the_path_and_the_edge_that_costs() {
+    let chains: Vec<String> = explain(STATE_SRC)
+        .lines()
+        .filter(|l| l.starts_with("  via"))
+        .map(str::to_string)
+        .collect();
+    assert_eq!(
+        chains,
+        [
+            "  via main -> run_counter => counter",
+            "  via main -> run_counter => counter -> tick",
+        ]
+    );
+}
+
+// The chain order is a projection of names to strings, not interning order: a
+// fresh process, which interns in another order than this test binary, prints
+// the same lines (the CLI adds a final newline).
+#[test]
+fn tier_explain_is_stable_across_processes() {
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_prism"))
+        .args([
+            "dump",
+            "tier-explain",
+            "tests/cases/run/local_mono_multishot.pr",
+        ])
+        .output()
+        .expect("spawn prism");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim_end(),
+        explain(LOCAL_SRC).trim_end()
+    );
 }
 
 // The dump is a pure function of the source: two runs are byte-identical.

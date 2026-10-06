@@ -49,8 +49,8 @@ pub fn graph_add_edge(
 -- Insert `x` into the ascending, duplicate-free list `xs`.
 fn insert_sorted_uniq(x : k, xs : List(k)) : List(k) given Ord(k) =
   match xs of
-    Nil => Cons(x, Nil)
-    Cons(y, rest) =>
+    [] => Cons(x, Nil)
+    y :: rest =>
       let c = cmp(x, y)
       if c < 0 then
         Cons(x, xs)
@@ -124,8 +124,8 @@ fn dfs_go(
   acc : List(k)
 ) : (Map(k, Unit), List(k)) given Ord(k) =
   match stack of
-    Nil => (seen, acc)
-    Cons(u, rest) =>
+    [] => (seen, acc)
+    u :: rest =>
       if set_member(u, seen) then
         dfs_go(g, rest, seen, acc)
       else
@@ -151,8 +151,8 @@ fn bfs_go(
   acc : List(k)
 ) : List(k) given Ord(k) =
   match queue of
-    Nil => acc
-    Cons(u, rest) =>
+    [] => acc
+    u :: rest =>
       match push_unseen(graph_successors(g, u), seen, Nil) of
         (fresh, seen2) =>
           bfs_go(g, append(rest, reverse(fresh)), seen2, Cons(u, acc))
@@ -164,8 +164,8 @@ fn push_unseen(
   acc : List(k)
 ) : (List(k), Map(k, Unit)) given Ord(k) =
   match vs of
-    Nil => (acc, seen)
-    Cons(v, rest) =>
+    [] => (acc, seen)
+    v :: rest =>
       if set_member(v, seen) then
         push_unseen(rest, seen, acc)
       else
@@ -287,12 +287,12 @@ fn scc_drive(
   match st of
     (meta, on, cstk, next, sccs, work) =>
       match work of
-        Nil => st
-        Cons(frame, rest) =>
+        [] => st
+        frame :: rest =>
           match frame of
             (v, succs) =>
               match succs of
-                Cons(w, more) =>
+                w :: more =>
                   let work2 = Cons((v, more), rest)
                   match map_lookup(w, meta) of
                     None =>
@@ -318,7 +318,7 @@ fn scc_drive(
                               ))
                           else
                             scc_drive(g, (meta, on, cstk, next, sccs, work2))
-                Nil =>
+                [] =>
                   -- `v` is done: pop its component if it is a root, then push its
                   -- lowlink up to the parent frame. Inlined (not a mutually
                   -- recursive helper) so `scc_drive` only ever self-recurses,
@@ -327,9 +327,9 @@ fn scc_drive(
                   match rooted(v, meta, on, cstk, sccs) of
                     (on2, cstk2, sccs2) =>
                       match rest of
-                        Nil =>
+                        [] =>
                           scc_drive(g, (meta, on2, cstk2, next, sccs2, rest))
-                        Cons(pf, _) =>
+                        pf :: _ =>
                           match pf of
                             (p, _ps) =>
                               scc_drive(g, (
@@ -366,8 +366,8 @@ fn pop_component(
   acc : List(k)
 ) : (List(k), List(k), Map(k, Unit)) given Ord(k) =
   match stack of
-    Nil => (acc, Nil, onstack)
-    Cons(u, rest) =>
+    [] => (acc, Nil, onstack)
+    u :: rest =>
       let on2 = set_delete(u, onstack)
       if cmp(u, v) == 0 then
         (Cons(u, acc), rest, on2)

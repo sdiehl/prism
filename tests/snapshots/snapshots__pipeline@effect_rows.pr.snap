@@ -21,6 +21,7 @@ Program {
                     ],
                     ret: Int,
                     grade: Many,
+                    span: 13..18,
                 },
             ],
             span: 0..29,

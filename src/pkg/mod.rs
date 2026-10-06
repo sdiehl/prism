@@ -69,8 +69,8 @@ const PACKAGE_SOURCE_LABEL_PREFIX: &str = "<package ";
 /// # Errors
 /// Fails if the Std pin uses a foreign hash scheme, or if the embedded standard
 /// library does not elaborate, a compiler bug.
-pub fn stdlib_root() -> Result<String, Error> {
-    Ok(crate::driver::stdlib_hash()?.root.into_string())
+pub fn stdlib_root() -> Result<Digest, Error> {
+    Ok(crate::driver::stdlib_hash()?.root)
 }
 
 /// Where a lockfile's Std pin stands against the standard library this compiler
@@ -88,7 +88,7 @@ pub enum StdPin {
     Match,
     /// The pinned root differs from the embedded stdlib's: the compiler ships a
     /// different Std than the lock was written for. Both roots are reported.
-    Mismatch { pinned: String, embedded: String },
+    Mismatch { pinned: Digest, embedded: Digest },
 }
 
 /// Compare `lock`'s Std pin against the standard library this compiler embeds.
@@ -108,11 +108,11 @@ pub fn std_pin_status(lock: &Lock) -> Result<StdPin, Error> {
         lock.validate_current_scheme()?;
     }
     let embedded = stdlib_root()?;
-    if pinned == embedded {
+    if *pinned == embedded {
         Ok(StdPin::Match)
     } else {
         Ok(StdPin::Mismatch {
-            pinned: pinned.to_string(),
+            pinned: pinned.clone(),
             embedded,
         })
     }
@@ -134,7 +134,7 @@ pub fn stdlib_source_root(lock: &Lock, store_root: &Path) -> Result<Root, Error>
     };
     lock.validate_current_scheme()?;
     let embedded = stdlib_root()?;
-    if pinned == embedded {
+    if *pinned == embedded {
         return Ok(Root::Embedded(crate::stdlib::STDLIB));
     }
 
@@ -150,8 +150,8 @@ pub fn stdlib_source_root(lock: &Lock, store_root: &Path) -> Result<Root, Error>
         }
         Err(e) => return Err(Error::Io(e)),
     };
-    let got = blake3::hash(&bytes).to_hex().to_string();
-    if got != pinned {
+    let got = Digest::of_bytes(blake3::hash(&bytes).as_bytes());
+    if got != *pinned {
         return Err(Error::ResolvePackage(format!(
             "stdlib source bundle hash mismatch: prism.lock pins Std root {pinned}, store \
              contains {got}"
@@ -160,7 +160,7 @@ pub fn stdlib_source_root(lock: &Lock, store_root: &Path) -> Result<Root, Error>
     let modules = decode_source_bundle(&bytes)?;
     Ok(Root::identified_source_bundle(
         std_source_label(pinned),
-        SourceBundleIdentity::stdlib(HASH_SCHEME, pinned),
+        SourceBundleIdentity::stdlib(HASH_SCHEME, got),
         modules,
     ))
 }
@@ -267,8 +267,8 @@ fn package_source_root(
         }
         Err(e) => return Err(Error::Io(e)),
     };
-    let got = blake3::hash(&bytes).to_hex().to_string();
-    if got != root {
+    let got = Digest::of_bytes(blake3::hash(&bytes).as_bytes());
+    if got.as_str() != root {
         return Err(Error::ResolvePackage(format!(
             "dependency `{name}` source bundle hash mismatch: lock pins {root}, store contains {got}"
         )));
@@ -276,7 +276,7 @@ fn package_source_root(
     let modules = decode_source_bundle(&bytes)?;
     Ok(Root::identified_source_bundle(
         package_source_label(name, root),
-        SourceBundleIdentity::package_with_origin(name, origin, HASH_SCHEME, root),
+        SourceBundleIdentity::package_with_origin(name, origin, HASH_SCHEME, got),
         modules,
     ))
 }

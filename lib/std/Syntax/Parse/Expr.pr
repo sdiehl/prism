@@ -87,10 +87,30 @@ let atom_starts : List(TokenKind) =
       TFixed("true"),
     ]
 
+-- The keywords that open a whole expression but not an operand. A refusal at
+-- expression entry reports them with the operand starts, because the grammar's
+-- first set there holds both.
+let keyword_starts : List(TokenKind) =
+  [
+      TFixed("\\"),
+      TFixed("for"),
+      TFixed("handle"),
+      TFixed("if"),
+      TFixed("let"),
+      TFixed("loop"),
+      TFixed("match"),
+      TFixed("probe"),
+      TFixed("return"),
+      TFixed("throw"),
+      TFixed("transact"),
+      TFixed("try"),
+      TFixed("while"),
+    ]
+
 fn note_kinds(c : Cursor, ks : List(TokenKind)) : Cursor =
   match ks of
-    Nil => c
-    Cons(k, rest) => note_kinds(cursor_note(c, k), rest)
+    [] => c
+    k :: rest => note_kinds(cursor_note(c, k), rest)
 
 fn note_expr(c : Cursor) : Cursor = note_kinds(c, atom_starts)
 
@@ -104,8 +124,8 @@ fn split_int(raw : String) : (String, Suffix) =
     (surface_int(raw), SufNone)
 
 -- Binding powers are doubled in spirit but written out: left associative
--- operators raise the right floor; `??` and `^` keep it level. Unary minus
--- parses at 16, between multiplication and power, giving both `-x ^ y` and
+-- operators raise the right floor; `??`, `::`, and `^` keep it level. Unary minus
+-- parses at 20, between multiplication and power, giving both `-x ^ y` and
 -- `x ^ -y` the mathematical grouping used by the Rust grammar.
 -- lint: allow(L0101)
 fn infix_binding(k : TokenKind) : Option(Binding) =
@@ -125,12 +145,32 @@ fn infix_binding(k : TokenKind) : Option(Binding) =
         Some(Binding { op = s, left = 8, right = 9, compare = false, tag = 0 })
       elif (s == "==" || s == "/=" || s == "<" || s == "<=" || s == ">" || s == ">=") then
         Some(Binding { op = s, left = 10, right = 11, compare = true, tag = 0 })
-      elif s == "+" || s == "-" then
+      elif s == "</>" then
         Some(
             Binding {
               op = s,
               left = 12,
               right = 13,
+              compare = false,
+              tag = 6
+            },
+          )
+      elif s == "::" then
+        Some(
+            Binding {
+              op = s,
+              left = 15,
+              right = 14,
+              compare = false,
+              tag = 5
+            },
+          )
+      elif s == "+" || s == "-" then
+        Some(
+            Binding {
+              op = s,
+              left = 16,
+              right = 17,
               compare = false,
               tag = 0
             },
@@ -139,8 +179,8 @@ fn infix_binding(k : TokenKind) : Option(Binding) =
         Some(
             Binding {
               op = s,
-              left = 14,
-              right = 15,
+              left = 18,
+              right = 19,
               compare = false,
               tag = 0
             },
@@ -149,8 +189,8 @@ fn infix_binding(k : TokenKind) : Option(Binding) =
         Some(
             Binding {
               op = s,
-              left = 17,
-              right = 16,
+              left = 21,
+              right = 20,
               compare = false,
               tag = 0
             },
@@ -196,6 +236,10 @@ fn infix_node(b : Binding, lhs : Sp(Expr), rhs : Sp(Expr)) : Expr =
     ECompose("forward", lhs, rhs)
   elif b.tag == 4 then
     ECompose("backward", lhs, rhs)
+  elif b.tag == 5 then
+    ECons(lhs, rhs)
+  elif b.tag == 6 then
+    EPathJoin(lhs, rhs)
   else
     EBin(b.op, lhs, rhs)
 
@@ -210,7 +254,7 @@ fn parse_prefix(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
   if at_fixed(c, "-") then
     let saved = c
     let c1 = cursor_advance(c)
-    let p2 = parse_bp(c1, depth, 16)
+    let p2 = parse_bp(c1, depth, 20)
     let PTook(e, c2) = p2 else parsed_refused(p2)
     PTook(made(saved, c2, ENeg(e)), c2)
   else
@@ -360,7 +404,10 @@ fn parse_call_args(
     let PTook(names, c1) = p1 else parsed_refused(p1)
     PTook((reverse(rev), Some(names)), c1)
   else
-    let p2 = parse_expr(c, depth)
+    let p2 = parse_expr(
+        cursor_note(cursor_note(c, TFixed(")")), TFixed("using")),
+        depth,
+      )
     let PTook(e, c1) = p2 else parsed_refused(p2)
     if at_fixed(c1, ",") then
       let c2 = cursor_advance(c1)
@@ -405,8 +452,8 @@ fn parse_index_tail(
   let key =
     if length(indices) == 1 then
       match indices of
-        Cons(one, _) => one
-        Nil => first
+        one :: _ => one
+        [] => first
     else
       synthesized(EList(indices), recv.span.lo, hi)
   let whole = authored(EIndex(recv, key), recv.span.lo, hi)
@@ -788,8 +835,8 @@ fn path_step_fields(
   acc : List(String)
 ) : Option(List(String)) =
   match steps of
-    Nil => Some(acc)
-    Cons(step, rest) =>
+    [] => Some(acc)
+    step :: rest =>
       match step of
         PSField(field) => path_step_fields(rest, append(acc, [field]))
         _ => None
@@ -800,15 +847,15 @@ fn finish_path_literal(
   c : Cursor
 ) : Parsed(Sp(Expr)) =
   match all of
-    Nil => PFault(refuse(span, path_anchor_msg()))
-    Cons(head, rest) =>
+    [] => PFault(refuse(span, path_anchor_msg()))
+    head :: rest =>
       -- An uppercase head is a root-type anchor rather than a field, since
       -- fields are lowercase. It rides both binders as an ordinary annotation,
       -- which is what lets the literal sit inline where nothing else names the
       -- whole type.
       if str_len(head) > 0 && is_upper(char_at(head, 0)) then
         match rest of
-          Nil => PFault(refuse(span, path_anchor_msg()))
+          [] => PFault(refuse(span, path_anchor_msg()))
           _ => PTook(path_lens_expr(rest, Some(TyCon(head, Nil)), span), c)
       else
         PTook(path_lens_expr(all, None, span), c)
@@ -825,8 +872,8 @@ fn path_param(name : String, ty : Option(Ty)) : Param =
 -- Read the chain out of the whole, one field at a time.
 fn path_read(fields : List(String), acc : Sp(Expr), span : Span) : Sp(Expr) =
   match fields of
-    Nil => acc
-    Cons(field, rest) =>
+    [] => acc
+    field :: rest =>
       path_read(rest, authored(EField(acc, field), span.lo, span.hi), span)
 
 -- The lens the literal expands to: a getter that reads the chain and a setter
@@ -1125,8 +1172,8 @@ fn parse_case_segment(c : Cursor, depth : Int) : Parsed(List(PathStep)) =
       elif t.kind == TQual then
         let pieces = split(char_at(".", 0), token_text(t))
         match pieces of
-          Nil => PStuck(cursor_note(c, TQual))
-          Cons(ctor, fields) =>
+          [] => PStuck(cursor_note(c, TQual))
+          ctor :: fields =>
             let steps =
               Cons(PSCase(ctor), map(\(field) -> PSField(field), fields))
             parse_path_indexes(cursor_advance(c), depth, steps)
@@ -1204,9 +1251,14 @@ fn parse_expr_top(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
       && (fixed_at(c, 1, "fn") || fixed_at(c, 1, "type"))) then
     parse_reflect(c)
   else
-    let p1 = parse_bp(c, depth, 0)
-    let PTook(lhs, c1) = p1 else parsed_refused(p1)
-    parse_assignment_tail(c, lhs, c1, depth)
+    match parse_bp(c, depth, 0) of
+      PTook(lhs, c1) => parse_assignment_tail(c, lhs, c1, depth)
+      PFault(d) => PFault(d)
+      PStuck(c1) =>
+        if c1.pos == c.pos then
+          PStuck(note_kinds(c1, keyword_starts))
+        else
+          PStuck(c1)
 
 fn parse_assignment_tail(
   saved : Cursor,
@@ -1330,7 +1382,7 @@ fn state_route(lhs : Sp(Expr), op : PathOp, span : Span) : Option(Sp(Expr)) =
     None => None
     Some(steps) =>
       match steps of
-        Nil => None
+        [] => None
         _ => Some(state_assign(steps, op, span))
 
 -- A statement lvalue flattened to a root binder and the steps taken from it.
@@ -1364,8 +1416,8 @@ fn lvalue_path(e : Expr) : Option(LPath) =
 -- the path route existed desugar exactly as they did.
 fn has_field_step(steps : List(PathStep)) : Bool =
   match steps of
-    Nil => false
-    Cons(step, rest) =>
+    [] => false
+    step :: rest =>
       match step of
         PSField(_) => true
         _ => has_field_step(rest)
@@ -1377,8 +1429,8 @@ fn state_lvalue(e : Expr) : Option(List(PathStep)) =
   match e of
     ECall(callee, args) =>
       match args of
-        Cons(_, _) => None
-        Nil =>
+        _ :: _ => None
+        [] =>
           match callee.node of
             EVar(name) =>
               if name == state_get() then
@@ -1447,7 +1499,13 @@ pub fn parse_expr_or_block(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
   if at_kind(c, TVOpen) then
     parse_block(c, depth)
   else
-    parse_expr(c, depth)
+    match parse_expr(c, depth) of
+      PStuck(c1) =>
+        if c1.pos == c.pos then
+          PStuck(cursor_note(c1, TVOpen))
+        else
+          PStuck(c1)
+      other => other
 
 fn parse_if_form(
   saved : Cursor,
@@ -1537,10 +1595,10 @@ fn widen_if_chain(e : Sp(Expr), lo : Int) : Sp(Expr) =
 fn parse_let_form(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
   let saved = c
   let c1 = cursor_advance(c)
-  if at_kind(c1, TIdent) then
+  if at_kind(c1, TIdent) && not(at_fixed(cursor_advance(c1), "::")) then
     let p2 = take_word(c1, TIdent)
     let PTook(name, c2) = p2 else parsed_refused(p2)
-    let p3 = take_fixed(c2, "=")
+    let p3 = take_fixed(cursor_note(c2, TFixed("::")), "=")
     let PTook(_, c3) = p3 else parsed_refused(p3)
     let p4 = parse_expr(c3, depth)
     let PTook(value, c4) = p4 else parsed_refused(p4)
@@ -1989,8 +2047,28 @@ fn parse_handler_arm(c : Cursor, depth : Int) : Parsed(HandlerArm) =
     PTook(HVal(name, body), c3)
   elif at_kind(c, TIdent) && kind_at(c, 1, TIdent) then
     parse_graded_arm(c, depth)
+  elif at_kind(c, TIdent) && fixed_at(c, 1, "=>") then
+    parse_finally_arm(c, depth)
   else
     parse_operation_arm(c, depth)
+
+-- The cleanup clause `finally => body`. The word is contextual, so any other
+-- bare word before `=>` is refused with the clause shapes it could have been.
+fn parse_finally_arm(c : Cursor, depth : Int) : Parsed(HandlerArm) =
+  let p1 = take_word(c, TIdent)
+  let PTook(word, c1) = p1 else parsed_refused(p1)
+  if word /= "finally" then
+    fail_run(
+        c,
+        c1,
+        "`{word}` is not a handler clause: write `finally => ...` for the cleanup clause, `return x => ...`, `op(params) resume k => ...`, `once op(params) => ...`, `never op(params) => ...`, or `val name = ...`",
+      )
+  else
+    let p2 = take_fixed(c1, "=>")
+    let PTook(_, c2) = p2 else parsed_refused(p2)
+    let p3 = parse_expr_or_block(c2, depth)
+    let PTook(body, c3) = p3 else parsed_refused(p3)
+    PTook(HFinally(body), c3)
 
 -- lint: allow(L0101)
 fn parse_graded_arm(c : Cursor, depth : Int) : Parsed(HandlerArm) =
@@ -2118,7 +2196,7 @@ fn try_scrutinee(e : Sp(Expr)) : Option(Sp(Expr)) =
         EMarker(marker) =>
           if marker == "try" then
             match args of
-              Cons(scrutinee, Nil) => Some(scrutinee)
+              [scrutinee] => Some(scrutinee)
               _ => None
           else
             None
@@ -2312,10 +2390,10 @@ fn parse_anonymous_with_handler(
 fn parse_let_stmt(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
   let saved = c
   let c1 = cursor_advance(c)
-  if at_kind(c1, TIdent) then
+  if at_kind(c1, TIdent) && not(at_fixed(cursor_advance(c1), "::")) then
     let p2 = take_word(c1, TIdent)
     let PTook(name, c2) = p2 else parsed_refused(p2)
-    let p3 = take_fixed(c2, "=")
+    let p3 = take_fixed(cursor_note(c2, TFixed("::")), "=")
     let PTook(_, c3) = p3 else parsed_refused(p3)
     let p4 = parse_expr_or_block(c3, depth)
     let PTook(value, c4) = p4 else parsed_refused(p4)
@@ -2323,7 +2401,7 @@ fn parse_let_stmt(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
       if at_fixed(c4, "in") then
         cursor_advance(c4)
       else
-        c4
+        cursor_note(c4, TFixed("in"))
     let p6 = take_kind(c5, TVSemi)
     let PTook(_, c6) = p6 else parsed_refused(p6)
     let p7 = parse_stmts(c6, depth)
@@ -2345,7 +2423,10 @@ fn parse_let_stmt(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
       let PTook(rest, c7) = p10 else parsed_refused(p10)
       PTook(build_pattern_let_stmt(pat, value, rest, cursor_span(saved).lo), c7)
     else
-      let p9 = take_kind(c4, TVSemi)
+      let p9 = take_kind(
+          cursor_note(cursor_note(c4, TFixed("else")), TFixed("in")),
+          TVSemi,
+        )
       let PTook(_, c6) = p9 else parsed_refused(p9)
       if at_fixed(c6, "else") then
         parse_let_else(saved, pat, value, cursor_advance(c6), depth)

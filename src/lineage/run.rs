@@ -52,7 +52,7 @@ pub struct RunLineageInput<'a> {
     pub source: &'a str,
     pub roots: &'a [Root],
     pub cfg: &'a Config,
-    pub backend: &'a str,
+    pub backend: crate::driver::ArtifactBackend,
     pub argv: Vec<String>,
     pub events: &'a [CapEvent],
     /// The run's complete ordered observation artifact.

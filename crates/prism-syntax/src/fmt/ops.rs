@@ -9,9 +9,40 @@ pub(super) const fn binop_prec(op: BinOp) -> u8 {
         BinOp::And => 2,
         BinOp::Eq | BinOp::Ne => 3,
         BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => 4,
-        BinOp::Add | BinOp::Sub => 5,
-        BinOp::Mul | BinOp::Div | BinOp::Rem => 6,
-        BinOp::Pow => 7,
+        BinOp::Add | BinOp::Sub => 7,
+        BinOp::Mul | BinOp::Div | BinOp::Rem => 8,
+        BinOp::Pow => 9,
+    }
+}
+
+// Path join `a </> b` and list cons `x :: xs` sit on the binary ladder between
+// comparison and the additive operators, the join looser than cons. Both are
+// sugar rather than a `BinOp`, but they parenthesize by the same precedence
+// comparison as one.
+pub(super) const PATH_PREC: u8 = 5;
+pub(super) const CONS_PREC: u8 = 6;
+
+// Whether an operand of `::` keeps its parens. The head is an additive operand
+// and the tail recurses at the cons level (right associative), so a cons on the
+// left must keep its parens and one on the right needs none.
+pub(super) const fn cons_operand_needs_paren(child: &Expr, head: bool) -> bool {
+    match child {
+        Expr::Bin(op, ..) => binop_prec(*op) < CONS_PREC,
+        Expr::Sugar(Sugar::Cons(..)) => head,
+        Expr::Sugar(Sugar::PathJoin(..)) => true,
+        _ => low_prec_operand(child),
+    }
+}
+
+// Whether an operand of `</>` keeps its parens. The join is left associative
+// over cons operands, so a join on the right keeps its parens, one on the left
+// needs none, and a cons on either side needs none.
+pub(super) const fn path_operand_needs_paren(child: &Expr, left: bool) -> bool {
+    match child {
+        Expr::Bin(op, ..) => binop_prec(*op) < PATH_PREC,
+        Expr::Sugar(Sugar::PathJoin(..)) => !left,
+        Expr::Sugar(Sugar::Cons(..)) => false,
+        _ => low_prec_operand(child),
     }
 }
 
@@ -64,7 +95,9 @@ pub(super) const fn low_prec_operand(child: &Expr) -> bool {
 // `-(a ^ b)`, the mathematical convention. A tighter operand (a call, a
 // projection, an atom, or a nested negation) needs none.
 pub(super) const fn neg_operand_needs_paren(child: &Expr) -> bool {
-    matches!(child, Expr::Bin(op, ..) if !matches!(op, BinOp::Pow)) || low_prec_operand(child)
+    matches!(child, Expr::Bin(op, ..) if !matches!(op, BinOp::Pow))
+        || matches!(child, Expr::Sugar(Sugar::Cons(..) | Sugar::PathJoin(..)))
+        || low_prec_operand(child)
 }
 
 // Every comparison operator lives at one non-associative grammar level
@@ -96,6 +129,8 @@ pub(super) const fn needs_left_paren(child: &Expr, parent_op: BinOp, parent_prec
         // (`(-2) ^ 2`); without them the print reparses as `-(2 ^ 2)`. Under any
         // other operator a negation binds tighter and needs none.
         Expr::Neg(..) => matches!(parent_op, BinOp::Pow),
+        Expr::Sugar(Sugar::Cons(..)) => CONS_PREC < parent_prec,
+        Expr::Sugar(Sugar::PathJoin(..)) => PATH_PREC < parent_prec,
         _ => low_prec_operand(child),
     }
 }
@@ -121,6 +156,8 @@ pub(super) const fn needs_right_paren(child: &Expr, parent_op: BinOp, parent_pre
             // the right-nested tree, so those parens are redundant and go.
             !matches!(parent_op, BinOp::Pow)
         }
+        Expr::Sugar(Sugar::Cons(..)) => CONS_PREC < parent_prec,
+        Expr::Sugar(Sugar::PathJoin(..)) => PATH_PREC < parent_prec,
         _ => low_prec_operand(child),
     }
 }

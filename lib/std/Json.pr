@@ -648,8 +648,8 @@ fn encode_float(f : Float) : String =
 -- order.
 fn sort_pairs(xs : List((String, Json))) : List((String, Json)) =
   match xs of
-    Nil => Nil
-    Cons(_, Nil) => xs
+    [] => Nil
+    [_] => xs
     _ =>
       let (l, r) = split_alt(xs)
       merge_pairs(sort_pairs(l), sort_pairs(r))
@@ -658,9 +658,9 @@ fn sort_pairs(xs : List((String, Json))) : List((String, Json)) =
 -- length or indexing.
 fn split_alt(xs : List((String, Json))) : (List((String, Json)), List((String, Json))) =
   match xs of
-    Nil => (Nil, Nil)
-    Cons(a, Nil) => (Cons(a, Nil), Nil)
-    Cons(a, Cons(b, rest)) =>
+    [] => (Nil, Nil)
+    [a] => (Cons(a, Nil), Nil)
+    a :: b :: rest =>
       let (l, r) = split_alt(rest)
       (Cons(a, l), Cons(b, r))
 
@@ -669,9 +669,9 @@ fn merge_pairs(
   b : List((String, Json))
 ) : List((String, Json)) =
   match (a, b) of
-    (Nil, _) => b
-    (_, Nil) => a
-    (Cons(x, xs), Cons(y, ys)) =>
+    ([], _) => b
+    (_, []) => a
+    (x :: xs, y :: ys) =>
       match (x, y) of
         ((kx, _), (ky, _)) =>
           if str_cmp(kx, ky) <= 0 then
@@ -838,15 +838,15 @@ instance fromJsonOption : FromJson(Option(a)) given FromJson(a)
 instance fromJsonPair : FromJson((a, b)) given FromJson(a), FromJson(b)
   fn from_json(j) =
     match j of
-      JArr(Cons(x, Cons(y, Nil))) => (from_json(x), from_json(y))
+      JArr([x, y]) => (from_json(x), from_json(y))
       _ => fail()
 
 -- Decode each element of a JSON array, threading `Fail` so one bad element fails
 -- the whole list.
 fn from_json_each(xs : List(Json)) : List(a) given FromJson(a) =
   match xs of
-    Nil => Nil
-    Cons(y, rest) => Cons(from_json(y), from_json_each(rest))
+    [] => Nil
+    y :: rest => Cons(from_json(y), from_json_each(rest))
 
 -- | The member named `key` of an object's member list, or `fail()` when there is
 -- none. Members are kept in parse order and duplicates are preserved, so the
@@ -863,8 +863,8 @@ fn from_json_each(xs : List(Json)) : List(a) given FromJson(a) =
 -- ```
 pub fn json_field(kvs : List((String, Json)), key : String) : Json ! {Fail | e} =
   match kvs of
-    Nil => fail()
-    Cons(kv, rest) =>
+    [] => fail()
+    kv :: rest =>
       match kv of
         (k, v) =>
           if k == key then
@@ -929,8 +929,8 @@ fn json_rekey(
   cs : List(Json)
 ) : Option(List((String, Json))) =
   match (fields, cs) of
-    (Nil, Nil) => Some(Nil)
-    (Cons(kv, more), Cons(v, rest)) =>
+    ([], []) => Some(Nil)
+    (kv :: more, v :: rest) =>
       match json_rekey(more, rest) of
         None => None
         Some(tl) => Some(Cons((json_field_name(kv), v), tl))

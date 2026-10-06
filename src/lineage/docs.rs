@@ -65,7 +65,7 @@ pub struct DocsLineageInput<'a> {
     pub source: &'a str,
     pub roots: &'a [Root],
     pub cfg: &'a Config,
-    pub backend: &'a str,
+    pub backend: crate::driver::ArtifactBackend,
     pub pages: Vec<DocsPageInput>,
     pub doctests: Vec<DoctestInput>,
 }
@@ -116,7 +116,7 @@ impl DocsLineage {
             packages,
             compiler: identity.artifact,
             generator: DocsGeneratorPayload {
-                format: DOCS_GENERATOR_FORMAT.to_string(),
+                format: DOCS_GENERATOR_FORMAT,
             },
             pages,
             doctests,
@@ -240,7 +240,7 @@ pub fn verify_manifest_identity(
     source: &str,
     roots: &[Root],
     cfg: &Config,
-    backend: &str,
+    backend: crate::driver::ArtifactBackend,
 ) -> Result<(), Error> {
     let fresh = DocsLineage::collect(DocsLineageInput {
         request: stored_request(stored)?,

@@ -36,6 +36,18 @@ pub fn grade_word_msg(word: &str) -> String {
     )
 }
 
+// A handler clause of the shape `word => body` where the word is not `finally`.
+// The only binder-free clause is `finally`, so the message names it and the
+// other clause shapes rather than failing as a bare parse error.
+#[must_use]
+pub fn bare_clause_word_msg(word: &str) -> String {
+    format!(
+        "`{word}` is not a handler clause: write `finally => ...` for the cleanup clause, \
+         `return x => ...`, `op(params) resume k => ...`, `once op(params) => ...`, \
+         `never op(params) => ...`, or `val name = ...`"
+    )
+}
+
 // A handler clause written `many op(...)`: the multishot clause binds the
 // continuation explicitly instead of taking a grade keyword.
 pub const GRADE_MANY_CLAUSE: &str =

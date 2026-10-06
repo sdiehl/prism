@@ -23,6 +23,7 @@ use std::collections::BTreeMap;
 use std::mem;
 use std::sync::{Mutex, PoisonError};
 
+use prism_common::format::FormatTag;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -33,9 +34,9 @@ use crate::store::disk::Store;
 use super::node_id::{minted_id, NodeId};
 
 /// The versioned envelope of a serialized fact graph.
-pub const FACT_GRAPH_FORMAT: &str = "prism-query-fact-graph-v1";
+pub const FACT_GRAPH_FORMAT: FormatTag = FormatTag::new("prism-query-fact-graph-v1");
 /// The versioned envelope of the persisted previous/current ledger.
-pub const FACT_LEDGER_FORMAT: &str = "prism-query-fact-ledger-v1";
+pub const FACT_LEDGER_FORMAT: FormatTag = FormatTag::new("prism-query-fact-ledger-v1");
 /// The store decisions-layer kind the ledger is filed under.
 pub const FACT_DECISION_KIND: &str = "query-facts";
 // Domain separator for the workspace-scope locator derivation.
@@ -283,7 +284,7 @@ impl FactGraph {
 // decisions layer's format line. A wrong-version document is refused on read.
 #[derive(Serialize, Deserialize)]
 struct FactLedgerDoc {
-    format: String,
+    format: FormatTag,
     previous: Vec<QueryFact>,
     current: Vec<QueryFact>,
 }
@@ -354,7 +355,7 @@ impl FactLedger {
 
     fn save(&self, store: &Store, scope: &FactScope) -> Result<(), Error> {
         let doc = FactLedgerDoc {
-            format: FACT_LEDGER_FORMAT.to_string(),
+            format: FACT_LEDGER_FORMAT,
             previous: self.previous.facts().to_vec(),
             current: self.current.facts().to_vec(),
         };

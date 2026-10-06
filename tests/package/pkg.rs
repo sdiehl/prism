@@ -390,10 +390,11 @@ fn std_root_pins_and_verifies() {
 
     // Pinned against a different Std: the disagreement names both roots.
     let mut stale = Lock::default();
-    stale.pin_std("0000000000000000".to_string());
+    let other = prism::core::hash_str("another std");
+    stale.pin_std(other.clone());
     match std_pin_status(&stale).unwrap() {
         StdPin::Mismatch { pinned, embedded } => {
-            assert_eq!(pinned, "0000000000000000");
+            assert_eq!(pinned, other);
             assert_eq!(embedded, root);
         }
         other => panic!("expected a mismatch, got {other:?}"),
@@ -403,7 +404,7 @@ fn std_root_pins_and_verifies() {
 #[test]
 fn foreign_std_lock_scheme_is_an_error() {
     let lock = Lock {
-        std_root: Some("deadbeef".to_string()),
+        std_root: Some(prism::core::hash_str("std")),
         std_scheme: Some("future-scheme".to_string()),
         ..Lock::default()
     };
@@ -418,7 +419,7 @@ fn stale_std_pin_loads_source_bundle_from_store() {
     let tmp = TempDir::new("std-source");
     let module_src = "pub fn answer() : Int = 42\n";
     let bundle = encode_source_bundle([("StoreOnly", module_src)]);
-    let root = blake3::hash(&bundle).to_hex().to_string();
+    let root = Digest::of_bytes(blake3::hash(&bundle).as_bytes());
     let store = Store::open_or_create(tmp.root()).unwrap();
     store.put(&root, &bundle).unwrap();
 
@@ -436,7 +437,7 @@ fn stale_std_pin_loads_source_bundle_from_store() {
 fn stale_std_pin_rejects_corrupt_store_bytes() {
     let tmp = TempDir::new("std-source-corrupt");
     let bundle = encode_source_bundle([("StoreOnly", "pub fn answer() : Int = 42\n")]);
-    let root = blake3::hash(&bundle).to_hex().to_string();
+    let root = Digest::of_bytes(blake3::hash(&bundle).as_bytes());
     let store = Store::open_or_create(tmp.root()).unwrap();
     store.put(&root, b"corrupt source bundle").unwrap();
 
@@ -447,7 +448,7 @@ fn stale_std_pin_rejects_corrupt_store_bytes() {
         .to_string();
 
     assert!(err.contains("stdlib source bundle hash mismatch"));
-    assert!(err.contains(&root));
+    assert!(err.contains(root.as_str()));
 }
 
 #[test]
@@ -479,7 +480,7 @@ entry = "src/main.pr"
 
     let module_src = "pub fn answer() : Int = 42\n";
     let bundle = encode_source_bundle([("StoreOnly", module_src)]);
-    let root = blake3::hash(&bundle).to_hex().to_string();
+    let root = Digest::of_bytes(blake3::hash(&bundle).as_bytes());
     let store = Store::open_or_create(tmp.root()).unwrap();
     store.put(&root, &bundle).unwrap();
     let mut lock = Lock::default();
@@ -585,7 +586,7 @@ fn run_uses_hash_pinned_package_source_bundle() {
     lock.set(LockEntry {
         name: STORE_PKG_NAME.to_string(),
         scheme: HASH_SCHEME.to_string(),
-        hash: Digest::from(root.clone()),
+        hash: Digest::parse(root.clone()).unwrap(),
         source: DepSource::Hash(root),
     });
     fs::write(project.join("prism.lock"), lock.render().unwrap()).unwrap();
@@ -616,14 +617,14 @@ fn package_source_roots_carry_bundle_identity() {
     lock.set(LockEntry {
         name: STORE_PKG_NAME.to_string(),
         scheme: HASH_SCHEME.to_string(),
-        hash: Digest::from(root.clone()),
+        hash: Digest::parse(root.clone()).unwrap(),
         source: dependencies[0].source.clone(),
     });
 
     let roots =
         package_source_roots(&lock, &dependencies, &tmp.root(), &DynFlags::default()).unwrap();
     let identity = roots[0].source_bundle_identity().unwrap();
-    assert_eq!(identity.root, root);
+    assert_eq!(identity.root.as_str(), root);
     assert_eq!(identity.scheme, HASH_SCHEME);
     assert_eq!(identity.artifact_kind, SourceBundleArtifactKind::Package);
     assert!(matches!(
@@ -648,7 +649,7 @@ fn git_package_source_roots_carry_origin_identity() {
     lock.set(LockEntry {
         name: STORE_PKG_NAME.to_string(),
         scheme: HASH_SCHEME.to_string(),
-        hash: Digest::from(root.clone()),
+        hash: Digest::parse(root.clone()).unwrap(),
         source: dependencies[0].source.clone(),
     });
     let transport = DiskTransport::open(tmp.root()).unwrap();
@@ -658,7 +659,7 @@ fn git_package_source_roots_carry_origin_identity() {
         tag: STORE_PKG_TAG.to_string(),
         scheme: HASH_SCHEME.to_string(),
         kind: INDEX_KIND_SOURCE.to_string(),
-        root: Digest::from(root.clone()),
+        root: Digest::parse(root.clone()).unwrap(),
     }]);
     transport
         .publish_index(&SignedArtifact { body, sig: None })
@@ -670,7 +671,7 @@ fn git_package_source_roots_carry_origin_identity() {
 
     let roots = package_source_roots(&lock, &dependencies, &tmp.root(), &flags).unwrap();
     let identity = roots[0].source_bundle_identity().unwrap();
-    assert_eq!(identity.root, root);
+    assert_eq!(identity.root.as_str(), root);
     assert_eq!(identity.scheme, HASH_SCHEME);
     assert_eq!(identity.artifact_kind, SourceBundleArtifactKind::Package);
     assert!(matches!(
@@ -699,7 +700,7 @@ fn git_package_requires_an_authenticated_index_pointer() {
     lock.set(LockEntry {
         name: STORE_PKG_NAME.to_string(),
         scheme: HASH_SCHEME.to_string(),
-        hash: Digest::from(root.clone()),
+        hash: Digest::parse(root.clone()).unwrap(),
         source,
     });
     fs::write(project.join("prism.lock"), lock.render().unwrap()).unwrap();
@@ -720,7 +721,7 @@ fn git_package_requires_an_authenticated_index_pointer() {
         tag: STORE_PKG_TAG.to_string(),
         scheme: HASH_SCHEME.to_string(),
         kind: INDEX_KIND_SOURCE.to_string(),
-        root: Digest::from(root.clone()),
+        root: Digest::parse(root.clone()).unwrap(),
     }]);
     transport
         .publish_index(&SignedArtifact {
@@ -749,7 +750,7 @@ fn git_package_requires_an_authenticated_index_pointer() {
         tag: STORE_PKG_TAG.to_string(),
         scheme: HASH_SCHEME.to_string(),
         kind: INDEX_KIND_SOURCE.to_string(),
-        root: Digest::from(root),
+        root: Digest::parse(root).unwrap(),
     }]);
     transport
         .publish_index(&SignedArtifact { body, sig: None })
@@ -782,7 +783,7 @@ fn package_resolution_rejects_foreign_lock_scheme() {
     lock.set(LockEntry {
         name: STORE_PKG_NAME.to_string(),
         scheme: "future-scheme".to_string(),
-        hash: Digest::from(root),
+        hash: Digest::parse(root).unwrap(),
         source: dependencies[0].source.clone(),
     });
 
@@ -845,7 +846,7 @@ fn signed_index_resolution_rejects_foreign_scheme() {
         tag: STORE_PKG_TAG.to_string(),
         scheme: "future-scheme".to_string(),
         kind: INDEX_KIND_SOURCE.to_string(),
-        root: Digest::from("00".repeat(32)),
+        root: Digest::parse("00".repeat(32)).unwrap(),
     }]);
     transport
         .publish_index(&SignedArtifact { body, sig: None })
@@ -1086,7 +1087,7 @@ fn check_world_reports_dependency_root_conflicts() {
         lock.set(LockEntry {
             name: STORE_PKG_NAME.to_string(),
             scheme: HASH_SCHEME.to_string(),
-            hash: Digest::from(root.clone()),
+            hash: Digest::parse(root.clone()).unwrap(),
             source: DepSource::Hash(root),
         });
         fs::write(project.join("prism.lock"), lock.render().unwrap()).unwrap();

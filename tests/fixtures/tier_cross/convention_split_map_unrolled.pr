@@ -14,8 +14,8 @@ fn pure_use(xs : List(Int)) : List(Int) = map(bump, xs)
 
 fn effect_use(xs : List(Int)) : List(Int) ! {Log} =
   match xs of
-    Nil => Nil
-    Cons(x, rest) => Cons(shout(x), effect_use(rest))
+    [] => Nil
+    x :: rest => Cons(shout(x), effect_use(rest))
 
 fn main() =
   let direct = pure_use([1, 2, 3])

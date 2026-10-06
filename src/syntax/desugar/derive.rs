@@ -1954,6 +1954,7 @@ mod tests {
                 name: "MkT".into(),
                 args,
                 fields: None,
+                span: marginalia::Span::default(),
             }],
             deriving: Vec::new(),
             newtype: false,

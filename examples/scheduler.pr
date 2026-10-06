@@ -25,8 +25,8 @@ type Task = Task((List(Task)) -> Unit ! {IO})
 
 fn run_q(q : List(Task)) : Unit ! {IO} =
   match q of
-    Nil => ()
-    Cons(Task(step), rest) => step(rest)
+    [] => ()
+    Task(step) :: rest => step(rest)
 
 fn schedule(main : () -> Unit ! {Coop, IO}) : Unit ! {IO} =
   let start =
