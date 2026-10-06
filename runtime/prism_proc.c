@@ -222,9 +222,7 @@ static int prism_proc_env_edit(prism_proc_stage *q, char *key, char *value) {
     size_t vlen = strlen(value);
     char *entry = (char *)malloc(klen + vlen + 2);
     if (entry == NULL) return 0;
-    memcpy(entry, key, klen);
-    entry[klen] = '=';
-    memcpy(entry + klen + 1, value, vlen + 1);
+    snprintf(entry, klen + vlen + 2, "%s=%s", key, value);
     if (at >= 0) {
         free(q->env[at]);
         q->env[at] = entry;
@@ -357,9 +355,7 @@ static char *prism_proc_resolve(const char *program) {
         if (dlen > 0 && dir[0] == '/' && dlen + plen + 2 <= PATH_MAX) {
             char *cand = (char *)malloc(dlen + plen + 2);
             if (cand == NULL) return NULL;
-            memcpy(cand, dir, dlen);
-            cand[dlen] = '/';
-            memcpy(cand + dlen + 1, program, plen + 1);
+            snprintf(cand, dlen + plen + 2, "%.*s/%s", (int)dlen, dir, program);
             if (prism_proc_executable(cand)) return cand;
             free(cand);
         }
