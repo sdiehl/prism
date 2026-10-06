@@ -407,11 +407,13 @@ check(
 );
 
 section("an effect relates to what interprets it");
-// Programs, not the standard library, perform `Output`, so before
-// `handles` this card related to nothing at all in either direction.
+// In the standard library only `Test`'s failure reports perform `Output`, so
+// before `handles` this card related to almost nothing in either direction.
 check(
-  "nothing performs it, which is why the card looked empty",
-  rel.get("performs", "in", "Output").length === 0,
+  "only the test failure reports perform it",
+  rel.get("performs", "in", "Output").join() ===
+    "Test.expect,Test.expect_equal,Test.expect_text,Test.fail_with,Test@differ,Test@raise_failure",
+  rel.get("performs", "in", "Output").join(),
 );
 check(
   "and four definitions handle it",
