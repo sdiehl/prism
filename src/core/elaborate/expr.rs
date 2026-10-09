@@ -926,7 +926,32 @@ impl Elab<'_> {
                         Box::new(Comp::Bind(Box::new(acc), vrest.into(), Box::new(cons))),
                     );
                 }
-                acc
+                // A literal checked against a shape-indexed type is that type's own
+                // constructor applied to the element chain above — `[1, 2, 3]` in a
+                // `Vec(Int, 3)` position is a `MkVec` over the three-element list. The
+                // dimension is erased before Core, so the constructor is the whole of
+                // what elaboration needs to know, and checking recorded which one
+                // against this node because the expected type is not visible here.
+                let wrap = match self.hir.res(e.id) {
+                    Some(NodeRes::ShapeIndexed(ctor)) => Some(*ctor),
+                    _ => None,
+                };
+                match wrap {
+                    Some(ctor) => {
+                        let vlist = self.fresh();
+                        let tag = self.ctors.get(ctor.as_str()).map_or(0, |c| c.tag);
+                        Comp::Bind(
+                            Box::new(acc),
+                            vlist.clone().into(),
+                            Box::new(Comp::Return(Value::Ctor(
+                                ctor,
+                                tag,
+                                vec![Value::Var(vlist.into())],
+                            ))),
+                        )
+                    }
+                    _ => acc,
+                }
             }
             Expr::FieldAccess(recv, field) => self.field_access(e.id, recv, field, locals)?,
             Expr::RecordCreate(ctor_name, field_exprs) => {

@@ -121,7 +121,7 @@ pub fn lint_hir(hir: &CheckedHir<'_>) -> Vec<HirViolation> {
     };
     for (i, fact) in hir.facts.res.iter().enumerate() {
         match fact {
-            None => {}
+            None | Some(NodeRes::ShapeIndexed(_)) => {}
             Some(NodeRes::Field(field)) => {
                 if let Some(msg) = check_step(field) {
                     push(&mut out, i, msg);

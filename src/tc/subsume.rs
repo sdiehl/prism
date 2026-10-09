@@ -892,6 +892,7 @@ mod tests {
             field_res: BTreeMap::new(),
             body_witness: BTreeMap::new(),
             unboxed_field: BTreeMap::new(),
+            shape_indexed: BTreeMap::new(),
             path_res: PathRes::new(),
             fixed: BTreeMap::new(),
             span_types: BTreeMap::new(),

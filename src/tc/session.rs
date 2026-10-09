@@ -134,6 +134,9 @@ pub(super) struct Tc<'a> {
     pub(super) eff_ops: &'a BTreeMap<String, EffOpInfo>,
     pub(super) field_res: BTreeMap<NodeId, FieldRef>,
     pub(super) unboxed_field: BTreeMap<NodeId, (usize, usize)>,
+    /// A list literal checked against a shape-indexed expected type, keyed by the
+    /// literal's node id: the constructor elaboration wraps its element chain in.
+    pub(super) shape_indexed: BTreeMap<NodeId, Sym>,
     pub(super) path_res: PathRes,
     pub(super) fixed: BTreeMap<NodeId, Type>,
     pub(super) span_types: BTreeMap<NodeId, Type>,

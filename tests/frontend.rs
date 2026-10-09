@@ -69,6 +69,7 @@ mod module_self_import;
 mod modules;
 #[path = "language/num_tower.rs"]
 mod num_tower;
+
 #[path = "language/ordered_witness.rs"]
 mod ordered_witness;
 #[path = "language/param_annot.rs"]
@@ -81,6 +82,8 @@ mod query;
 mod reflect;
 #[path = "language/rigid_sig_vars.rs"]
 mod rigid_sig_vars;
+#[path = "language/shape_indexed_literal.rs"]
+mod shape_indexed_literal;
 #[path = "language/skolem_escape.rs"]
 mod skolem_escape;
 #[path = "language/soundness.rs"]

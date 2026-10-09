@@ -19,6 +19,14 @@ use crate::types::Type;
 const TY_HASHMAP: &str = "HashMap";
 const TY_TENSOR: &str = "Tensor";
 
+/// The standard library's fixed-length vector, `Data.Vec.Vec`.
+///
+/// Unlike the containers above, this one is matched on its **qualified** name.
+/// Those are the only declarations of their name, so a bare name is enough for
+/// them; a user is free to declare a `Vec` of their own, and the list-literal
+/// rule that reads this must not catch it.
+pub(crate) const TY_VEC: &str = "Data.Vec.Vec";
+
 /// A container the `e[k]` / `e[k] := v` index sugar supports.
 ///
 /// Classifying a receiver type once, here, is what lets the typing rule

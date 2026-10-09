@@ -29,7 +29,7 @@ compaction, above it is not.
 | surface AST      |    2,125 |     1,502 |       363 |        205 |  0.14 |
 | syntax codecs    |     none |      none |     2,996 |      2,456 |   n/a |
 | lint             |     none |      none |     1,190 |        866 |   n/a |
-| checker          |   12,726 |    10,049 |     4,239 |      3,390 |  0.34 |
+| checker          |   12,813 |    10,093 |     4,239 |      3,390 |  0.34 |
 
 What each row counts:
 

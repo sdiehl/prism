@@ -3,10 +3,20 @@
 -- `Vec(a, n)` is a list of `a` whose length `n` is a type-level natural. The
 -- `Nat` kind unifies dimensions by equality of literals and variables only:
 -- there is no successor structure and no arithmetic, and `n + m` in a dimension
--- position is declined at the parser. This module therefore ships exactly the
--- operations that equality-only indexing can type honestly:
+-- position is declined at the parser.
 --
---   - `vempty` and `vsingle` pin a literal length (`0`, `1`).
+-- A vector is written as a list literal, and the literal's own element count is
+-- what fixes the length: in a `Vec(Int, 3)` position `[1, 2, 3]` is a
+-- length-three vector and `[]` is the empty one, while a count that disagrees is
+-- a compile error naming both lengths. The count is read from the literal rather
+-- than required of it, so this reaches every length, and a literal in a position
+-- whose length is a variable solves that variable. The constructor below is an
+-- implementation detail of that spelling and is not exported.
+--
+-- This module ships the operations that equality-only indexing can type honestly:
+--
+--   - `vempty` and `vsingle` pin a literal length (`0`, `1`), though a literal is
+--     usually the plainer way to say the same thing.
 --   - `vmap` preserves the length (`n` appears on both sides).
 --   - `vzip` requires equal lengths (both `n`); a length clash is a compile
 --     error that names both lengths.
@@ -15,7 +25,9 @@
 -- expressible under equality-only unification: a length-changing
 -- `vcons : (a, Vec(a, n)) -> Vec(a, n + 1)` and an append
 -- `(Vec(a, n), Vec(a, m)) -> Vec(a, n + m)`. That is the declined line; writing
--- either `n + 1` produces a pointed rejection rather than a bare parse error.
+-- either `n + 1` produces a pointed rejection rather than a bare parse error. A
+-- literal is no way around it either: it can write a longer vector than the
+-- constructors here can, but it cannot compute one.
 --
 -- `vhead` accepts any length, so it cannot statically forbid the empty vector
 -- (ruling it out needs `n = m + 1`, again arithmetic). On an empty vector it

@@ -365,6 +365,7 @@ fn check_seeded_mode(
     }
     let field_res;
     let unboxed_field;
+    let shape_indexed;
     let path_res;
     let fixed;
     let span_types;
@@ -386,6 +387,7 @@ fn check_seeded_mode(
             eff_ops: &eff_ops,
             field_res: BTreeMap::new(),
             unboxed_field: BTreeMap::new(),
+            shape_indexed: BTreeMap::new(),
             path_res: PathRes::new(),
             fixed: BTreeMap::new(),
             span_types: BTreeMap::new(),
@@ -508,6 +510,7 @@ fn check_seeded_mode(
         tc.check_or_null_sites()?;
         field_res = tc.field_res;
         unboxed_field = tc.unboxed_field;
+        shape_indexed = tc.shape_indexed;
         path_res = tc.path_res;
         fixed = tc.fixed;
         span_types = tc.span_types;
@@ -543,6 +546,7 @@ fn check_seeded_mode(
         facts: NodeFacts::from_tables(
             field_res,
             unboxed_field,
+            shape_indexed,
             path_res,
             fixed,
             span_types,
@@ -704,6 +708,7 @@ fn infer_expr_full(
         eff_ops: &checked.defs.eff_ops,
         field_res: BTreeMap::new(),
         unboxed_field: BTreeMap::new(),
+        shape_indexed: BTreeMap::new(),
         path_res: PathRes::new(),
         fixed: BTreeMap::new(),
         span_types: BTreeMap::new(),
@@ -757,6 +762,7 @@ fn infer_expr_full(
     let facts = NodeFacts::from_tables(
         tc.field_res,
         tc.unboxed_field,
+        tc.shape_indexed,
         tc.path_res,
         tc.fixed,
         tc.span_types,
@@ -791,6 +797,7 @@ fn query_tc(seed: &TypecheckSeed) -> Tc<'_> {
         eff_ops: seed.effect_operations(),
         field_res: BTreeMap::new(),
         unboxed_field: BTreeMap::new(),
+        shape_indexed: BTreeMap::new(),
         path_res: PathRes::new(),
         fixed: BTreeMap::new(),
         span_types: BTreeMap::new(),

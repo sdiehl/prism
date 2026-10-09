@@ -41,6 +41,12 @@ pub enum NodeRes {
     /// A record update path `e { p.q = v }`: one rebuild chain per path, one
     /// [`FieldRef`] step per path segment.
     Paths(Vec<Vec<FieldRef>>),
+    /// A list literal checked against a shape-indexed expected type: the
+    /// constructor to wrap the literal's element chain in, so `[1, 2, 3]` in a
+    /// `Vec(Int, 3)` position elaborates to that type's own constructor applied
+    /// to the list. The dimension itself is erased before Core, so the
+    /// constructor is the whole of what elaboration needs to know.
+    ShapeIndexed(Sym),
 }
 
 /// Operation-local residual evidence for one checked handler expression.
@@ -332,6 +338,7 @@ impl NodeFacts {
     pub(crate) fn from_tables(
         field_res: BTreeMap<NodeId, FieldRef>,
         unboxed_field: BTreeMap<NodeId, (usize, usize)>,
+        shape_indexed: BTreeMap<NodeId, Sym>,
         path_res: PathRes,
         fixed: BTreeMap<NodeId, Type>,
         span_types: BTreeMap<NodeId, Type>,
@@ -354,6 +361,9 @@ impl NodeFacts {
         }
         for (id, (idx, arity)) in unboxed_field {
             place(&mut res, id, NodeRes::UnboxedField(idx, arity));
+        }
+        for (id, ctor) in shape_indexed {
+            place(&mut res, id, NodeRes::ShapeIndexed(ctor));
         }
         for (id, chains) in path_res {
             place(&mut res, id, NodeRes::Paths(chains));

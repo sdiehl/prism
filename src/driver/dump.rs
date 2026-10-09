@@ -1316,6 +1316,10 @@ enum HirRes {
     },
     #[serde(rename = "unboxed")]
     Unboxed { index: usize, arity: usize },
+    // A list literal that constructs a shape-indexed type: the constructor
+    // elaboration wraps its element chain in.
+    #[serde(rename = "shape_indexed")]
+    ShapeIndexed { ctor: String },
     #[serde(rename = "paths")]
     Paths { chains: Vec<Vec<HirStep>> },
 }
@@ -1413,6 +1417,9 @@ fn render_res(res: &NodeRes) -> HirRes {
         NodeRes::UnboxedField(index, arity) => HirRes::Unboxed {
             index: *index,
             arity: *arity,
+        },
+        NodeRes::ShapeIndexed(ctor) => HirRes::ShapeIndexed {
+            ctor: ctor.as_str().to_string(),
         },
         NodeRes::Paths(chains) => HirRes::Paths {
             chains: chains
