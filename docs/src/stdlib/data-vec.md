@@ -8,6 +8,8 @@ Fixed-length vectors indexed by a `Nat` dimension.
 
 - `vempty` and `vsingle` pin a literal length (`0`, `1`). - `vmap` preserves the length (`n` appears on both sides). - `vzip` requires equal lengths (both `n`); a length clash is a compile error that names both lengths.
 
+A list **literal** may be passed where a `Vec` is expected: `use_vec([1, 2, 3])`, with the literal's length fixing the `Vec`'s size. However, a list value can't be passed here as it has dynamic length: binding `let l = [1, 2, 3]` and then calling `use_vec(l)` is a type error.
+
 Two operations are deliberately absent because their result length is not expressible under equality-only unification: a length-changing `vcons : (a, Vec(a, n)) -> Vec(a, n + 1)` and an append `(Vec(a, n), Vec(a, m)) -> Vec(a, n + m)`. That is the declined line; writing either `n + 1` produces a pointed rejection rather than a bare parse error.
 
 `vhead` accepts any length, so it cannot statically forbid the empty vector (ruling it out needs `n = m + 1`, again arithmetic). On an empty vector it raises `Fail` rather than guarding with an `Option`; this is the head-on-empty consequence of the declined line.

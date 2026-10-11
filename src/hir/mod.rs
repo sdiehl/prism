@@ -41,11 +41,9 @@ pub enum NodeRes {
     /// A record update path `e { p.q = v }`: one rebuild chain per path, one
     /// [`FieldRef`] step per path segment.
     Paths(Vec<Vec<FieldRef>>),
-    /// A list literal checked against a shape-indexed expected type: the
-    /// constructor to wrap the literal's element chain in, so `[1, 2, 3]` in a
-    /// `Vec(Int, 3)` position elaborates to that type's own constructor applied
-    /// to the list. The dimension itself is erased before Core, so the
-    /// constructor is the whole of what elaboration needs to know.
+    /// A list literal checked against a shape-indexed expected type: the constructor
+    /// to wrap the literal's element chain in, so `[1, 2, 3]` in a `Vec(Int, 3)`
+    /// position elaborates to that type's own constructor applied to the list.
     ShapeIndexed(Sym),
 }
 

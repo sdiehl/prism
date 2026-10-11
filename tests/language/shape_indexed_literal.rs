@@ -1,14 +1,9 @@
-// A list literal constructs a shape-indexed type. Its length comes from the
-// literal's own element count rather than from a construction function, so
-// `[1, 2, 3]` fills a `Vec(Int, 3)` position and a literal whose count disagrees
-// is refused naming both lengths.
-//
-// The rule is the arithmetic of three the tower already had: a bare `1` adopting
-// a `Float` context, a list literal pushing its lane into `List(T)`, and a tuple
-// taking its arity from its own shape. It is checked here beside them, and the
-// runtime case is kept as a test rather than a probe because the property it
-// exercises — that the literal builds the constructor the type declares — is the
-// one a checking-only change would quietly get wrong.
+// A list literal constructs a shape-indexed type: its length comes from the
+// literal's own element count, so `[1, 2, 3]` fills a `Vec(Int, 3)` position and a
+// count that disagrees is refused naming both lengths. The runtime case below is a
+// test rather than a probe because the property it exercises — that the literal
+// builds the constructor the type declares — is what a checking-only change would
+// get wrong.
 
 use prism::{check, interpret, with_prelude};
 use rstest::rstest;
@@ -38,7 +33,11 @@ fn literal_of(n: usize) -> String {
 /// wanted, so the expected type is what gives the literal its length.
 fn literal_at(n: usize) -> String {
     format!(
-        "import Data.Vec (..)\n\nfn takes(v : Vec(Int, {n})) : Int = 0\nfn use() : Int = takes({})\n",
+        r"import Data.Vec (..)
+
+fn takes(v : Vec(Int, {n})) : Int = 0
+fn use() : Int = takes({})
+",
         literal_of(n)
     )
 }
@@ -55,7 +54,11 @@ fn a_literal_constructs_the_length_it_spells(#[values(0, 1, 2, 3, 12)] n: usize)
 #[test]
 fn a_literal_of_the_wrong_length_is_refused_naming_both() {
     let msg = rejection(
-        "import Data.Vec (..)\n\nfn takes3(v : Vec(Int, 3)) : Int = 0\nfn use() : Int = takes3([1, 2])\n",
+        r"import Data.Vec (..)
+
+fn takes3(v : Vec(Int, 3)) : Int = 0
+fn use() : Int = takes3([1, 2])
+",
     );
     assert!(
         msg.contains("expected length 3") && msg.contains("got length 2"),
@@ -69,7 +72,11 @@ fn a_literal_of_the_wrong_length_is_refused_naming_both() {
 #[test]
 fn a_variable_length_is_solved_from_the_count() {
     accepts(
-        "import Data.Vec (..)\n\nfn takes(v : Vec(Int, n)) : Int = 0\nfn use() : Int = takes([1, 2, 3])\n",
+        r"import Data.Vec (..)
+
+fn takes(v : Vec(Int, n)) : Int = 0
+fn use() : Int = takes([1, 2, 3])
+",
     );
 }
 
@@ -77,11 +84,35 @@ fn a_variable_length_is_solved_from_the_count() {
 // it: the count is evidence about the literal, not about `n`.
 #[test]
 fn a_rigid_length_cannot_be_satisfied_by_a_literal() {
-    let msg =
-        rejection("import Data.Vec (..)\n\nfn f(v : Vec(Int, n)) : Vec(Int, n) = [1, 2, 3]\n");
+    let msg = rejection(
+        r"import Data.Vec (..)
+
+fn f(v : Vec(Int, n)) : Vec(Int, n) = [1, 2, 3]
+",
+    );
     assert!(
         msg.contains("mismatch"),
         "a literal against a rigid length should be refused, got: {msg}"
+    );
+}
+
+// The rule needs the expected type at the literal's own site, so a literal bound
+// first is a `List` and stays one: inference gives `v` its type, not the position
+// `v` later reaches. Pinned as a test so the limitation cannot drift unnoticed.
+#[test]
+fn a_literal_bound_before_its_position_is_inferred_as_a_list() {
+    let msg = rejection(
+        r"import Data.Vec (..)
+
+fn takes3(v : Vec(Int, 3)) : Int = 0
+fn use() : Int =
+  let v = [1, 2, 3]
+  takes3(v)
+",
+    );
+    assert!(
+        msg.contains("mismatch"),
+        "a let-bound literal should be inferred as a list, got: {msg}"
     );
 }
 
@@ -90,7 +121,11 @@ fn a_rigid_length_cannot_be_satisfied_by_a_literal() {
 #[test]
 fn the_element_lane_is_adopted_through_the_rule() {
     accepts(
-        "import Data.Vec (..)\n\nfn takes(v : Vec(I64, 3)) : Int = 0\nfn use() : Int = takes([1, 2, 3])\n",
+        r"import Data.Vec (..)
+
+fn takes(v : Vec(I64, 3)) : Int = 0
+fn use() : Int = takes([1, 2, 3])
+",
     );
 }
 
@@ -99,7 +134,11 @@ fn the_element_lane_is_adopted_through_the_rule() {
 #[test]
 fn a_list_is_still_refused_where_a_shape_indexed_type_is_wanted() {
     let msg = rejection(
-        "import Data.Vec (..)\n\nfn takes3(v : Vec(Int, 3)) : Int = 0\nfn use(xs : List(Int)) : Int = takes3(xs)\n",
+        r"import Data.Vec (..)
+
+fn takes3(v : Vec(Int, 3)) : Int = 0
+fn use(xs : List(Int)) : Int = takes3(xs)
+",
     );
     assert!(
         msg.contains("mismatch"),
@@ -110,7 +149,11 @@ fn a_list_is_still_refused_where_a_shape_indexed_type_is_wanted() {
 #[test]
 fn a_shape_indexed_value_is_still_refused_where_a_list_is_wanted() {
     let msg = rejection(
-        "import Data.Vec (..)\n\nfn wants(xs : List(Int)) : Int = 0\nfn use(v : Vec(Int, 3)) : Int = wants(v)\n",
+        r"import Data.Vec (..)
+
+fn wants(xs : List(Int)) : Int = 0
+fn use(v : Vec(Int, 3)) : Int = wants(v)
+",
     );
     assert!(
         msg.contains("mismatch"),
@@ -155,7 +198,11 @@ fn main() = println(show(vto_list(three())))
 #[test]
 fn a_user_declared_type_is_not_offered_the_form() {
     let msg = rejection(
-        "type Grid(a, n : Nat) = MkGrid(List(a))\n\nfn takes(v : Grid(Int, 3)) : Int = 0\nfn use() : Int = takes([1, 2, 3])\n",
+        r"type Grid(a, n : Nat) = MkGrid(List(a))
+
+fn takes(v : Grid(Int, 3)) : Int = 0
+fn use() : Int = takes([1, 2, 3])
+",
     );
     assert!(
         msg.contains("mismatch"),
@@ -171,7 +218,11 @@ fn a_user_declared_type_is_not_offered_the_form() {
 #[test]
 fn a_field_listing_something_other_than_the_element_is_not_shape_indexed() {
     let msg = rejection(
-        "type Foo(a, n : Nat) = MkFoo(List(Int))\n\nfn takes(v : Foo(Bool, 3)) : Int = 0\nfn use() : Int = takes([true, false, true])\n",
+        r"type Foo(a, n : Nat) = MkFoo(List(Int))
+
+fn takes(v : Foo(Bool, 3)) : Int = 0
+fn use() : Int = takes([true, false, true])
+",
     );
     assert!(
         msg.contains("mismatch"),

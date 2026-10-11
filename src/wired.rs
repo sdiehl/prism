@@ -21,10 +21,10 @@ const TY_TENSOR: &str = "Tensor";
 
 /// The standard library's fixed-length vector, `Data.Vec.Vec`.
 ///
-/// Unlike the containers above, this one is matched on its **qualified** name.
-/// Those are the only declarations of their name, so a bare name is enough for
-/// them; a user is free to declare a `Vec` of their own, and the list-literal
-/// rule that reads this must not catch it.
+/// Matched on its qualified name where the containers above use a bare one: a user
+/// may declare a `Vec` of their own, and the list-literal rule must not catch it.
+/// Naming it here is a stepping stone — the intent is a conformance a type opts
+/// into, with `Vec` as its first instance.
 pub(crate) const TY_VEC: &str = "Data.Vec.Vec";
 
 /// A container the `e[k]` / `e[k] := v` index sugar supports.

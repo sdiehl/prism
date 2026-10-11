@@ -273,38 +273,20 @@ impl Tc<'_> {
         handled
     }
 
-    /// The constructor a list literal should build when its expected type is the
-    /// standard library's vector, as `(element position, dimension position,
-    /// constructor)`, or `None` for every other type.
-    ///
-    /// **This is `Data.Vec.Vec` and nothing else, deliberately.** A dimension is an
-    /// erased phantom, so no criterion can tell a `Nat` that measures a container
-    /// from one that means something else. Recognising a type by its declared kinds
-    /// — which an earlier version of this did — offers the form to any declaration
-    /// with a `Nat` in it, whatever its author meant by it, and it cannot check the
-    /// value it builds either.
-    ///
-    /// `Vec` is the one type where the offer is worth making, because `MkVec` is
-    /// `opaque` and pinned hidden by `stdlib_invariant_constructors_are_hidden`, so
-    /// outside its module a literal is the *only* route to a value and the count it
-    /// carries is the only thing holding the length honest. A user's own
-    /// `Grid(a, n : Nat)` has the same shape but keeps its constructor visible, so
-    /// nothing is checked there either way and the form would only appear to
-    /// promise something.
-    ///
-    /// A general mechanism would be additive rather than a widening of this: a class
-    /// a type conforms to, as Swift's builder conformance works, with `Vec` as its
-    /// first instance.
-    fn shape_indexed_ctor(&self, head: &Sym, args: &[Type]) -> Option<(usize, usize, Sym)> {
+    /// The constructor a list literal builds when the expected type is the standard
+    /// library's vector, as `(element position, dimension position, constructor)`, or
+    /// `None` for any other type: naming `Data.Vec.Vec` here is a stepping stone.
+    fn shape_indexed_ctor(&self, ty: &Type) -> Option<(usize, usize, Sym)> {
+        let Type::Con(head, args) = ty else {
+            return None;
+        };
         if head.as_str() != wired::TY_VEC || args.len() != 2 {
             return None;
         }
-        // A sanity check on a type whose declaration is known rather than a way of
-        // recognising it: `Vec` has one constructor, and the form is retired rather
-        // than guessed if that ever stops being true. The positions below are the
-        // library's declaration order — element first, dimension second — and are
-        // read from the kinds rather than assumed, so a re-declaration that swapped
-        // them retires the form instead of misreading it.
+        // The declaration is known, so this is a sanity check rather than a way of
+        // recognising `Vec`: one constructor, and the positions read from the kinds
+        // rather than assumed, so a re-declaration retires the form rather than
+        // misreading it.
         let info = self.data.get(head.as_str())?;
         if info.ctors.len() != 1 {
             return None;
@@ -312,8 +294,7 @@ impl Tc<'_> {
         let kinds = info.param_kinds();
         let elem_i = kinds.iter().position(|k| *k == Kind::Type)?;
         let nat_i = kinds.iter().position(|k| *k == Kind::Nat)?;
-        let ctor = Sym::from(info.ctors[0].as_str());
-        Some((elem_i, nat_i, ctor))
+        Some((elem_i, nat_i, Sym::from(info.ctors[0].as_str())))
     }
 
     fn check(&mut self, env: &Env, e: &S<Expr<Core>>, ty: &Type) -> Result<(), TypeError> {
@@ -356,6 +337,34 @@ impl Tc<'_> {
     ) -> Result<(), TypeError> {
         let span = e.span;
         let id = e.id;
+        // A list literal against `Vec` takes its length from the literal's own element
+        // count, so `[1, 2, 3]` fills a `Vec(Int, 3)` position with no construction
+        // function in sight. Decided here rather than in an arm below, because the
+        // expected type is what decides it and a guard cannot bind what an arm needs.
+        if let (Expr::List(elems), Type::Con(_, args), Some((elem_i, nat_i, ctor))) =
+            (&e.node, ty, self.shape_indexed_ctor(ty))
+        {
+            let elem_ty = self.apply(&args[elem_i]);
+            for elem in elems {
+                self.check(env, elem, &elem_ty)?;
+            }
+            // The dimension is unified rather than merely compared, so a literal against
+            // a variable length solves it, a clash names both lengths, and a rigid length
+            // is refused rather than forced.
+            let want = self.apply(&args[nat_i]);
+            let got = Type::Nat(u64::try_from(elems.len()).unwrap_or(u64::MAX));
+            self.subtype(&got, &want).map_err(|e| {
+                e.or(TypeError::TypeMismatch {
+                    span,
+                    expected: want.show(),
+                    found: got.show(),
+                })
+            })?;
+            // Elaboration cannot see the expected type, so the constructor it wraps the
+            // element chain in is recorded against this node.
+            self.shape_indexed.insert(id, ctor);
+            return Ok(());
+        }
         match (&e.node, ty) {
             (Expr::Hole(name), _) => {
                 self.record_hole(env, name, span, ty.clone());
@@ -485,39 +494,6 @@ impl Tc<'_> {
                     let t = self.apply(t);
                     self.check(env, elem, &t)?;
                 }
-                Ok(())
-            }
-            // A list literal against `Vec` takes its length from the literal's own
-            // element count, so `[1, 2, 3]` in a `Vec(Int, 3)` position is a
-            // length-3 vector with no construction function in sight. It descends
-            // from the tuple arm above, which takes an arity from its shape, and
-            // from the `Float` adoption below, which lets an expected type steer a
-            // literal. The predicate says why this is `Vec` alone.
-            (Expr::List(elems), Type::Con(head, args))
-                if self.shape_indexed_ctor(head, args).is_some() =>
-            {
-                let (elem_i, nat_i, ctor) =
-                    self.shape_indexed_ctor(head, args).expect("guarded above");
-                let elem_ty = self.apply(&args[elem_i]);
-                for elem in elems {
-                    self.check(env, elem, &elem_ty)?;
-                }
-                // The dimension is unified rather than merely compared, so a literal
-                // against a variable length solves it, a clash names both lengths in
-                // the wording dimension unification already uses, and a rigid
-                // dimension is refused rather than forced.
-                let want = self.apply(&args[nat_i]);
-                let got = Type::Nat(u64::try_from(elems.len()).unwrap_or(u64::MAX));
-                self.subtype(&got, &want).map_err(|e| {
-                    e.or(TypeError::TypeMismatch {
-                        span,
-                        expected: want.show(),
-                        found: got.show(),
-                    })
-                })?;
-                // Elaboration cannot see the expected type, so the constructor it
-                // must wrap the element chain in is recorded against this node.
-                self.shape_indexed.insert(id, ctor);
                 Ok(())
             }
             // A list literal against a known `List(T)` pushes `T` into each
